@@ -43,6 +43,13 @@ var _enemy_hits := 0
 ## Player hits on enemies.
 var _enemy_damaged := 0
 var _enemy_kills := 0
+## Player attacks that connected with another player (including evaded/blocked).
+var _pvp_hits := 0
+## Player attacks that touched an ally and were ignored (once per attack and ally).
+var _ally_hits_ignored := 0
+
+## Parties (World/Party, both sides). See are_allies.
+var party: PartySystem
 
 # Client
 var _hud: Hud
@@ -70,6 +77,7 @@ var _last_screenshot_slot := -1
 
 func _ready() -> void:
 	_verbose = LaunchArgs.has_flag("verbose")
+	_add_party_system()
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -204,8 +212,10 @@ func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
 	for target: Player in _players.get_children():
 		if target != attacker:
-			_strike_player(attacker.peer_id, attacker.global_position, attacker.state.yaw,
-					attack, attacker.attack_results, target)
+			var result := _strike_player(attacker.peer_id, attacker.global_position,
+					attacker.state.yaw, attack, attacker.attack_results, target)
+			if result >= 0:
+				_pvp_hits += 1
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
 			continue
@@ -234,14 +244,19 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 ## Server: resolves one attack against one player, at most once per attack
 ## (`results`, keyed by target id). A player in i-frames evades but can still be
 ## hit later in the same active window if their i-frames run out first. A
-## blocking player facing the attacker takes stamina damage instead. Returns the
-## HIT_* result, or -1 if the attack didn't connect (or already did).
+## blocking player facing the attacker takes stamina damage instead. Allies
+## (are_allies) are ignored entirely: no damage, stagger, block cost or label.
+## Returns the HIT_* result, or -1 if the attack didn't connect (or already did).
 func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, results: Dictionary[int, bool], target: Player) -> int:
 	if target.state.dead or results.get(target.peer_id, false):
 		return -1
 	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
+		return -1
+	if are_allies(attacker_id, target.peer_id):
+		results[target.peer_id] = true  # counted once per attack
+		_ally_hits_ignored += 1
 		return -1
 	if target.state.is_invulnerable(target.params):
 		if results.has(target.peer_id):
@@ -310,6 +325,25 @@ func _send_hit(attacker_id: int, target_id: int, damage: float, result: int) -> 
 		_receive_hit.rpc_id(peer_id, attacker_id, target_id, damage, result)
 
 
+# --- Parties and allies ---
+
+## The single answer to "are these two on the same side?". Ids are peer ids for
+## players and negative ids for enemies: a player is its own ally, members of
+## the same party are allies, and enemies are never allies (PartyRules.allied).
+## Authoritative on the server; a client only knows its own party.
+func are_allies(a: int, b: int) -> bool:
+	return party.are_allies(a, b)
+
+
+## World/Party must exist on the server and every client: its RPCs are matched
+## by node path.
+func _add_party_system() -> void:
+	party = PartySystem.new()
+	party.name = "Party"
+	party.players = _players
+	add_child(party)
+
+
 # --- Client ---
 
 func _client_tick(delta: float) -> void:
@@ -321,6 +355,8 @@ func _client_tick(delta: float) -> void:
 		move = bot[0]
 		buttons = bot[1]
 		aim_yaw = bot[2]
+		if not party.bot_may_attack():
+			buttons &= ~PlayerState.BUTTON_ATTACK
 	else:
 		move = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 		if Input.is_action_pressed(&"jump"):
@@ -556,11 +592,15 @@ func print_summary() -> void:
 				_players.get_child_count(), _tick, _hits, _deaths, _respawns, _blocks, _guard_breaks])
 		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d" % [
 				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills])
+		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d" % [
+				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored])
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,
 				_local_player.dodges, _local_player.air_dodges, _local_player.attacks, _hits_landed])
+		print("SUMMARY client=%d party_members=%d" % [
+				multiplayer.get_unique_id(), party.member_count()])
 	for player: Player in _players.get_children():
 		if not player.is_local:
 			print("SUMMARY client=%d remote=%d moved=%.1f" % [

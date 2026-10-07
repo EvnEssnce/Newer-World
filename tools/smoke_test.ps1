@@ -2,9 +2,13 @@
 # for a few seconds: each client must see the other move, dodge, attack; the server
 # must resolve hits, a death and a respawn, a guarded hit, and Husks and bots must
 # hit each other; no unexpected prediction corrections.
-#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1
+#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Party]
+# -Party runs the bots with --bot-party: they form a party, so instead of hits,
+# deaths and blocks between the bots, the server must report a party formed,
+# 0 bot-on-bot hits and at least one bot swing ignored because they're allies
+# (both clients in a party of 2), while Husk fights still happen.
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
-param([int]$Port = 24599, [int]$Seconds = 12)
+param([int]$Port = 24599, [int]$Seconds = 12, [switch]$Party)
 . "$PSScriptRoot\find_godot.ps1"
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
@@ -24,11 +28,14 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=300',
     '--tune=enemy_husk/stats/respawn_time=2')
 
+$botFlags = @('--bot', '--verbose')
+if ($Party) { $botFlags += '--bot-party' }
+
 $server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
 $clients = @(
-    (Start-Godot 'client1' (@('--bot', '--verbose', "--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)),
-    (Start-Godot 'client2' (@('--bot', '--verbose', "--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune))
+    (Start-Godot 'client1' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)),
+    (Start-Godot 'client2' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune))
 )
 $clients | ForEach-Object { $_.WaitForExit() }
 # The server quits on its own shortly after the clients, printing its summary.
@@ -39,7 +46,25 @@ $failed = $false
 # the server must resolve real hits.
 $serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+) blocks=(\d+) guard_breaks=(\d+)'
 $enemySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemies count=(\d+) enemy_hits=(\d+) enemy_damaged=(\d+) enemy_kills=(\d+)'
-if (-not $serverSummary -or [int]$serverSummary.Matches[0].Groups[1].Value -lt 1) {
+$partySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY party formed=(\d+) parties=(\d+) pvp_hits=(\d+) ally_hits_ignored=(\d+)'
+if ($Party) {
+    # Party members can't hurt each other: no bot-on-bot hits at all (not even
+    # evades or blocks), so the bots' deaths/blocks checks below don't apply.
+    if (-not $partySummary -or [int]$partySummary.Matches[0].Groups[1].Value -lt 1) {
+        Write-Host "FAIL party: no party formed on the server ($($partySummary.Line))" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$partySummary.Matches[0].Groups[3].Value -ne 0) {
+        Write-Host "FAIL party: party members hit each other ($($partySummary.Line))" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$partySummary.Matches[0].Groups[4].Value -lt 1) {
+        # The bots still swing at each other when no Husk is near; those swings
+        # must reach the server's ally check (and be ignored there).
+        Write-Host "FAIL party: no swing between allies reached the ally check ($($partySummary.Line))" -ForegroundColor Red
+        $failed = $true
+    } else {
+        Write-Host "PASS party: $($partySummary.Line)" -ForegroundColor Green
+    }
+} elseif (-not $serverSummary -or [int]$serverSummary.Matches[0].Groups[1].Value -lt 1) {
     Write-Host "FAIL server: no hits resolved ($($serverSummary.Line))" -ForegroundColor Red
     $failed = $true
 } elseif ([int]$serverSummary.Matches[0].Groups[2].Value -lt 1 -or [int]$serverSummary.Matches[0].Groups[3].Value -lt 1) {
@@ -90,6 +115,15 @@ foreach ($name in 'client1', 'client2') {
         $failed = $true
     } else {
         Write-Host "PASS ${name}: $($local.Line)" -ForegroundColor Green
+    }
+    if ($Party) {
+        $members = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ party_members=(\d+)'
+        if (-not $members -or [int]$members.Matches[0].Groups[1].Value -ne 2) {
+            Write-Host "FAIL ${name}: not in a party of 2 at the end ($($members.Line))" -ForegroundColor Red
+            $failed = $true
+        } else {
+            Write-Host "PASS ${name}: $($members.Line)" -ForegroundColor Green
+        }
     }
 }
 $errors = Get-ChildItem $logDir -Filter '*.err.log' | Select-String -Pattern 'ERROR|SCRIPT ERROR'

@@ -55,9 +55,12 @@ game/
   items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
   items/item.gd              One rolled item (plain data, to_dict/from_dict).
   items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
-ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info).
+  party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
+  party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
+ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info),
+                     party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, weapon_sword, enemy_husk,
-                     loot (rarities + loot tables), items, affixes (.cfg).
+                     loot (rarities + loot tables), items, affixes, party (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -126,7 +129,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `attack_stepped`; `World._on_attack_stepped` tests `MeleeHitbox.hits` against every
   other player's current server position. Each target is hit at most once per attack
   (`Player.attack_results`). A target in i-frames "evades" (reported once) but can still
-  be hit later in the same active window.
+  be hit later in the same active window. `_strike_player` ignores allies
+  (`World.are_allies`): no damage, stagger, block cost or label.
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
   snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
   results) for damage numbers, labels and the red flash.
@@ -177,6 +181,35 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   PROGRESS.md for the order and its dependency on the other session's Wave 1.
 - Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
 
+## Parties and allies
+
+- **`World.are_allies(a, b)` is the one place that answers "same side?"** (peer ids; a
+  player is its own ally, members of one party are allies, enemies (ids ≤ 0) never are).
+  Use it for anything that targets friends or foes (heals, shields, buffs). It's
+  authoritative on the server; a client only knows its own party. PvE-first: party
+  members never damage each other.
+- `PartyRules` (pure, unit tested) holds parties and invites: only a leader (or a
+  player not in a party) invites; one pending invite per target; pending invites count
+  toward `max_size`; the party is created on the first accepted invite; invites expire
+  and die if the inviter stops leading the party they were sent from; leader leaves →
+  earliest-joined member leads; a party of 1 dissolves; disconnect = leave. Tuning in
+  `data/party.cfg`.
+- `PartySystem` is `World/Party` on both sides (created in `World._add_party_system`).
+  Not part of the predicted sim: it never touches `PlayerState` or the input bits.
+  **Client → server**, reliable: `_request_invite(target_id)`, `_request_answer(accept)`,
+  `_request_leave()`, `_request_kick(target_id)`. The server checks the sender has a
+  player, the target exists and (for invites) is within `invite_range` by server
+  positions, then applies `PartyRules`. **Server → client**, reliable:
+  `_receive_view(PartyRules.view_for(peer))` to every peer whose view changed (members,
+  leader, pending invite and its time left, outgoing invites, max size), and
+  `_receive_notice(text)` to a requester whose request failed. Clients draw the view:
+  `PartyHud` frames (health from snapshots), the invite prompt, and party members'
+  nameplates in `Player.PARTY_NAME_COLOR`.
+- Keys: **T** invite the player nearest the crosshair (within `invite_range`), **Y** join,
+  **N** decline, **L** leave, **Delete** kick the party member nearest the crosshair
+  (leader). Q, E, R, X, K, Z, C and 1–9 are reserved for abilities, weapon swap, the tree
+  panel and Wing abilities.
+
 ## Running
 
 Godot was installed with winget; there is no `godot` on PATH. `tools/find_godot.ps1`
@@ -186,17 +219,23 @@ run them with `-ExecutionPolicy Bypass`:
 ```
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # server + you + a bot window
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
+powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the bot parties with you
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, fight each other and Husks, block, die, respawn
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits on each other, Husk fights still happen
 ```
 
-Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
+Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
+Both smoke scripts take `-Port N` (default 24599) so parallel runs don't collide.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
 `--bot` (auto-connect; repeats every 6 s: take turns attacking and blocking: the nearest Husk within 15 m, else the nearest player; then circle with
-jump/air dodge/ground dodge; see `World._bot_input`), `--verbose` (log positions every 2 s,
+jump/air dodge/ground dodge; see `World._bot_input`), `--bot-party` (with `--bot`: the
+lower peer id invites the nearest player, and the bot accepts any invite; it doesn't
+attack until it's in a party, then still swings at its ally when no Husk is near, which
+the server ignores; see `PartySystem._bot_step`), `--verbose` (log positions every 2 s,
 server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),

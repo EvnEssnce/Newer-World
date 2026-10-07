@@ -11,6 +11,33 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-07 (11): Parties and the ally rule (class build Wave 1B)
+
+Built by a parallel agent from `design/classes.md`, merged into main.
+
+Done:
+- **Parties:**
+  - Invite the player nearest your crosshair (**T**), join (**Y**), decline (**N**),
+    leave (**L**), kick (**Delete**, leader only).
+  - Up to 5 members; invites expire after 30 s; invite range 20 m (`data/party.cfg`).
+  - The server validates everything; pure rules in `PartyRules`.
+- **Ally rule:** `World.are_allies(a, b)` is the single source of truth. Party members
+  can't damage, stagger or block-drain each other. Enemies are unaffected.
+- **HUD:** party frames with health (left), an invite prompt, cyan nameplates for party
+  members.
+- **Testing:**
+  - `--bot-party` bots party up.
+  - `smoke_test.ps1 -Party` requires a party to form and 0 ally hits.
+  - `run_local_test.ps1 -Party` gives you a bot that joins your party.
+- Tests: 131. Smoke after merge: default 8 of 9 passed (the 1 fail is likely the known
+  "no hit landed on a guard" flake), `-Party` 3 of 3.
+
+Needs a hand playtest (`run_local_test.ps1 -Party`):
+- Invite/join/leave flow.
+- The bot's swings pass through you while partied.
+- Layout and colours of the party frames.
+- Key choices.
+
 ### 2026-10-07 (10): Items and loot rolls (milestone 2, session 1)
 
 Done (pure logic and data; nothing in the game world yet, so no shared files touched
