@@ -2,8 +2,12 @@
 
 ## Current milestone
 
-**1. Networked combat slice.** Movement, stamina, dodge, sword attacks, block, stagger,
-death, respawn and one enemy type (Husk) are networked. Next: the milestone 1 playtest.
+**2. Loot loop.** Enemy drops with rarity and rolled stats, inventory, equipping gear
+that changes the player's numbers.
+
+Milestone 1 (networked combat slice) is **done**: on 2026-10-07 the developer
+playtested fighting Husks alongside the bot and called the combat loop great, with
+Husks behaving as expected.
 
 ## Session log
 
@@ -162,11 +166,19 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Milestone 1 check: fight the Husks with the bot or a friend. Does it feel good?
-2. Milestone 1, one session each:
-   - Light attack combo chain (New World-style 3-hit string)?
-   - Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
-     (download the packs yourself; Mixamo needs an Adobe login).
+Milestone 2, one session each:
+1. Items and loot rolls (pure logic + tests): item definitions, rarity tiers, rolled
+   stats, gear score ranges, Husk loot table, all in `data/`. Plus a script that rolls
+   50,000 drops and prints the real rarity distribution.
+2. Drops in the world: a dead Husk drops loot the server rolls; walk over or press a key
+   to pick it up (server-authoritative); a simple inventory screen.
+3. Equipment slots: equip a weapon/armor piece and its stats change your damage and
+   defense (attributes like STR/CON can start here). Check `design/classes.md` first.
+
+Later / unscheduled:
+- Light attack combo chain (New World-style 3-hit string)?
+- Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
+  (download the packs yourself; Mixamo needs an Adobe login).
 
 ## Known issues / notes
 
