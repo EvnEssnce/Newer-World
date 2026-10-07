@@ -1,6 +1,7 @@
 # Automated networking check: a headless server and two headless bot clients run
 # for a few seconds: each client must see the other move, dodge, attack; the server
-# must resolve hits, a death and a respawn; no unexpected prediction corrections.
+# must resolve hits, a death and a respawn, a guarded hit, and Husks and bots must
+# hit each other; no unexpected prediction corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
 param([int]$Port = 24599, [int]$Seconds = 12)
@@ -19,7 +20,9 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # Low health (two clean hits) and a quick respawn so the bots die and come back
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
-$tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5')
+$tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
+    '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=300',
+    '--tune=enemy_husk/stats/respawn_time=2')
 
 $server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
@@ -32,19 +35,31 @@ $clients | ForEach-Object { $_.WaitForExit() }
 if (-not $server.WaitForExit(10000)) { Stop-Process -Id $server.Id -Force }
 
 $failed = $false
-# The bots fight for the first 3.5 s of every 6; the server must resolve real hits.
+# The bots fight (Husks when near, else each other) for the first 4 s of every 6;
+# the server must resolve real hits.
 $serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+) blocks=(\d+) guard_breaks=(\d+)'
+$enemySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemies count=(\d+) enemy_hits=(\d+) enemy_damaged=(\d+) enemy_kills=(\d+)'
 if (-not $serverSummary -or [int]$serverSummary.Matches[0].Groups[1].Value -lt 1) {
     Write-Host "FAIL server: no hits resolved ($($serverSummary.Line))" -ForegroundColor Red
     $failed = $true
 } elseif ([int]$serverSummary.Matches[0].Groups[2].Value -lt 1 -or [int]$serverSummary.Matches[0].Groups[3].Value -lt 1) {
     Write-Host "FAIL server: no death and respawn ($($serverSummary.Line))" -ForegroundColor Red
     $failed = $true
-} elseif ([int]$serverSummary.Matches[0].Groups[4].Value -lt 1 -or [int]$serverSummary.Matches[0].Groups[5].Value -lt 1) {
-    Write-Host "FAIL server: no blocked hit and guard break ($($serverSummary.Line))" -ForegroundColor Red
+} elseif ([int]$serverSummary.Matches[0].Groups[4].Value + [int]$serverSummary.Matches[0].Groups[5].Value -lt 1) {
+    Write-Host "FAIL server: no hit landed on a guard ($($serverSummary.Line))" -ForegroundColor Red
     $failed = $true
 } else {
     Write-Host "PASS server: $($serverSummary.Line)" -ForegroundColor Green
+}
+# Husks notice the bots from 40 m (via --tune), so they must fight both ways.
+if (-not $enemySummary -or [int]$enemySummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL enemies: none spawned ($($enemySummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$enemySummary.Matches[0].Groups[2].Value -lt 1 -or [int]$enemySummary.Matches[0].Groups[3].Value -lt 1) {
+    Write-Host "FAIL enemies: Husks and bots didn't both land hits ($($enemySummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS enemies: $($enemySummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'

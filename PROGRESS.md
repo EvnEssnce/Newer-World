@@ -3,9 +3,29 @@
 ## Current milestone
 
 **1. Networked combat slice.** Movement, stamina, dodge, sword attacks, block, stagger,
-death and respawn are networked. Next up: one enemy type.
+death, respawn and one enemy type (Husk) are networked. Next: the milestone 1 playtest.
 
 ## Session log
+
+### 2026-10-07 (9): First enemy (Husk)
+
+Done:
+- Husk: a slow, heavy-hitting melee enemy, fully server-controlled. Two of them at a
+  camp ~15 m north of spawn. They wander, notice players within 8 m, chase, and swing
+  (0.6 s windup telegraphed by glowing red, 120 damage, 0.3 s stagger on hit). Roll and
+  block work against them as against players.
+- Players hit Husks with the same attacks; heavies stagger them (interrupting their
+  windup). 600 health; dead Husks respawn at the camp after 10 s. Pulled more than 25 m
+  from camp, a Husk walks home and heals.
+- All values in `data/enemy_husk.cfg`. Camps are `Marker3D`s in `world.tscn`.
+- The bot fights the nearest Husk within 15 m (else you), so you can fight Husks
+  together, which is milestone 1's "done" check.
+- Tests: 76 (11 for the enemy brain). Smoke test: Husks and bots must hit each other;
+  0 corrections across 5 runs. Visuals checked from game frames (telegraph, club,
+  labels).
+
+Needs a hand playtest (milestone 1 check): fight the Husks with the bot (or a second
+person). Is it fun? Tune `data/enemy_husk.cfg`.
 
 ### 2026-10-07 (8): Block
 
@@ -142,14 +162,17 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest block and guard break.
+1. Milestone 1 check: fight the Husks with the bot or a friend. Does it feel good?
 2. Milestone 1, one session each:
    - Light attack combo chain (New World-style 3-hit string)?
-   - One enemy type with server-driven AI.
    - Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
      (download the packs yourself; Mixamo needs an Adobe login).
 
 ## Known issues / notes
+
+- Husks steer straight at their target (no navmesh), so a crate between you and a
+  Husk can stall it. Fine for the open test area; add navigation before real zones.
+- A heavy's hitbox can hit both Husks at once when they stand together.
 
 - About 1 smoke run in 20 shows a few (≤4) small unexpected corrections on flat ground
   (~0.1 m sideways), not near any server event. Cause unconfirmed; the server logged no

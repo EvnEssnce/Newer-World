@@ -46,10 +46,14 @@ game/
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
   player/player_state.gd     Stamina, dodge, attacks, stagger, death, facing. Pure logic, unit tested.
   player/player_params.gd    Player tuning converted to ticks/radians, loaded once.
-  combat/attack_params.gd    One attack's tuning (phases, damage, hitbox).
-  combat/melee_hitbox.gd     Box hitbox vs capsule test. Pure math, unit tested.
+  combat/attack_params.gd    One attack's tuning (phases, damage, hitbox). Players and enemies.
+  combat/melee_hitbox.gd     Box hitbox vs capsule test, frontal arc. Pure math, unit tested.
+  combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
+  enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
+  enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
+  enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
 ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info).
-data/                Tuning files: network, movement, combat, camera, weapon_sword (.cfg).
+data/                Tuning files: network, movement, combat, camera, weapon_sword, enemy_husk (.cfg).
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
 tools/               PowerShell run scripts, unit test runner, smoke test.
@@ -130,6 +134,24 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (`revive()`). The client shows a countdown banner from the `HIT_DEFEATED` event.
 - No lag compensation yet: hits use targets' current server positions, while the
   attacker sees them `interpolation_delay` in the past.
+
+## Enemies
+
+- Placed by `Marker3D`s under `World/EnemySpawns` (level data; `metadata/kind` picks
+  `data/enemy_<kind>.cfg`). The server spawns one `Enemy` per marker at startup with a
+  negative id (`-1`, `-2`, ...), which is also its node name under `World/Enemies` and
+  how hit events address it (peer ids are always positive).
+- **Server only**: each tick after the players, `Enemy.server_step` runs its
+  `EnemyBrain` (IDLE wander → CHASE nearest living player within `aggro_range` →
+  ATTACK when within `attack_range` and off cooldown → back to CHASE; STAGGERED when hit
+  by a staggering attack; RETURN home past `leash_range`, healing on arrival). Movement
+  is direct steering, no navmesh yet. Not predicted, so no PlayerState-style rules.
+- Enemy swings go through the same `World._strike_player` as player attacks (evade,
+  block, guard break, stagger, death). Player attacks on enemies: damage, aggro the
+  attacker, stagger × `stagger_multiplier`; death → respawn at home after `respawn_time`.
+- Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
+  players. The windup is telegraphed by the body glowing red.
+- Enemies don't collide with players (layer 4; players and enemies only mask the world).
 - Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
 
 ## Running
@@ -143,13 +165,13 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # ser
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, air dodge, fight, block, guard break, die, respawn
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, fight each other and Husks, block, die, respawn
 ```
 
 Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect; repeats every 6 s: take turns attacking and blocking the nearest player, then circle with
+`--bot` (auto-connect; repeats every 6 s: take turns attacking and blocking: the nearest Husk within 15 m, else the nearest player; then circle with
 jump/air dodge/ground dodge; see `World._bot_input`), `--verbose` (log positions every 2 s,
 server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),

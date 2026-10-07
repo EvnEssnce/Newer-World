@@ -3,10 +3,11 @@ extends Node3D
 ## The shared game world, at /root/Main/World on the server and every client.
 ##
 ## Server: spawns a player when a client says it's ready, simulates players from
-## their inputs every physics tick, resolves melee hits and sends snapshots of
-## every player.
+## their inputs every physics tick, runs enemies (one per marker under
+## EnemySpawns), resolves melee hits and sends snapshots of everyone.
 ## Client: sends its inputs every tick, predicts its own player, draws other
-## players interpolated between snapshots, and shows hits the server reports.
+## players and enemies interpolated between snapshots, and shows hits the server
+## reports.
 
 ## Results sent with each hit event.
 const HIT_DAMAGED := 0
@@ -17,12 +18,15 @@ const HIT_GUARD_BROKEN := 4
 const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
+const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
 const HUD_SCENE := preload("res://ui/hud.tscn")
 ## Inputs per packet the server accepts; anything larger is dropped as malformed.
 const MAX_INPUTS_PER_PACKET := 8
 const SPAWN_RADIUS := 3.0
 ## Bot fight phase: walk to this distance from the target before swinging.
 const BOT_ATTACK_DISTANCE := 1.6
+## The bot fights enemies within this many meters rather than other players.
+const BOT_ENEMY_RANGE := 15.0
 
 # Server
 var _tick := 0
@@ -34,6 +38,11 @@ var _deaths := 0
 var _respawns := 0
 var _blocks := 0
 var _guard_breaks := 0
+## Enemy swings that connected with a player (including blocked ones).
+var _enemy_hits := 0
+## Player hits on enemies.
+var _enemy_damaged := 0
+var _enemy_kills := 0
 
 # Client
 var _hud: Hud
@@ -56,6 +65,7 @@ var _log_timer := 0.0
 var _last_screenshot_slot := -1
 
 @onready var _players: Node3D = $Players
+@onready var _enemies: Node3D = $Enemies
 
 
 func _ready() -> void:
@@ -66,6 +76,7 @@ func _ready() -> void:
 		_max_input_buffer = Tuning.get_value("network", "server", "max_input_buffer")
 		_max_inputs_per_tick = Tuning.get_value("network", "server", "max_inputs_per_tick")
 		Net.peer_left.connect(_on_peer_left)
+		_spawn_enemies()
 	else:
 		_interpolation_delay = Tuning.get_value("network", "client", "interpolation_delay")
 		_input_redundancy = Tuning.get_value("network", "client", "input_redundancy")
@@ -91,6 +102,8 @@ func _process(delta: float) -> void:
 		for player: Player in _players.get_children():
 			if not player.is_local:
 				player.interpolate(_render_time)
+		for enemy: Enemy in _enemies.get_children():
+			enemy.interpolate(_render_time)
 	_update_hud()
 	_maybe_save_screenshot()
 	if _verbose:
@@ -113,6 +126,18 @@ func _server_tick(delta: float) -> void:
 		if player.state.dead and _tick >= player.respawn_at_tick:
 			_respawn(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
+	var targets := {}
+	for player: Player in _players.get_children():
+		if not player.state.dead:
+			targets[player.peer_id] = player.global_position
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.dead:
+			if _tick >= enemy.respawn_at_tick:
+				enemy.respawn()
+				if _verbose:
+					print("[server] enemy %d respawned" % enemy.enemy_id)
+		else:
+			enemy.server_step(targets, delta)
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
 
@@ -121,8 +146,11 @@ func _broadcast_snapshot() -> void:
 	var states: Array = []
 	for player: Player in _players.get_children():
 		states.append(player.get_snapshot())
+	var enemy_states: Array = []
+	for enemy: Enemy in _enemies.get_children():
+		enemy_states.append(enemy.get_snapshot())
 	for peer_id in _connected_player_ids():
-		_receive_snapshot.rpc_id(peer_id, _tick, states)
+		_receive_snapshot.rpc_id(peer_id, _tick, states, enemy_states)
 
 
 ## Peers with a player in the world. A peer can be mid-disconnect for a moment
@@ -170,46 +198,94 @@ func _on_peer_left(peer_id: int) -> void:
 	print("[server] peer %d left (%d players)" % [peer_id, _players.get_child_count()])
 
 
-## Server: the attacker's hitbox is live this step. Each target can be hit once
-## per attack; a target in i-frames evades but can still be hit later in the
-## same active window if its i-frames run out first.
+## Server: a player's hitbox is live this step. It can hit other players and
+## enemies, each at most once per attack.
 func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
 	for target: Player in _players.get_children():
-		if target == attacker or target.state.dead:
-			continue
-		if attacker.attack_results.get(target.peer_id, false):
+		if target != attacker:
+			_strike_player(attacker.peer_id, attacker.global_position, attacker.state.yaw,
+					attack, attacker.attack_results, target)
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
 			continue
 		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
-				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT):
+				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
-		if target.state.is_invulnerable(target.params):
-			if not attacker.attack_results.has(target.peer_id):
-				attacker.attack_results[target.peer_id] = false
-				_send_hit(attacker, target, 0.0, HIT_EVADED)
-			continue
-		attacker.attack_results[target.peer_id] = true
-		var damage := attack.damage
-		var result := HIT_DAMAGED
-		if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
-				target.state.yaw, attacker.global_position, target.params.block_arc):
-			var broke := target.state.take_blocked_hit(attack, target.params)
-			damage *= target.params.block_damage_taken
-			result = HIT_GUARD_BROKEN if broke else HIT_BLOCKED
-			if broke:
-				_guard_breaks += 1
-			else:
-				_blocks += 1
-		target.health = maxf(0.0, target.health - damage)
-		if target.health <= 0.0:
-			result = HIT_DEFEATED
-			target.state.kill()
-			target.respawn_at_tick = _tick + target.params.respawn_ticks
-			_deaths += 1
-		elif result == HIT_DAMAGED:
-			target.state.apply_stagger(attack.stagger_ticks)
-		_hits += 1
-		_send_hit(attacker, target, damage, result)
+		attacker.attack_results[enemy.enemy_id] = true
+		var killed := enemy.take_hit(attack.damage, attack.stagger_ticks, attacker.peer_id)
+		_enemy_damaged += 1
+		if killed:
+			enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
+			_enemy_kills += 1
+		_send_hit(attacker.peer_id, enemy.enemy_id, attack.damage,
+				HIT_DEFEATED if killed else HIT_DAMAGED)
+
+
+## Server: an enemy's swing is live this tick.
+func _on_enemy_attack_stepped(enemy: Enemy) -> void:
+	for target: Player in _players.get_children():
+		var result := _strike_player(enemy.enemy_id, enemy.global_position, enemy.brain.yaw,
+				enemy.params.attack, enemy.attack_results, target)
+		if result >= 0 and result != HIT_EVADED:
+			_enemy_hits += 1
+
+
+## Server: resolves one attack against one player, at most once per attack
+## (`results`, keyed by target id). A player in i-frames evades but can still be
+## hit later in the same active window if their i-frames run out first. A
+## blocking player facing the attacker takes stamina damage instead. Returns the
+## HIT_* result, or -1 if the attack didn't connect (or already did).
+func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
+		attack: AttackParams, results: Dictionary[int, bool], target: Player) -> int:
+	if target.state.dead or results.get(target.peer_id, false):
+		return -1
+	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
+			Player.BODY_RADIUS, Player.BODY_HEIGHT):
+		return -1
+	if target.state.is_invulnerable(target.params):
+		if results.has(target.peer_id):
+			return -1
+		results[target.peer_id] = false
+		_send_hit(attacker_id, target.peer_id, 0.0, HIT_EVADED)
+		return HIT_EVADED
+	results[target.peer_id] = true
+	var damage := attack.damage
+	var result := HIT_DAMAGED
+	if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
+			target.state.yaw, attacker_pos, target.params.block_arc):
+		var broke := target.state.take_blocked_hit(attack, target.params)
+		damage *= target.params.block_damage_taken
+		result = HIT_GUARD_BROKEN if broke else HIT_BLOCKED
+		if broke:
+			_guard_breaks += 1
+		else:
+			_blocks += 1
+	target.health = maxf(0.0, target.health - damage)
+	if target.health <= 0.0:
+		result = HIT_DEFEATED
+		target.state.kill()
+		target.respawn_at_tick = _tick + target.params.respawn_ticks
+		_deaths += 1
+	elif result == HIT_DAMAGED:
+		target.state.apply_stagger(attack.stagger_ticks)
+	_hits += 1
+	_send_hit(attacker_id, target.peer_id, damage, result)
+	return result
+
+
+func _spawn_enemies() -> void:
+	var next_id := -1
+	for marker: Marker3D in $EnemySpawns.get_children():
+		var enemy: Enemy = ENEMY_SCENE.instantiate()
+		enemy.enemy_id = next_id
+		enemy.name = str(next_id)
+		enemy.kind = marker.get_meta("kind", "husk")
+		enemy.home = marker.position
+		enemy.position = marker.position
+		enemy.attack_stepped.connect(_on_enemy_attack_stepped)
+		_enemies.add_child(enemy)
+		next_id -= 1
 
 
 ## Server: brings a dead player back at a random spawn point with full health.
@@ -226,12 +302,12 @@ func _respawn(player: Player) -> void:
 	print("[server] peer %d respawned" % player.peer_id)
 
 
-func _send_hit(attacker: Player, target: Player, damage: float, result: int) -> void:
+## Ids are peer ids for players and negative ids for enemies.
+func _send_hit(attacker_id: int, target_id: int, damage: float, result: int) -> void:
 	if _verbose:
-		print("[server] %d -> %d: %s %d" % [attacker.peer_id, target.peer_id,
-				HIT_NAMES[result], damage])
+		print("[server] %d -> %d: %s %d" % [attacker_id, target_id, HIT_NAMES[result], damage])
 	for peer_id in _connected_player_ids():
-		_receive_hit.rpc_id(peer_id, attacker.peer_id, target.peer_id, damage, result)
+		_receive_hit.rpc_id(peer_id, attacker_id, target_id, damage, result)
 
 
 # --- Client ---
@@ -264,9 +340,11 @@ func _client_tick(delta: float) -> void:
 
 
 ## Bot input for testing without a second person. Repeats every 6 s:
-## 0–4 s: walk to the nearest player and fight in two 2 s turns; the bot with the
-## lower peer id attacks in the first, the other in the second. On its turn a
-## bot holds for a heavy, then taps two lights; off its turn it holds block.
+## 0–4 s: fight. The target is the nearest living enemy within BOT_ENEMY_RANGE,
+## or else the nearest other player. The fight has two 2 s turns; the bot with
+## the lower peer id (compared with the nearest other player) attacks in the
+## first, the other in the second. On its turn a bot holds for a heavy, then taps
+## two lights; off its turn it holds block.
 ## 4–6 s: walk in circles; jump at 4.6 (after the last attack has finished),
 ## air dodge at 4.75, ground dodge at 5.5.
 ## Fighting comes first because players spawn close together.
@@ -286,14 +364,17 @@ func _bot_input() -> Array:
 		if crossed.call(4.75) or crossed.call(5.5):
 			buttons |= PlayerState.BUTTON_DODGE
 	else:
-		var target := _nearest_remote_player()
+		var other_player := _nearest_remote_player()
+		var target: Node3D = _nearest_enemy(BOT_ENEMY_RANGE)
+		if target == null:
+			target = other_player
 		if target:
 			var to := target.global_position - _local_player.global_position
 			var flat := Vector2(to.x, to.z)
 			aim_yaw = PlayerState.yaw_for_direction(flat)
 			if flat.length() > BOT_ATTACK_DISTANCE:
 				move = flat.normalized()
-			var first_turn := multiplayer.get_unique_id() < target.peer_id
+			var first_turn := other_player == null or multiplayer.get_unique_id() < other_player.peer_id
 			var turn_start := 0.0 if first_turn else 2.0
 			var turn_time := phase - turn_start
 			if turn_time >= 0.0 and turn_time < 2.0:
@@ -307,6 +388,17 @@ func _bot_input() -> Array:
 				buttons |= PlayerState.BUTTON_BLOCK
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
+
+
+func _nearest_enemy(max_distance: float) -> Enemy:
+	var nearest: Enemy
+	var best := max_distance
+	for enemy: Enemy in _enemies.get_children():
+		var distance := enemy.global_position.distance_to(_local_player.global_position)
+		if not enemy.dead and distance < best:
+			best = distance
+			nearest = enemy
+	return nearest
 
 
 func _nearest_remote_player() -> Player:
@@ -323,7 +415,7 @@ func _nearest_remote_player() -> Player:
 
 
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
-func _receive_snapshot(tick: int, states: Array) -> void:
+func _receive_snapshot(tick: int, states: Array, enemy_states: Array) -> void:
 	_snapshots_received += 1
 	var server_time := tick / float(Engine.physics_ticks_per_second)
 	_sync_render_clock(server_time)
@@ -345,6 +437,29 @@ func _receive_snapshot(tick: int, states: Array) -> void:
 			print("[client] peer %d left" % player.peer_id)
 			_players.remove_child(player)
 			player.queue_free()
+	_receive_enemy_states(server_time, enemy_states)
+
+
+## Enemy snapshot entries: Enemy.get_snapshot().
+func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
+	var seen := {}
+	for state: Array in enemy_states:
+		var enemy_id: int = state[0]
+		seen[enemy_id] = true
+		var enemy := _enemies.get_node_or_null(str(enemy_id)) as Enemy
+		if enemy == null:
+			enemy = ENEMY_SCENE.instantiate()
+			enemy.enemy_id = enemy_id
+			enemy.name = str(enemy_id)
+			enemy.kind = state[1]
+			enemy.position = state[2]
+			_enemies.add_child(enemy)
+		enemy.push_snapshot(server_time, state[2], state[3], state[4], state[5], state[7])
+		enemy.set_health(state[6])
+	for enemy: Enemy in _enemies.get_children():
+		if not seen.has(enemy.enemy_id):
+			_enemies.remove_child(enemy)
+			enemy.queue_free()
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -358,7 +473,8 @@ func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) 
 			if result == HIT_DEFEATED and _local_player:
 				var respawn_seconds := _local_player.params.respawn_ticks / float(Engine.physics_ticks_per_second)
 				_respawn_at_msec = Time.get_ticks_msec() + roundi(respawn_seconds * 1000.0)
-	var target := _players.get_node_or_null(str(target_id)) as Player
+	var container := _enemies if target_id < 0 else _players
+	var target := container.get_node_or_null(str(target_id))
 	if target:
 		target.show_hit(damage, result)
 
@@ -438,6 +554,8 @@ func print_summary() -> void:
 	if multiplayer.is_server():
 		print("SUMMARY server players=%d ticks=%d hits=%d deaths=%d respawns=%d blocks=%d guard_breaks=%d" % [
 				_players.get_child_count(), _tick, _hits, _deaths, _respawns, _blocks, _guard_breaks])
+		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d" % [
+				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills])
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d" % [

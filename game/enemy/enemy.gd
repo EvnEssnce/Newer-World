@@ -1,0 +1,214 @@
+class_name Enemy
+extends CharacterBody3D
+## An enemy. Server: runs its EnemyBrain every tick, moves, owns health and
+## death, and emits attack_stepped while its swing is live (World resolves the
+## hits). Clients: draw it interpolated between snapshots, like other players.
+## Not predicted, so its state doesn't need to live in PlayerState-style arrays.
+
+## Server only: emitted after each tick in which its swing's hitbox is live.
+signal attack_stepped(enemy: Enemy)
+
+## Must match the capsule in enemy.tscn. Used by player hit detection.
+const BODY_RADIUS := 0.5
+const BODY_HEIGHT := 2.2
+const MAX_SNAPSHOTS := 30
+
+# Placeholder visuals (cosmetic only; replaced by real models later).
+const BASE_COLOR := Color(0.42, 0.3, 0.48)
+## The windup telegraph: the body glows toward this color as the swing winds up.
+const TELEGRAPH_COLOR := Color(1.0, 0.15, 0.05)
+const HIT_COLOR := Color(1.0, 1.0, 1.0)
+const DEAD_COLOR := Color(0.25, 0.25, 0.27)
+const HIT_FLASH_MS := 150
+const STAGGER_TILT := 0.4
+## Club pitch at rest, raised at the end of the windup, and at the end of the strike.
+const CLUB_IDLE := -0.6
+const CLUB_WOUND := 1.9
+const CLUB_STRUCK := -1.5
+
+## Negative, so it never collides with a peer id. Also its node name.
+var enemy_id := 0
+## Which data/enemy_<kind>.cfg it uses.
+var kind := "husk"
+var params: EnemyParams
+## Its camp: where it wanders, returns to and respawns.
+var home := Vector3.ZERO
+## Server-authoritative; clients copy it from snapshots.
+var health := 0.0
+var dead := false
+
+# Server
+var brain := EnemyBrain.new()
+var respawn_at_tick := -1
+## Players the current swing has already been resolved against (see Player).
+var attack_results: Dictionary[int, bool] = {}
+var _rng := RandomNumberGenerator.new()
+var _gravity := 0.0
+
+# Client
+var _snapshots: Array[Array] = []  # [server_time, pos, yaw, mode, attack_tick, dead]
+var _material: StandardMaterial3D
+var _hitbox_material: StandardMaterial3D
+var _hit_flash_until := 0
+
+@onready var _model: Node3D = $Model
+@onready var _body_pivot: Node3D = $Model/BodyPivot
+@onready var _club_pivot: Node3D = $Model/BodyPivot/ClubPivot
+@onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
+@onready var _name_label: Label3D = $NameLabel
+
+
+func _ready() -> void:
+	params = EnemyParams.for_kind(kind)
+	_gravity = PlayerParams.current().gravity
+	if multiplayer.is_server():
+		health = params.max_health
+		brain.wander_point = home
+		_rng.randomize()
+		_name_label.visible = false
+		return
+	_material = StandardMaterial3D.new()
+	_material.albedo_color = BASE_COLOR
+	($Model/BodyPivot/Body as MeshInstance3D).material_override = _material
+	_hitbox_material = StandardMaterial3D.new()
+	_hitbox_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_hitbox_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_hitbox_debug.material_override = _hitbox_material
+	_update_label()
+
+
+# --- Server ---
+
+## targets maps the peer id of every living player to their position.
+func server_step(targets: Dictionary, delta: float) -> void:
+	if dead:
+		return
+	var desired := brain.step(global_position, home, targets, params, delta, _rng)
+	if brain.attack_tick == 0:
+		attack_results.clear()
+	velocity.x = desired.x
+	velocity.z = desired.y
+	velocity.y = 0.0 if is_on_floor() else velocity.y - _gravity * delta
+	move_and_slide()
+	if brain.arrived_home:
+		health = params.max_health
+	if brain.is_attack_active(params):
+		attack_stepped.emit(self)
+
+
+## Applies a player's hit. Returns true if it killed the enemy.
+func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
+	health = maxf(0.0, health - damage)
+	if health <= 0.0:
+		dead = true
+		velocity = Vector3.ZERO
+		return true
+	brain.aggro(attacker_id)
+	brain.stagger(roundi(stagger_ticks * params.stagger_multiplier))
+	return false
+
+
+func respawn() -> void:
+	dead = false
+	health = params.max_health
+	global_position = home
+	velocity = Vector3.ZERO
+	brain = EnemyBrain.new()
+	brain.wander_point = home
+	respawn_at_tick = -1
+
+
+func get_snapshot() -> Array:
+	return [enemy_id, kind, global_position, brain.yaw, brain.mode, brain.attack_tick, health, dead]
+
+
+# --- Client ---
+
+func push_snapshot(server_time: float, pos: Vector3, yaw: float, mode: int, attack_tick: int,
+		is_dead: bool) -> void:
+	if _snapshots.is_empty():
+		global_position = pos
+	_snapshots.append([server_time, pos, yaw, mode, attack_tick, is_dead])
+	if _snapshots.size() > MAX_SNAPSHOTS:
+		_snapshots.pop_front()
+
+
+func interpolate(render_time: float) -> void:
+	if _snapshots.is_empty():
+		return
+	while _snapshots.size() >= 2 and _snapshots[1][0] <= render_time:
+		_snapshots.pop_front()
+	var from: Array = _snapshots[0]
+	var pos: Vector3 = from[1]
+	var yaw: float = from[2]
+	var attack_tick := float(from[4])
+	if _snapshots.size() >= 2 and render_time > from[0]:
+		var to: Array = _snapshots[1]
+		var weight: float = (render_time - from[0]) / (to[0] - from[0])
+		pos = from[1].lerp(to[1], weight)
+		yaw = lerp_angle(from[2], to[2], weight)
+		if from[4] >= 0 and to[4] > from[4]:
+			attack_tick = lerpf(from[4], to[4], weight)
+	global_position = pos
+	dead = from[5]
+	_show(yaw, from[3] == EnemyBrain.Mode.STAGGERED, attack_tick)
+
+
+func set_health(value: float) -> void:
+	if value == health:
+		return
+	health = value
+	_update_label()
+
+
+func show_hit(damage: float, result: int) -> void:
+	HitFeedback.spawn_label(self, 2.8, damage, result)
+	if HitFeedback.flashes(result):
+		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
+
+
+func _update_label() -> void:
+	var status := "Defeated" if health <= 0.0 else str(ceili(health))
+	_name_label.text = "%s\n%s" % [kind.capitalize(), status]
+
+
+## attack_tick is fractional for smooth swings; -1 when not swinging.
+func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
+	_model.rotation.y = yaw
+	if dead:
+		_body_pivot.rotation.x = -PI / 2.0
+		_body_pivot.position.y = BODY_RADIUS
+	else:
+		_body_pivot.position.y = BODY_HEIGHT / 2.0
+		_body_pivot.rotation.x = STAGGER_TILT if staggered else 0.0
+
+	var attack := params.attack
+	var windup := float(attack.windup_ticks)
+	var strike_end := windup + attack.active_ticks
+	var club := CLUB_IDLE
+	var telegraph := 0.0
+	if attack_tick >= 0.0 and not dead:
+		if attack_tick < windup:
+			telegraph = attack_tick / maxf(windup, 1.0)
+			club = lerpf(CLUB_IDLE, CLUB_WOUND, telegraph)
+		elif attack_tick < strike_end:
+			club = lerpf(CLUB_WOUND, CLUB_STRUCK, (attack_tick - windup) / attack.active_ticks)
+		else:
+			club = lerpf(CLUB_STRUCK, CLUB_IDLE,
+					(attack_tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
+	_club_pivot.rotation.x = club
+
+	_hitbox_debug.visible = Player.show_hitboxes and attack_tick >= 0.0 and not dead
+	if _hitbox_debug.visible:
+		(_hitbox_debug.mesh as BoxMesh).size = Vector3(
+				attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
+		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
+		var active := attack_tick >= windup and attack_tick < strike_end
+		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
+
+	if dead:
+		_material.albedo_color = DEAD_COLOR
+	elif Time.get_ticks_msec() < _hit_flash_until:
+		_material.albedo_color = HIT_COLOR
+	else:
+		_material.albedo_color = BASE_COLOR.lerp(TELEGRAPH_COLOR, telegraph)

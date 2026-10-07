@@ -331,38 +331,11 @@ func set_health(value: float) -> void:
 	_update_label()
 
 
-## Shows a hit, evade or defeat reported by the server.
+## Shows a hit, evade, block or defeat reported by the server.
 func show_hit(damage: float, result: int) -> void:
-	var label := Label3D.new()
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.font_size = 56
-	label.outline_size = 10
-	label.position = Vector3(randf_range(-0.3, 0.3), 2.4, 0.0)
-	match result:
-		World.HIT_EVADED:
-			label.text = "Evaded"
-			label.modulate = Color(0.75, 0.9, 1.0)
-		World.HIT_BLOCKED:
-			label.text = "Blocked" if damage <= 0.0 else "Blocked -%d" % damage
-			label.modulate = Color(0.8, 0.85, 0.9)
-		World.HIT_GUARD_BROKEN:
-			label.text = "Guard broken!" if damage <= 0.0 else "Guard broken! -%d" % damage
-			label.modulate = Color(1.0, 0.55, 0.15)
-		World.HIT_DEFEATED:
-			label.text = "-%d  Defeated!" % damage
-			label.modulate = Color(1.0, 0.3, 0.2)
-		_:
-			label.text = "-%d" % damage
-			label.modulate = Color(1.0, 0.85, 0.3)
-	if result in [World.HIT_DAMAGED, World.HIT_DEFEATED, World.HIT_GUARD_BROKEN]:
+	HitFeedback.spawn_label(self, 2.4, damage, result)
+	if HitFeedback.flashes(result):
 		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
-	add_child(label)
-	var tween := label.create_tween()
-	tween.set_parallel()
-	tween.tween_property(label, "position:y", 3.2, 0.8)
-	tween.tween_property(label, "modulate:a", 0.0, 0.8).set_delay(0.3)
-	tween.chain().tween_callback(label.queue_free)
 
 
 func _update_label() -> void:
