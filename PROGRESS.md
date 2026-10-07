@@ -166,14 +166,19 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-Milestone 2, one session each:
-1. Items and loot rolls (pure logic + tests): item definitions, rarity tiers, rolled
-   stats, gear score ranges, Husk loot table, all in `data/`. Plus a script that rolls
-   50,000 drops and prints the real rarity distribution.
-2. Drops in the world: a dead Husk drops loot the server rolls; walk over or press a key
-   to pick it up (server-authoritative); a simple inventory screen.
-3. Equipment slots: equip a weapon/armor piece and its stats change your damage and
-   defense (attributes like STR/CON can start here). Check `design/classes.md` first.
+Milestone 2, one session each. Checked against `design/classes.md` (another session is
+building its Wave 1 in parallel: 1A ability framework/weapon swap/Fighter, 1B parties):
+1. **Now (no shared files):** items and loot rolls, pure logic + tests: item definitions,
+   rarity tiers, rolled stats, gear score ranges, Husk loot table, all in `data/`, plus a
+   script that rolls 50,000 drops and prints the real rarity distribution. **No
+   attributes** (design decision): gear stats are things like damage %, armor, max
+   health/stamina, crit. Weapon items name a weapon type (class-locked; attack timings
+   stay in 1A's `data/weapon_<name>.cfg`, not in loot data).
+2. **After Wave 1 merges** (touches `world.gd`, HUD): dead Husks drop **personal** loot
+   (everyone who damaged it gets their own server roll, so no party loot rules); pick up
+   with **F**, inventory screen on **I** (Wave 1 uses Q/E/R/X/K/Z/C).
+3. **After 1A merges:** equipping armor and weapons changes your numbers, built on 1A's
+   weapon slots, with gear bonuses feeding the same modifier path as mastery passives.
 
 Later / unscheduled:
 - Light attack combo chain (New World-style 3-hit string)?
