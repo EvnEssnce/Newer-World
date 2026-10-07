@@ -7,6 +7,8 @@ var windup_ticks := 0
 var active_ticks := 0
 var recovery_ticks := 0
 var damage := 0.0
+## Ticks the target is staggered on hit; 0 = none.
+var stagger_ticks := 0
 ## Fraction of normal movement speed while attacking.
 var move_multiplier := 0.0
 ## Hitbox: from the attacker's center, hitbox_range forward, hitbox_width wide,
@@ -26,6 +28,7 @@ static func from_tuning(file: String, section: String, tps: float) -> AttackPara
 	a.active_ticks = maxi(1, roundi(Tuning.get_value(file, section, "active") * tps))
 	a.recovery_ticks = roundi(Tuning.get_value(file, section, "recovery") * tps)
 	a.damage = Tuning.get_value(file, section, "damage")
+	a.stagger_ticks = roundi(Tuning.get_value(file, section, "stagger") * tps)
 	a.move_multiplier = Tuning.get_value(file, section, "move_multiplier")
 	a.hitbox_range = Tuning.get_value(file, section, "range")
 	a.hitbox_width = Tuning.get_value(file, section, "width")

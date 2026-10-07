@@ -44,7 +44,7 @@ game/
                      prediction, interpolation, hit display; test bot.
   player/player.gd   One player; server/local/remote roles (see below), health, visuals.
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
-  player/player_state.gd     Stamina, dodge, attacks, facing, input buttons. Pure logic, unit tested.
+  player/player_state.gd     Stamina, dodge, attacks, stagger, death, facing. Pure logic, unit tested.
   player/player_params.gd    Player tuning converted to ticks/radians, loaded once.
   combat/attack_params.gd    One attack's tuning (phases, damage, hitbox).
   combat/melee_hitbox.gd     Box hitbox vs capsule test. Pure math, unit tested.
@@ -75,10 +75,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array(), health]`.
   Snapshots also drive spawning/despawning on clients: new id → spawn, missing id → remove.
 - **Local player**: applies each input immediately and remembers the predicted position
-  and `PlayerState` per seq. On a snapshot, if the server's position or state for
+  and `PlayerState` per seq (keeping the latest acknowledged one, since two snapshots
+  can acknowledge the same seq). On a snapshot, if the server's position or state for
   `last_processed_seq` differs from the prediction, it restores the server's position,
-  velocity and state and replays unacknowledged inputs ("corrections" on the HUD; should
-  stay 0 on localhost).
+  velocity and state and replays unacknowledged inputs. "Corrections" on the HUD count
+  only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
+  event (`PlayerState.server_events` changed: stagger, death, respawn) isn't counted.
+- **Server-side teleports** (respawn) must put the player exactly on the ground. The
+  body's on-floor flag isn't synced, so a mid-air teleport causes a correction.
 - **Remote players**: drawn `interpolation_delay` seconds in the past, interpolated
   between snapshots on a render clock synced to server ticks. Roll and i-frame visuals
   come from the interpolated `PlayerState`.
@@ -105,7 +109,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
   snapshots. Hit events go to clients via reliable `World._receive_hit`
   (`HIT_DAMAGED` / `HIT_EVADED` / `HIT_DEFEATED`) for damage numbers and the red flash.
-- No death yet: at 0 health the server refills it and reports `HIT_DEFEATED`.
+- **Stagger**: a hit with `stagger > 0` (weapon file; heavy only by default) calls
+  `PlayerState.apply_stagger`: interrupts the target's attack/dodge, and it can't act
+  until it ends (presses stay buffered).
+- **Death**: at 0 health the server calls `PlayerState.kill()`; dead players can't act,
+  can't be hit, and lie grey on the ground. After `[death] respawn_time` the server
+  `_respawn`s them at a random point on the spawn circle with full health and stamina
+  (`revive()`). The client shows a countdown banner from the `HIT_DEFEATED` event.
 - No lag compensation yet: hits use targets' current server positions, while the
   attacker sees them `interpolation_delay` in the past.
 - Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
@@ -121,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # ser
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: move, dodge, air dodge, fight; server must resolve hits; 0 corrections
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: move, dodge, air dodge, fight, die, respawn; 0 corrections
 ```
 
 Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
@@ -131,7 +141,10 @@ Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:p
 jump/air dodge/ground dodge; see `World._bot_input`), `--verbose` (log positions every 2 s,
 server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),
-`--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test).
+`--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),
+`--tune=file/section/key=value` (repeatable; overrides a `data/` value for that run;
+give the server and every client the same overrides). The smoke test uses `--tune`
+for low health and a fast respawn so deaths happen within the run.
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.

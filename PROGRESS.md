@@ -2,10 +2,28 @@
 
 ## Current milestone
 
-**1. Networked combat slice.** Movement, stamina, dodge and sword attacks are networked.
-Next up: death/respawn and hit reactions, block, one enemy.
+**1. Networked combat slice.** Movement, stamina, dodge, sword attacks, stagger, death
+and respawn are networked. Next up: block, one enemy.
 
 ## Session log
+
+### 2026-10-07 (7): Death, respawn and stagger
+
+Done:
+- Death at 0 health: the player drops (grey, face down), can't act or be hit. A
+  "Defeated / Respawning in N" banner counts down; after 5 s (`[death] respawn_time`)
+  they respawn at a random spawn point with full health and stamina.
+- Stagger: heavy hits stagger the target for 0.4 s (`stagger` per attack in
+  `weapon_sword.cfg`; light is 0). Interrupts their attack or roll; presses during it
+  are buffered. Body tilts back while staggered.
+- `--tune=file/section/key=value` launch option to override tuning for one run.
+- Fixed two sources of false prediction corrections: respawning in mid-air (now on the
+  ground) and two snapshots acknowledging the same input. Corrections caused by server
+  events (stagger/death/respawn) aren't counted.
+- Tests: 51 (11 new for stagger/death). Smoke test runs with 300 health and 0.5 s
+  respawn: 1–2 deaths and respawns per run, 0 corrections.
+
+Needs a hand playtest: respawn time, stagger length, whether light hits should stagger.
 
 ### 2026-10-07 (6): Attack playtest feedback
 
@@ -99,9 +117,8 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest right-click heavy and attack aim tracking.
+1. Hand-playtest death/respawn and heavy-hit stagger.
 2. Milestone 1, one session each:
-   - Death/respawn and hit reactions (stagger on heavy hits?).
    - Light attack combo chain (New World-style 3-hit string)?
    - Block (stamina drain on hit).
    - One enemy type with server-driven AI.

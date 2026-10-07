@@ -33,6 +33,7 @@ var max_air_dodges := 0
 
 # Health
 var max_health := 0.0
+var respawn_ticks := 0
 
 # Attacks (equipped weapon)
 var light_attack: AttackParams
@@ -76,6 +77,7 @@ static func from_tuning() -> PlayerParams:
 	p.max_air_dodges = Tuning.get_value("combat", "dodge", "air_dodges")
 
 	p.max_health = Tuning.get_value("combat", "health", "max")
+	p.respawn_ticks = roundi(Tuning.get_value("combat", "death", "respawn_time") * tps)
 
 	# Only the sword exists so far; later this follows the equipped weapon.
 	var weapon := "weapon_sword"

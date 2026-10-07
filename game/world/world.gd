@@ -27,6 +27,8 @@ var _snapshot_interval := 3
 var _max_input_buffer := 8
 var _max_inputs_per_tick := 2
 var _hits := 0
+var _deaths := 0
+var _respawns := 0
 
 # Client
 var _hud: Hud
@@ -40,6 +42,8 @@ var _snapshots_received := 0
 var _was_captured := false
 var _hits_landed := 0
 var _hits_taken := 0
+## Local time (msec) when the local player respawns, or -1 when alive.
+var _respawn_at_msec := -1
 var _bot := false
 var _bot_last_phase := 0.0
 var _verbose := false
@@ -101,6 +105,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _server_tick(delta: float) -> void:
 	_tick += 1
 	for player: Player in _players.get_children():
+		if player.state.dead and _tick >= player.respawn_at_tick:
+			_respawn(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
@@ -165,7 +171,9 @@ func _on_peer_left(peer_id: int) -> void:
 func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
 	for target: Player in _players.get_children():
-		if target == attacker or attacker.attack_results.get(target.peer_id, false):
+		if target == attacker or target.state.dead:
+			continue
+		if attacker.attack_results.get(target.peer_id, false):
 			continue
 		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
 				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT):
@@ -176,14 +184,31 @@ func _on_attack_stepped(attacker: Player) -> void:
 				_send_hit(attacker, target, 0.0, HIT_EVADED)
 			continue
 		attacker.attack_results[target.peer_id] = true
-		target.health -= attack.damage
+		target.health = maxf(0.0, target.health - attack.damage)
 		var result := HIT_DAMAGED
 		if target.health <= 0.0:
 			result = HIT_DEFEATED
-			# Placeholder until death and respawn exist: refill and keep fighting.
-			target.health = target.params.max_health
+			target.state.kill()
+			target.respawn_at_tick = _tick + target.params.respawn_ticks
+			_deaths += 1
+		else:
+			target.state.apply_stagger(attack.stagger_ticks)
 		_hits += 1
 		_send_hit(attacker, target, attack.damage, result)
+
+
+## Server: brings a dead player back at a random spawn point with full health.
+## The point must be exactly on the ground: the body's on-floor flag isn't synced,
+## so a mid-air teleport makes the client's prediction disagree for a tick.
+func _respawn(player: Player) -> void:
+	var angle := randf() * TAU
+	player.global_position = Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS
+	player.velocity = Vector3.ZERO
+	player.health = player.params.max_health
+	player.state.revive(player.params)
+	player.respawn_at_tick = -1
+	_respawns += 1
+	print("[server] peer %d respawned" % player.peer_id)
 
 
 func _send_hit(attacker: Player, target: Player, damage: float, result: int) -> void:
@@ -308,6 +333,9 @@ func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) 
 			_hits_landed += 1
 		if target_id == my_id:
 			_hits_taken += 1
+			if result == HIT_DEFEATED and _local_player:
+				var respawn_seconds := _local_player.params.respawn_ticks / float(Engine.physics_ticks_per_second)
+				_respawn_at_msec = Time.get_ticks_msec() + roundi(respawn_seconds * 1000.0)
 	var target := _players.get_node_or_null(str(target_id)) as Player
 	if target:
 		target.show_hit(damage, result)
@@ -354,6 +382,11 @@ func _update_hud() -> void:
 	if _local_player:
 		_hud.set_health(_local_player.health, _local_player.params.max_health)
 		_hud.set_stamina(_local_player.state.stamina, _local_player.params.max_stamina)
+		var banner := ""
+		if _local_player.state.dead:
+			var seconds_left := maxi(0, ceili((_respawn_at_msec - Time.get_ticks_msec()) / 1000.0))
+			banner = "Defeated\nRespawning in %d" % seconds_left
+		_hud.set_banner(banner)
 
 
 ## Debug: with --screenshot-dir=PATH, saves this game window's image every 0.25 s
@@ -381,8 +414,8 @@ func _describe_players() -> String:
 ## Printed when the process exits via --quit-after; used by tools/smoke_test.ps1.
 func print_summary() -> void:
 	if multiplayer.is_server():
-		print("SUMMARY server players=%d ticks=%d hits=%d" % [
-				_players.get_child_count(), _tick, _hits])
+		print("SUMMARY server players=%d ticks=%d hits=%d deaths=%d respawns=%d" % [
+				_players.get_child_count(), _tick, _hits, _deaths, _respawns])
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d" % [

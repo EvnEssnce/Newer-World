@@ -1,6 +1,6 @@
 # Automated networking check: a headless server and two headless bot clients run
-# for a few seconds: each client must see the other move, dodge, attack, and the
-# server must resolve hits, all without prediction corrections.
+# for a few seconds: each client must see the other move, dodge, attack; the server
+# must resolve hits, a death and a respawn; no unexpected prediction corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
 param([int]$Port = 24599, [int]$Seconds = 8)
@@ -16,11 +16,15 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
         -RedirectStandardError (Join-Path $logDir "$name.err.log")
 }
 
-$server = Start-Godot 'server' @('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)")
+# Low health and a quick respawn so the bots die and come back within the run.
+# Every process gets the same overrides, as prediction requires.
+$tune = @('--tune=combat/health/max=300', '--tune=combat/death/respawn_time=0.5')
+
+$server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
 $clients = @(
-    (Start-Godot 'client1' @('--bot', "--address=127.0.0.1:$Port", "--quit-after=$Seconds")),
-    (Start-Godot 'client2' @('--bot', "--address=127.0.0.1:$Port", "--quit-after=$Seconds"))
+    (Start-Godot 'client1' (@('--bot', "--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)),
+    (Start-Godot 'client2' (@('--bot', "--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune))
 )
 $clients | ForEach-Object { $_.WaitForExit() }
 # The server quits on its own shortly after the clients, printing its summary.
@@ -28,9 +32,12 @@ if (-not $server.WaitForExit(10000)) { Stop-Process -Id $server.Id -Force }
 
 $failed = $false
 # The bots fight for the first 3.5 s of every 6; the server must resolve real hits.
-$serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+)'
+$serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+)'
 if (-not $serverSummary -or [int]$serverSummary.Matches[0].Groups[1].Value -lt 1) {
     Write-Host "FAIL server: no hits resolved ($($serverSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$serverSummary.Matches[0].Groups[2].Value -lt 1 -or [int]$serverSummary.Matches[0].Groups[3].Value -lt 1) {
+    Write-Host "FAIL server: no death and respawn ($($serverSummary.Line))" -ForegroundColor Red
     $failed = $true
 } else {
     Write-Host "PASS server: $($serverSummary.Line)" -ForegroundColor Green

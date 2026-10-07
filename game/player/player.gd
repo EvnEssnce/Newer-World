@@ -31,7 +31,10 @@ const REMOTE_COLOR := Color(0.95, 0.55, 0.2)
 ## Body color while i-frames are active, so they're visible while tuning.
 const INVULNERABLE_COLOR := Color(0.95, 0.95, 1.0)
 const HIT_COLOR := Color(1.0, 0.15, 0.1)
+const DEAD_COLOR := Color(0.35, 0.35, 0.38)
 const HIT_FLASH_MS := 150
+## Body tilt (radians, backward) while staggered.
+const STAGGER_TILT := 0.4
 ## Sword pivot rotation (x = pitch, y = sweep) at rest and at each swing's extremes.
 const SWORD_IDLE := Vector2(-0.7, 0.0)
 const LIGHT_WOUND := Vector2(0.0, -1.4)
@@ -58,6 +61,8 @@ var last_processed_seq := 0
 ## Targets the current attack has already been resolved against:
 ## true = hit (can't be hit again), false = evaded so far (can still be hit).
 var attack_results: Dictionary[int, bool] = {}
+## Server tick at which a dead player respawns.
+var respawn_at_tick := -1
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -68,6 +73,7 @@ var _pending_inputs: Array[Array] = []
 var _predictions: Dictionary[int, Array] = {}  # seq -> [position, PlayerState] after that input
 var _latest_ack: Array = []  # [pos, vel, seq, state array] from the newest snapshot
 var _last_ack_seq := 0
+var _reconciled_seq := 0
 var _camera_pivot: Node3D
 var _spring_arm: SpringArm3D
 
@@ -108,8 +114,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	if is_local:
-		_show(state.yaw, state.dodge_progress(params), state.is_invulnerable(params),
-				state.attack_type, state.attack_tick)
+		_show(state, state.yaw, state.dodge_progress(params), state.attack_tick)
 
 
 func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> void:
@@ -195,17 +200,29 @@ func _reconcile(delta: float) -> void:
 	var server_state := PlayerState.from_array(_latest_ack[3])
 	_latest_ack = []
 	var predicted: Variant = _predictions.get(ack_seq)
+	# Keep the entry for ack_seq itself: the next snapshot may acknowledge the same
+	# input again (no new input processed in between) and needs it to compare.
 	while not _pending_inputs.is_empty() and _pending_inputs[0][0] <= ack_seq:
-		_predictions.erase(_pending_inputs.pop_front()[0])
+		var seq: int = _pending_inputs.pop_front()[0]
+		if seq != ack_seq:
+			_predictions.erase(seq)
+	if _reconciled_seq != ack_seq:
+		_predictions.erase(_reconciled_seq)
+		_reconciled_seq = ack_seq
 	if (predicted != null and server_pos.distance_to(predicted[0]) < RECONCILE_TOLERANCE
 			and server_state.matches(predicted[1])):
 		return
 
-	if ack_seq > 0:  # seq 0 is just the initial sync to the spawn point
+	# Seq 0 is just the initial sync to the spawn point, and server events (stagger,
+	# death, respawn) can't be predicted; only other disagreements are real errors.
+	var expected: bool = ack_seq == 0 or (predicted != null
+			and server_state.server_events != predicted[1].server_events)
+	if not expected:
 		corrections += 1
 	global_position = server_pos
 	velocity = server_vel
 	state = server_state
+	_predictions[ack_seq] = [server_pos, server_state.copy()]
 	for input in _pending_inputs:
 		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta)
 		_predictions[input[0]] = [global_position, state.copy()]
@@ -281,8 +298,7 @@ func interpolate(render_time: float) -> void:
 			attack_tick = lerpf(from_state.attack_tick, to_state.attack_tick, weight)
 	distance_seen += global_position.distance_to(new_pos)
 	global_position = new_pos
-	_show(yaw, dodge_progress, from_state.is_invulnerable(params), from_state.attack_type,
-			attack_tick)
+	_show(from_state, yaw, dodge_progress, attack_tick)
 
 
 # --- Client feedback ---
@@ -325,17 +341,29 @@ func show_hit(damage: float, result: int) -> void:
 func _update_label() -> void:
 	# Your own health is on the HUD; a label over your head just covers others'.
 	_name_label.visible = not is_local
-	_name_label.text = "Player %d\n%d" % [peer_id % 10000, ceili(health)]
+	var status := "Defeated" if health <= 0.0 else str(ceili(health))
+	_name_label.text = "Player %d\n%s" % [peer_id % 10000, status]
 
 
-## Applies facing, roll, sword swing, hitbox and color. Client only.
-## attack_tick is fractional for smooth remote swings; -1 when not attacking.
-func _show(yaw: float, dodge_progress: float, invulnerable: bool, attack_type: int,
-		attack_tick: float) -> void:
+## Applies facing, roll, stagger/death pose, sword swing, hitbox and color.
+## Client only. view supplies the discrete state (attack type, dead, staggered,
+## i-frames); yaw, dodge_progress and attack_tick may be interpolated, and
+## attack_tick is -1 when not attacking.
+func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: float) -> void:
 	_model.rotation.y = yaw
-	# A full forward somersault over the roll.
-	_roll_pivot.rotation.x = 0.0 if dodge_progress < 0.0 else -TAU * dodge_progress
+	if view.dead:
+		_roll_pivot.rotation.x = -PI / 2.0  # face down on the ground
+		_roll_pivot.position.y = BODY_RADIUS
+	else:
+		_roll_pivot.position.y = BODY_HEIGHT / 2.0
+		if dodge_progress >= 0.0:
+			_roll_pivot.rotation.x = -TAU * dodge_progress  # a full forward somersault
+		elif view.is_staggered():
+			_roll_pivot.rotation.x = STAGGER_TILT
+		else:
+			_roll_pivot.rotation.x = 0.0
 
+	var attack_type := view.attack_type
 	var attack := params.attack(attack_type) if attack_tick >= 0.0 else null
 	var pose := _sword_pose(attack, attack_type, attack_tick)
 	_sword_pivot.rotation = Vector3(pose.x, pose.y, 0.0)
@@ -349,9 +377,11 @@ func _show(yaw: float, dodge_progress: float, invulnerable: bool, attack_type: i
 				and attack_tick < attack.windup_ticks + attack.active_ticks)
 		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
 
-	if Time.get_ticks_msec() < _hit_flash_until:
+	if view.dead:
+		_material.albedo_color = DEAD_COLOR
+	elif Time.get_ticks_msec() < _hit_flash_until:
 		_material.albedo_color = HIT_COLOR
-	elif invulnerable:
+	elif view.is_invulnerable(params):
 		_material.albedo_color = INVULNERABLE_COLOR
 	else:
 		_material.albedo_color = _base_color

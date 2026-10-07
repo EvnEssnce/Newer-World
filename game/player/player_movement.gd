@@ -10,6 +10,9 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		aim_yaw: float, params: PlayerParams, delta: float) -> void:
 	var on_floor := body.is_on_floor()
 	state.step(move, buttons, aim_yaw, on_floor, params, delta)
+	if not state.can_act():
+		move = Vector2.ZERO  # staggered or dead: slide to a stop, can't jump
+		buttons = 0
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as

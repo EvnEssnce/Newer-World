@@ -1,11 +1,16 @@
 class_name PlayerState
 extends RefCounted
 ## A player's simulated state besides position and velocity: stamina, dodge,
-## attacks, facing. step() advances it one tick from one input. No physics here,
-## so it can be unit tested (tests/test_player_state.gd, tests/test_attacks.gd).
+## attacks, stagger, death, facing. step() advances it one tick from one input.
+## No physics here, so it can be unit tested (tests/test_player_state.gd,
+## tests/test_attacks.gd, tests/test_death_stagger.gd).
 ##
 ## The server sends this in every snapshot, and the client restores it when it
 ## reconciles, so everything that affects the simulation must live here.
+##
+## Stagger, death and respawn are applied by the server outside step() (the
+## client can't predict being hit). Each one bumps server_events, so the client
+## knows the resulting correction was expected.
 
 ## Jump is set while held; dodge and attacks only on the tick they're pressed.
 const BUTTON_JUMP := 1
@@ -38,6 +43,12 @@ var queued_attack := ATTACK_NONE
 var queued_attack_ticks := 0
 ## Facing around Y. 0 faces -Z.
 var yaw := 0.0
+## Ticks left in a stagger (interrupted; can't act). Applied by the server.
+var stagger_ticks := 0
+## Down at 0 health: can't act and can't be hit. Applied and cleared by the server.
+var dead := false
+## Counts server-applied changes (stagger, death, respawn).
+var server_events := 0
 
 
 ## Advances one tick. move is the world-space XZ input (length <= 1); aim_yaw is
@@ -54,7 +65,12 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 		attack_tick += 1
 		if attack_tick >= params.attack(attack_type).total_ticks():
 			_end_attack()
+	if stagger_ticks > 0:
+		stagger_ticks -= 1
+	if dead:
+		return
 
+	# Presses while staggered stay buffered and fire when the stagger ends.
 	_handle_dodge_input(move, buttons, on_floor, params)
 	_handle_attack_input(buttons, aim_yaw, params)
 	if attack_tick > 0:
@@ -65,8 +81,47 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 			stamina_regen_wait -= 1
 		else:
 			stamina = minf(params.max_stamina, stamina + params.stamina_regen_per_tick)
-		if attack_tick < 0 and move.length_squared() > 0.01:
+		if attack_tick < 0 and can_act() and move.length_squared() > 0.01:
 			yaw = rotate_toward(yaw, yaw_for_direction(move), params.turn_speed * delta)
+
+
+## False while staggered or dead: no moving, dodging, attacking or jumping.
+func can_act() -> bool:
+	return not dead and stagger_ticks == 0
+
+
+func is_staggered() -> bool:
+	return stagger_ticks > 0
+
+
+# --- Server-applied events ---
+
+## Interrupts the current attack or dodge and stops the player acting for ticks.
+func apply_stagger(ticks: int) -> void:
+	if ticks <= 0 or dead:
+		return
+	_end_attack()
+	queued_attack = ATTACK_NONE
+	dodge_tick = -1
+	stagger_ticks = maxi(stagger_ticks, ticks)
+	server_events += 1
+
+
+func kill() -> void:
+	dead = true
+	_end_attack()
+	queued_attack = ATTACK_NONE
+	dodge_tick = -1
+	dodge_buffer = 0
+	stagger_ticks = 0
+	server_events += 1
+
+
+func revive(params: PlayerParams) -> void:
+	dead = false
+	stamina = params.max_stamina
+	stamina_regen_wait = 0
+	server_events += 1
 
 
 # --- Dodge ---
@@ -75,7 +130,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 ## or with an air dodge left, and not mid-attack (except during recovery, which
 ## the dodge cancels).
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
-	return (dodge_tick < 0 and stamina >= params.dodge_stamina_cost
+	return (can_act() and dodge_tick < 0 and stamina >= params.dodge_stamina_cost
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
 
@@ -120,7 +175,7 @@ func _handle_dodge_input(move: Vector2, buttons: int, on_floor: bool, params: Pl
 # --- Attacks ---
 
 func can_attack() -> bool:
-	return dodge_tick < 0 and attack_tick < 0
+	return can_act() and dodge_tick < 0 and attack_tick < 0
 
 
 func is_attacking() -> bool:
@@ -180,7 +235,8 @@ static func yaw_for_direction(direction: Vector2) -> float:
 
 func to_array() -> Array:
 	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, dodge_buffer, yaw,
-			air_dodges_used, attack_type, attack_tick, queued_attack, queued_attack_ticks]
+			air_dodges_used, attack_type, attack_tick, queued_attack, queued_attack_ticks,
+			stagger_ticks, dead, server_events]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -196,6 +252,9 @@ static func from_array(data: Array) -> PlayerState:
 	s.attack_tick = data[8]
 	s.queued_attack = data[9]
 	s.queued_attack_ticks = data[10]
+	s.stagger_ticks = data[11]
+	s.dead = data[12]
+	s.server_events = data[13]
 	return s
 
 
@@ -213,4 +272,7 @@ func matches(other: PlayerState) -> bool:
 			and attack_type == other.attack_type
 			and attack_tick == other.attack_tick
 			and queued_attack == other.queued_attack
-			and queued_attack_ticks == other.queued_attack_ticks)
+			and queued_attack_ticks == other.queued_attack_ticks
+			and stagger_ticks == other.stagger_ticks
+			and dead == other.dead
+			and server_events == other.server_events)
