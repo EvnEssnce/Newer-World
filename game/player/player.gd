@@ -72,8 +72,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	if is_local:
-		_show(state.yaw, state.dodge_progress(params), state.backstep,
-				state.is_invulnerable(params))
+		_show(state.yaw, state.dodge_progress(params), state.is_invulnerable(params))
 
 
 func _simulate(move: Vector2, buttons: int, delta: float) -> void:
@@ -86,11 +85,10 @@ func _simulate(move: Vector2, buttons: int, delta: float) -> void:
 
 
 ## Applies the facing, roll and i-frame look. Client only.
-func _show(yaw: float, dodge_progress: float, is_backstep: bool, invulnerable: bool) -> void:
+func _show(yaw: float, dodge_progress: float, invulnerable: bool) -> void:
 	_model.rotation.y = yaw
-	# A full forward somersault over the roll (backward for a backstep).
-	var roll := 0.0 if dodge_progress < 0.0 else TAU * dodge_progress
-	_roll_pivot.rotation.x = roll if is_backstep else -roll
+	# A full forward somersault over the roll.
+	_roll_pivot.rotation.x = 0.0 if dodge_progress < 0.0 else -TAU * dodge_progress
 	_material.albedo_color = INVULNERABLE_COLOR if invulnerable else _base_color
 
 
@@ -242,4 +240,4 @@ func interpolate(render_time: float) -> void:
 			progress = lerpf(progress, to_state.dodge_progress(params), weight)
 	distance_seen += global_position.distance_to(new_pos)
 	global_position = new_pos
-	_show(yaw, progress, from_state.backstep, from_state.is_invulnerable(params))
+	_show(yaw, progress, from_state.is_invulnerable(params))

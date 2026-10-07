@@ -149,16 +149,20 @@ func test_stamina_regen_caps_at_max() -> void:
 func test_dodge_goes_in_move_direction_and_faces_it() -> void:
 	_step(DODGE, Vector2.RIGHT)
 	assert_eq(state.dodge_dir, Vector2.RIGHT)
-	assert_false(state.backstep)
 	assert_almost(state.yaw, PlayerState.yaw_for_direction(Vector2.RIGHT))
 
 
-func test_no_input_backsteps_without_turning() -> void:
+func test_no_input_rolls_forward() -> void:
 	state.yaw = 0.0  # facing -Z
 	_step(DODGE, Vector2.ZERO)
-	assert_true(state.backstep)
-	assert_true(state.dodge_dir.is_equal_approx(Vector2(0.0, 1.0)), "moves toward +Z")
+	assert_true(state.dodge_dir.is_equal_approx(Vector2(0.0, -1.0)), "moves toward -Z")
 	assert_almost(state.yaw, 0.0)
+
+
+func test_no_input_rolls_whichever_way_you_face() -> void:
+	state.yaw = PlayerState.yaw_for_direction(Vector2(1.0, 1.0).normalized())
+	_step(DODGE, Vector2.ZERO)
+	assert_true(state.dodge_dir.is_equal_approx(Vector2(1.0, 1.0).normalized()))
 
 
 func test_network_round_trip_keeps_state() -> void:
@@ -167,5 +171,4 @@ func test_network_round_trip_keeps_state() -> void:
 	var copy := PlayerState.from_array(state.to_array())
 	assert_true(copy.matches(state))
 	assert_eq(copy.dodge_dir, state.dodge_dir)
-	assert_eq(copy.backstep, state.backstep)
 	assert_almost(copy.yaw, state.yaw)

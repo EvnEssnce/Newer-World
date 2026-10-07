@@ -18,8 +18,6 @@ var stamina_regen_wait := 0
 var dodge_tick := -1
 ## World-space XZ direction of the current dodge, normalized.
 var dodge_dir := Vector2.ZERO
-## True if the current dodge is a backstep (dodged with no movement input).
-var backstep := false
 ## Ticks a dodge press stays queued while a dodge isn't possible.
 var dodge_buffer := 0
 ## Dodges started since last on the floor.
@@ -78,10 +76,9 @@ func _start_dodge(move: Vector2, params: PlayerParams) -> void:
 	dodge_buffer = 0
 	stamina -= params.dodge_stamina_cost
 	stamina_regen_wait = params.stamina_regen_delay_ticks
-	backstep = move.length_squared() <= 0.01
-	if backstep:
-		# Straight back from where the character faces, without turning.
-		dodge_dir = Vector2(sin(yaw), cos(yaw))
+	if move.length_squared() <= 0.01:
+		# No movement input: roll the way the character faces.
+		dodge_dir = Vector2(-sin(yaw), -cos(yaw))
 	else:
 		dodge_dir = move.normalized()
 		yaw = yaw_for_direction(dodge_dir)
@@ -96,8 +93,7 @@ static func yaw_for_direction(direction: Vector2) -> float:
 # --- Network / reconciliation ---
 
 func to_array() -> Array:
-	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, backstep, dodge_buffer, yaw,
-			air_dodges_used]
+	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, dodge_buffer, yaw, air_dodges_used]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -106,10 +102,9 @@ static func from_array(data: Array) -> PlayerState:
 	s.stamina_regen_wait = data[1]
 	s.dodge_tick = data[2]
 	s.dodge_dir = data[3]
-	s.backstep = data[4]
-	s.dodge_buffer = data[5]
-	s.yaw = data[6]
-	s.air_dodges_used = data[7]
+	s.dodge_buffer = data[4]
+	s.yaw = data[5]
+	s.air_dodges_used = data[6]
 	return s
 
 

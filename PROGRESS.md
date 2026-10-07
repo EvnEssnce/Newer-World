@@ -7,6 +7,11 @@ attacks, block, one enemy.
 
 ## Session log
 
+### 2026-10-07 (4): Neutral dodge rolls forward
+
+- Dodging with no movement input now rolls forward (the way the character faces)
+  instead of backstepping. Backstep removed entirely; every roll is a forward roll.
+
 ### 2026-10-07 (3): Dodge playtest feedback, air dodge
 
 Playtest verdict (developer): roll distance/speed, recovery into movement, time between
@@ -28,7 +33,7 @@ Needs a hand playtest: air dodge feel, and whether 1 air dodge per jump is right
 
 Done:
 - Dodge on **Shift**: rolls in the movement direction, or backsteps (straight back,
-  without turning) with no movement input. Costs stamina; can't dodge in the air or with
+  without turning) with no movement input (changed to forward in session 4). Costs stamina; can't dodge in the air or with
   too little stamina. Presses up to `buffer` seconds early (mid-roll, or just before
   landing) still fire.
 - I-frames for a window inside the roll (`PlayerState.is_invulnerable`). Nothing can hit
