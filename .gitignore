@@ -18,3 +18,6 @@ mono_crash.*.json
 Thumbs.db
 *.tmp
 .vscode/
+
+# Claude Code agent worktrees (temporary copies of the repo)
+.claude/worktrees/
