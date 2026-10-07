@@ -28,10 +28,10 @@ Developer decisions after the first sim run:
 - Removed the Uncommon tier, so rarities are Common 0 / Rare 1 / Epic 2 / Legendary 3
   bonus stats. Weapons, hands and chest have 3+ eligible affixes, so their Legendaries
   are full. **Still open:** head, legs and feet only have 2 eligible affixes, so their
-  Legendaries roll 2 (same as Epic). Uncommon's weight wasn't redistributed: Common is
-  now ~81% of drops, Rare ~1 in 12 kills, Epic ~1 in 34, Legendary ~1 in 248.
-- Affix names: Blaze (damage), Sear (crit), Amber (max health), Ferocity (max stamina),
-  Rage (stamina regen), Hearth (block stamina cost). Ids in `affixes.cfg` unchanged.
+  Legendaries roll 2 (same as Epic).
+- Husk rarity weights set to Common 78 / Rare 18 / Epic 3.3 / Legendary 0.7 (% of drops).
+- Affix names: Blaze (damage), Sear (crit), Hearth (max health), Ferocity (max stamina),
+  Rage (stamina regen), Scorch (block stamina cost). Ids in `affixes.cfg` unchanged.
 
 ### 2026-10-07 (9): First enemy (Husk)
 
