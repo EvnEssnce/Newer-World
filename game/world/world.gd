@@ -12,6 +12,9 @@ extends Node3D
 const HIT_DAMAGED := 0
 const HIT_EVADED := 1
 const HIT_DEFEATED := 2
+const HIT_BLOCKED := 3
+const HIT_GUARD_BROKEN := 4
+const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const HUD_SCENE := preload("res://ui/hud.tscn")
@@ -29,6 +32,8 @@ var _max_inputs_per_tick := 2
 var _hits := 0
 var _deaths := 0
 var _respawns := 0
+var _blocks := 0
+var _guard_breaks := 0
 
 # Client
 var _hud: Hud
@@ -37,9 +42,9 @@ var _render_time := -1.0
 var _interpolation_delay := 0.1
 var _input_redundancy := 3
 var _snapshots_received := 0
-## The click that captures the mouse mustn't also attack, so attacks need the
-## mouse to have been captured on the previous tick already.
-var _was_captured := false
+## The click that captures the mouse mustn't also attack: after capturing, the
+## attack button has to be released once before it counts.
+var _attack_blocked := true
 var _hits_landed := 0
 var _hits_taken := 0
 ## Local time (msec) when the local player respawns, or -1 when alive.
@@ -184,17 +189,27 @@ func _on_attack_stepped(attacker: Player) -> void:
 				_send_hit(attacker, target, 0.0, HIT_EVADED)
 			continue
 		attacker.attack_results[target.peer_id] = true
-		target.health = maxf(0.0, target.health - attack.damage)
+		var damage := attack.damage
 		var result := HIT_DAMAGED
+		if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
+				target.state.yaw, attacker.global_position, target.params.block_arc):
+			var broke := target.state.take_blocked_hit(attack, target.params)
+			damage *= target.params.block_damage_taken
+			result = HIT_GUARD_BROKEN if broke else HIT_BLOCKED
+			if broke:
+				_guard_breaks += 1
+			else:
+				_blocks += 1
+		target.health = maxf(0.0, target.health - damage)
 		if target.health <= 0.0:
 			result = HIT_DEFEATED
 			target.state.kill()
 			target.respawn_at_tick = _tick + target.params.respawn_ticks
 			_deaths += 1
-		else:
+		elif result == HIT_DAMAGED:
 			target.state.apply_stagger(attack.stagger_ticks)
 		_hits += 1
-		_send_hit(attacker, target, attack.damage, result)
+		_send_hit(attacker, target, damage, result)
 
 
 ## Server: brings a dead player back at a random spawn point with full health.
@@ -214,7 +229,7 @@ func _respawn(player: Player) -> void:
 func _send_hit(attacker: Player, target: Player, damage: float, result: int) -> void:
 	if _verbose:
 		print("[server] %d -> %d: %s %d" % [attacker.peer_id, target.peer_id,
-				["hit", "evaded", "defeated"][result], damage])
+				HIT_NAMES[result], damage])
 	for peer_id in _connected_player_ids():
 		_receive_hit.rpc_id(peer_id, attacker.peer_id, target.peer_id, damage, result)
 
@@ -237,20 +252,23 @@ func _client_tick(delta: float) -> void:
 		if Input.is_action_just_pressed(&"dodge"):
 			buttons |= PlayerState.BUTTON_DODGE
 		var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-		if captured and _was_captured:
-			if Input.is_action_just_pressed(&"attack_light"):
-				buttons |= PlayerState.BUTTON_LIGHT
-			if Input.is_action_just_pressed(&"attack_heavy"):
-				buttons |= PlayerState.BUTTON_HEAVY
-		_was_captured = captured
+		var attack_held := Input.is_action_pressed(&"attack")
+		if not captured or not attack_held:
+			_attack_blocked = not captured
+		if captured and attack_held and not _attack_blocked:
+			buttons |= PlayerState.BUTTON_ATTACK
+		if captured and Input.is_action_pressed(&"block"):
+			buttons |= PlayerState.BUTTON_BLOCK
 	var inputs := _local_player.client_predict(move, buttons, aim_yaw, delta, _input_redundancy)
 	_submit_inputs.rpc_id(1, inputs)
 
 
 ## Bot input for testing without a second person. Repeats every 6 s:
-## 0–3.5 s: walk to the nearest player. When in reach (until 2.8 s), light attack
-## every 0.4 s, and heavy attack at 2.0 s.
-## 3.5–6 s: walk in circles; jump at 3.5, air dodge at 3.65, ground dodge at 5.0.
+## 0–4 s: walk to the nearest player and fight in two 2 s turns; the bot with the
+## lower peer id attacks in the first, the other in the second. On its turn a
+## bot holds for a heavy, then taps two lights; off its turn it holds block.
+## 4–6 s: walk in circles; jump at 4.6 (after the last attack has finished),
+## air dodge at 4.75, ground dodge at 5.5.
 ## Fighting comes first because players spawn close together.
 ## Returns [move, buttons, aim_yaw].
 func _bot_input() -> Array:
@@ -260,29 +278,33 @@ func _bot_input() -> Array:
 	var move := Vector2.ZERO
 	var buttons := 0
 	var aim_yaw := 0.0
-	if phase >= 3.5:
+	if phase >= 4.0:
 		var circle_t := t + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(circle_t * 0.8), sin(circle_t * 0.8))
-		if phase < 3.55:
+		if phase >= 4.6 and phase < 4.65:
 			buttons |= PlayerState.BUTTON_JUMP
-		if crossed.call(3.65) or crossed.call(5.0):
+		if crossed.call(4.75) or crossed.call(5.5):
 			buttons |= PlayerState.BUTTON_DODGE
 	else:
 		var target := _nearest_remote_player()
-		var in_reach := false
 		if target:
 			var to := target.global_position - _local_player.global_position
 			var flat := Vector2(to.x, to.z)
 			aim_yaw = PlayerState.yaw_for_direction(flat)
-			in_reach = flat.length() <= BOT_ATTACK_DISTANCE + 0.4
 			if flat.length() > BOT_ATTACK_DISTANCE:
 				move = flat.normalized()
-		# Stop swinging by 2.8 s so the last attack is over before the 3.5 s jump.
-		if in_reach and phase < 2.8:
-			if crossed.call(2.0):
-				buttons |= PlayerState.BUTTON_HEAVY
-			elif fmod(phase, 0.4) < fmod(_bot_last_phase, 0.4):
-				buttons |= PlayerState.BUTTON_LIGHT
+			var first_turn := multiplayer.get_unique_id() < target.peer_id
+			var turn_start := 0.0 if first_turn else 2.0
+			var turn_time := phase - turn_start
+			if turn_time >= 0.0 and turn_time < 2.0:
+				if turn_time < 0.3:
+					buttons |= PlayerState.BUTTON_ATTACK  # held 0.3 s: heavy
+				elif crossed.call(turn_start + 1.35) or crossed.call(turn_start + 1.75):
+					buttons |= PlayerState.BUTTON_ATTACK  # one tick: light on release
+			else:
+				# Guard up for the whole off turn: other players are drawn ~0.1 s in
+				# the past, too late to react to a light attack's windup.
+				buttons |= PlayerState.BUTTON_BLOCK
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 
@@ -328,7 +350,7 @@ func _receive_snapshot(tick: int, states: Array) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) -> void:
 	var my_id := multiplayer.get_unique_id()
-	if result != HIT_EVADED:
+	if result in [HIT_DAMAGED, HIT_DEFEATED, HIT_GUARD_BROKEN]:
 		if attacker_id == my_id:
 			_hits_landed += 1
 		if target_id == my_id:
@@ -414,8 +436,8 @@ func _describe_players() -> String:
 ## Printed when the process exits via --quit-after; used by tools/smoke_test.ps1.
 func print_summary() -> void:
 	if multiplayer.is_server():
-		print("SUMMARY server players=%d ticks=%d hits=%d deaths=%d respawns=%d" % [
-				_players.get_child_count(), _tick, _hits, _deaths, _respawns])
+		print("SUMMARY server players=%d ticks=%d hits=%d deaths=%d respawns=%d blocks=%d guard_breaks=%d" % [
+				_players.get_child_count(), _tick, _hits, _deaths, _respawns, _blocks, _guard_breaks])
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d" % [

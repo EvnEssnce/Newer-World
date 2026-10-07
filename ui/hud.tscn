@@ -103,4 +103,4 @@ offset_bottom = -8.0
 grow_vertical = 0
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
-text = "WASD move   Space jump   Shift dodge   Left click light attack   Right click heavy attack   F3 hitboxes   Esc frees the mouse"
+text = "WASD move   Space jump   Shift dodge   Left click: tap = light, hold = heavy   Hold right click: block   F3 hitboxes   Esc frees the mouse"

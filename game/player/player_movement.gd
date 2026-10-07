@@ -8,7 +8,7 @@ class_name PlayerMovement
 
 static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, buttons: int,
 		aim_yaw: float, params: PlayerParams, delta: float) -> void:
-	var on_floor := body.is_on_floor()
+	var on_floor := state.on_floor
 	state.step(move, buttons, aim_yaw, on_floor, params, delta)
 	if not state.can_act():
 		move = Vector2.ZERO  # staggered or dead: slide to a stop, can't jump
@@ -24,6 +24,8 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		var attack := state.current_attack(params)
 		if attack:
 			speed *= attack.move_multiplier
+		elif state.blocking:
+			speed *= params.block_move_multiplier
 		var target := Vector3(move.x, 0.0, move.y) * speed
 		var acceleration := params.air_acceleration
 		if on_floor:
@@ -40,3 +42,4 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 
 	body.velocity = Vector3(horizontal.x, vertical, horizontal.z)
 	body.move_and_slide()
+	state.on_floor = body.is_on_floor()

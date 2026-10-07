@@ -2,10 +2,35 @@
 
 ## Current milestone
 
-**1. Networked combat slice.** Movement, stamina, dodge, sword attacks, stagger, death
-and respawn are networked. Next up: block, one enemy.
+**1. Networked combat slice.** Movement, stamina, dodge, sword attacks, block, stagger,
+death and respawn are networked. Next up: one enemy type.
 
 ## Session log
+
+### 2026-10-07 (8): Block
+
+Controls changed (developer's choice, New World layout): **tap left click = light,
+hold left click = heavy, hold right click = block.**
+
+Done:
+- Block: frontal arc (120°) blocks hits; blocked hits cost stamina
+  (`block_stamina_damage` per attack) instead of health. Slower movement and stamina
+  regen while blocking; the guard faces the camera. Attacking or rolling drops the
+  guard, and it comes back if right click is still held.
+- Guard break: heavy attacks always break a guard (`breaks_block`), and so does any hit
+  with more stamina damage than the blocker has. Guard break = 1.2 s stagger (raised
+  from 0.8: at 0.8 the stagger ended before the attacker could follow up after a heavy).
+- "Blocked" / "Guard broken!" labels; placeholder shield raises when blocking.
+- Fixed a real prediction bug: the client didn't restore the body's on-floor flag when
+  reconciling, so a correction that moved you into the air made the replay drift. The
+  flag is now part of `PlayerState`.
+- Bots take turns: one attacks (heavy, then two lights) while the other blocks. Smoke
+  test (now 12 s) requires blocks and guard breaks too. `--verbose` logs unexpected
+  corrections and dropped inputs.
+- Tests: 65.
+
+Needs a hand playtest: block feel, guard break length, stamina cost of blocked hits,
+and whether heavies should always break guard.
 
 ### 2026-10-07 (7): Death, respawn and stagger
 
@@ -117,15 +142,19 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest death/respawn and heavy-hit stagger.
+1. Hand-playtest block and guard break.
 2. Milestone 1, one session each:
    - Light attack combo chain (New World-style 3-hit string)?
-   - Block (stamina drain on hit).
    - One enemy type with server-driven AI.
    - Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
      (download the packs yourself; Mixamo needs an Adobe login).
 
 ## Known issues / notes
+
+- About 1 smoke run in 20 shows a few (≤4) small unexpected corrections on flat ground
+  (~0.1 m sideways), not near any server event. Cause unconfirmed; the server logged no
+  dropped inputs in 12 runs that tried to catch it. Smoke test tolerates ≤5. Run with
+  `--verbose` to get the details if it shows up in play.
 
 - Movement and combat tuning are read separately by server and client. If they run
   different `data/*.cfg` files, prediction will constantly correct. Later: the server

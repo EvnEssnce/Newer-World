@@ -25,3 +25,13 @@ static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 			clampf(local_x, -half_width, half_width),
 			clampf(local_z, -attack.hitbox_range, 0.0))
 	return Vector2(local_x, local_z).distance_to(closest) <= target_radius
+
+
+## True if `other_pos` is within the `arc` (full width, radians) in front of a
+## player at `pos` facing `yaw`. Used for blocking: only frontal hits are blocked.
+static func is_in_front(pos: Vector3, yaw: float, other_pos: Vector3, arc: float) -> bool:
+	var to_other := Vector2(other_pos.x - pos.x, other_pos.z - pos.z)
+	if to_other.is_zero_approx():
+		return true  # standing inside each other: count it as in front
+	var forward := Vector2(-sin(yaw), -cos(yaw))
+	return absf(forward.angle_to(to_other)) <= arc / 2.0 + 0.0001

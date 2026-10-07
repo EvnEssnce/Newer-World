@@ -35,6 +35,10 @@ const DEAD_COLOR := Color(0.35, 0.35, 0.38)
 const HIT_FLASH_MS := 150
 ## Body tilt (radians, backward) while staggered.
 const STAGGER_TILT := 0.4
+## Shield pivot position/yaw at the left side, and raised in front while blocking.
+const SHIELD_REST := Vector3(-0.5, 0.0, 0.0)
+const SHIELD_REST_YAW := PI / 2.0
+const SHIELD_RAISED := Vector3(-0.1, 0.2, -0.5)
 ## Sword pivot rotation (x = pitch, y = sweep) at rest and at each swing's extremes.
 const SWORD_IDLE := Vector2(-0.7, 0.0)
 const LIGHT_WOUND := Vector2(0.0, -1.4)
@@ -44,6 +48,8 @@ const HEAVY_STRUCK := Vector2(-1.3, 0.0)
 
 ## Shows attack hitboxes on all players. Toggled with F3.
 static var show_hitboxes := false
+## --verbose: log dropped inputs (server) and unexpected corrections (client).
+static var verbose := LaunchArgs.has_flag("verbose")
 
 var peer_id := 0
 var is_local := false
@@ -80,6 +86,8 @@ var _spring_arm: SpringArm3D
 # Remote client
 var _snapshots: Array[Array] = []  # [server_time, pos, PlayerState]
 var distance_seen := 0.0
+## The state currently being drawn (remote players only); the test bot reads it.
+var view_state := PlayerState.new()
 
 var _material: StandardMaterial3D
 var _base_color := REMOTE_COLOR
@@ -89,6 +97,7 @@ var _hitbox_material: StandardMaterial3D
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
 @onready var _sword_pivot: Node3D = $Model/RollPivot/SwordPivot
+@onready var _shield_pivot: Node3D = $Model/RollPivot/ShieldPivot
 @onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
 @onready var _name_label: Label3D = $NameLabel
 
@@ -143,10 +152,14 @@ func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 		var aim_yaw: float = input[3]
 		if seq <= _last_queued_seq or not move.is_finite() or not is_finite(aim_yaw):
 			continue
+		if verbose and seq != _last_queued_seq + 1 and _last_queued_seq > 0:
+			print("[server] peer %d inputs %d-%d never arrived" % [peer_id, _last_queued_seq + 1, seq - 1])
 		_input_queue.append([seq, move.limit_length(1.0), input[2] & PlayerState.ALL_BUTTONS,
 				aim_yaw])
 		_last_queued_seq = seq
 	while _input_queue.size() > max_buffer:
+		if verbose:
+			print("[server] peer %d input queue full, dropped input %d" % [peer_id, _input_queue[0][0]])
 		_input_queue.pop_front()
 
 
@@ -219,9 +232,16 @@ func _reconcile(delta: float) -> void:
 			and server_state.server_events != predicted[1].server_events)
 	if not expected:
 		corrections += 1
+		if verbose:
+			print("[client] unexpected correction at seq %d: server %s, predicted %s\n  server state %s\n  predicted state %s" % [
+					ack_seq, server_pos, predicted[0] if predicted != null else "none",
+					server_state.to_array(), predicted[1].to_array() if predicted != null else "none"])
 	global_position = server_pos
 	velocity = server_vel
 	state = server_state
+	# The body's own floor flag also steers move_and_slide's floor snapping.
+	if state.on_floor and not is_on_floor():
+		apply_floor_snap()
 	_predictions[ack_seq] = [server_pos, server_state.copy()]
 	for input in _pending_inputs:
 		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta)
@@ -298,6 +318,7 @@ func interpolate(render_time: float) -> void:
 			attack_tick = lerpf(from_state.attack_tick, to_state.attack_tick, weight)
 	distance_seen += global_position.distance_to(new_pos)
 	global_position = new_pos
+	view_state = from_state
 	_show(from_state, yaw, dodge_progress, attack_tick)
 
 
@@ -322,13 +343,19 @@ func show_hit(damage: float, result: int) -> void:
 		World.HIT_EVADED:
 			label.text = "Evaded"
 			label.modulate = Color(0.75, 0.9, 1.0)
+		World.HIT_BLOCKED:
+			label.text = "Blocked" if damage <= 0.0 else "Blocked -%d" % damage
+			label.modulate = Color(0.8, 0.85, 0.9)
+		World.HIT_GUARD_BROKEN:
+			label.text = "Guard broken!" if damage <= 0.0 else "Guard broken! -%d" % damage
+			label.modulate = Color(1.0, 0.55, 0.15)
 		World.HIT_DEFEATED:
 			label.text = "-%d  Defeated!" % damage
 			label.modulate = Color(1.0, 0.3, 0.2)
 		_:
 			label.text = "-%d" % damage
 			label.modulate = Color(1.0, 0.85, 0.3)
-	if result != World.HIT_EVADED:
+	if result in [World.HIT_DAMAGED, World.HIT_DEFEATED, World.HIT_GUARD_BROKEN]:
 		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
 	add_child(label)
 	var tween := label.create_tween()
@@ -362,6 +389,9 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 			_roll_pivot.rotation.x = STAGGER_TILT
 		else:
 			_roll_pivot.rotation.x = 0.0
+
+	_shield_pivot.position = SHIELD_RAISED if view.blocking else SHIELD_REST
+	_shield_pivot.rotation.y = 0.0 if view.blocking else SHIELD_REST_YAW
 
 	var attack_type := view.attack_type
 	var attack := params.attack(attack_type) if attack_tick >= 0.0 else null

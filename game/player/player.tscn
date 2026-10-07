@@ -22,6 +22,14 @@ roughness = 0.35
 material = SubResource("StandardMaterial3D_sword")
 size = Vector3(0.07, 0.07, 1.0)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_shield"]
+albedo_color = Color(0.45, 0.32, 0.2, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_shield"]
+material = SubResource("StandardMaterial3D_shield")
+size = Vector3(0.65, 0.8, 0.08)
+
 [sub_resource type="BoxMesh" id="BoxMesh_hitbox"]
 resource_local_to_scene = true
 
@@ -52,6 +60,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.45, 0.25, -0.1)
 [node name="Sword" type="MeshInstance3D" parent="Model/RollPivot/SwordPivot"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.55)
 mesh = SubResource("BoxMesh_sword")
+
+[node name="ShieldPivot" type="Node3D" parent="Model/RollPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5, 0, 0)
+
+[node name="Shield" type="MeshInstance3D" parent="Model/RollPivot/ShieldPivot"]
+mesh = SubResource("BoxMesh_shield")
 
 [node name="HitboxDebug" type="MeshInstance3D" parent="Model"]
 visible = false

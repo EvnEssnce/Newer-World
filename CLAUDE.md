@@ -64,9 +64,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   channel 1): the last `input_redundancy` inputs, each
   `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
-  `PlayerState.BUTTON_*` bits: jump is sent while held; dodge, light and heavy only on
-  the tick they're pressed (the sim buffers them). `aim_yaw` is the camera yaw; attacks
-  start facing it and keep turning toward it. New actions (block) get new bits.
+  `PlayerState.BUTTON_*` bits: jump, attack and block are sent while held; dodge only on
+  the tick it's pressed (the sim buffers it). Tap vs hold (light vs heavy) is decided
+  inside the sim from the held attack bit. `aim_yaw` is the camera yaw; attacks and
+  block face it. New actions get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
@@ -80,9 +81,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `last_processed_seq` differs from the prediction, it restores the server's position,
   velocity and state and replays unacknowledged inputs. "Corrections" on the HUD count
   only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
-  event (`PlayerState.server_events` changed: stagger, death, respawn) isn't counted.
-- **Server-side teleports** (respawn) must put the player exactly on the ground. The
-  body's on-floor flag isn't synced, so a mid-air teleport causes a correction.
+  event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn)
+  isn't counted. `--verbose` logs each unexpected one, and server-side input drops.
+- **On-floor is synced state**: `PlayerMovement` reads `PlayerState.on_floor` (set after
+  each `move_and_slide`), never `body.is_on_floor()` directly, so a restored state
+  carries it. Server-side teleports (respawn) should still land exactly on the ground.
 - **Remote players**: drawn `interpolation_delay` seconds in the past, interpolated
   between snapshots on a render clock synced to server ticks. Roll and i-frame visuals
   come from the interpolated `PlayerState`.
@@ -96,19 +99,28 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 
 ## Combat model
 
-- Left click = light, right click = heavy (fires on press). Attacks: windup → active
-  (hitbox live) → recovery, all in ticks from the weapon file. A dodge can cancel
-  recovery only. Presses during an attack or roll are buffered. Facing starts at
-  `aim_yaw` and tracks it at `turn_speed` (weapon file) for the whole attack, so the
-  hitbox follows the camera; movement is slowed by `move_multiplier`.
+- Tap left click = light (fires on release), hold left click `heavy_hold_time` = heavy
+  (fires while held). Hold right click = block. Attacks: windup → active (hitbox live)
+  → recovery, all in ticks from the weapon file. A dodge can cancel recovery only.
+  Presses during an attack or roll are buffered. Facing starts at `aim_yaw` and tracks
+  it at `turn_speed` (weapon file) for the whole attack, so the hitbox follows the
+  camera; movement is slowed by `move_multiplier`.
+- **Block** (`[block]` in combat.cfg): `PlayerState.blocking` while the button is held
+  and not attacking/dodging/staggered (attack or dodge drops the guard; it comes back if
+  still held). Slower movement and stamina regen; facing tracks the aim. On the server,
+  a hit on a blocker from within `arc` in front (`MeleeHitbox.is_in_front`) calls
+  `take_blocked_hit`: costs the attack's `block_stamina_damage` instead of health
+  (`damage_taken` fraction still applies). `breaks_block` attacks (heavy) or running out
+  of stamina = guard break: `guard_break_stagger`. Results `HIT_BLOCKED` /
+  `HIT_GUARD_BROKEN`.
 - **Hits are server-only.** After each server sim step with a live hitbox, `Player` emits
   `attack_stepped`; `World._on_attack_stepped` tests `MeleeHitbox.hits` against every
   other player's current server position. Each target is hit at most once per attack
   (`Player.attack_results`). A target in i-frames "evades" (reported once) but can still
   be hit later in the same active window.
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
-  snapshots. Hit events go to clients via reliable `World._receive_hit`
-  (`HIT_DAMAGED` / `HIT_EVADED` / `HIT_DEFEATED`) for damage numbers and the red flash.
+  snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
+  results) for damage numbers, labels and the red flash.
 - **Stagger**: a hit with `stagger > 0` (weapon file; heavy only by default) calls
   `PlayerState.apply_stagger`: interrupts the target's attack/dodge, and it can't act
   until it ends (presses stay buffered).
@@ -131,13 +143,13 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # ser
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: move, dodge, air dodge, fight, die, respawn; 0 corrections
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, air dodge, fight, block, guard break, die, respawn
 ```
 
 Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect; repeats every 6 s: fight the nearest player, then circle with
+`--bot` (auto-connect; repeats every 6 s: take turns attacking and blocking the nearest player, then circle with
 jump/air dodge/ground dodge; see `World._bot_input`), `--verbose` (log positions every 2 s,
 server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),

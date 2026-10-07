@@ -41,6 +41,19 @@ var heavy_attack: AttackParams
 var attack_buffer_ticks := 0
 ## Radians per second the facing tracks the aim during an attack.
 var attack_turn_speed := 0.0
+## Ticks the attack button must be held for a heavy attack.
+var heavy_hold_ticks := 0
+
+# Block
+## Full width of the protected arc in front of the blocker, radians.
+var block_arc := 0.0
+## Fraction of a blocked hit's damage that still gets through.
+var block_damage_taken := 0.0
+var block_move_multiplier := 0.0
+var block_regen_multiplier := 0.0
+## Radians per second the facing tracks the aim while blocking.
+var block_turn_speed := 0.0
+var guard_break_stagger_ticks := 0
 
 static var _current: PlayerParams
 
@@ -85,6 +98,15 @@ static func from_tuning() -> PlayerParams:
 	p.heavy_attack = AttackParams.from_tuning(weapon, "heavy", tps)
 	p.attack_buffer_ticks = roundi(Tuning.get_value(weapon, "attacks", "buffer") * tps)
 	p.attack_turn_speed = deg_to_rad(Tuning.get_value(weapon, "attacks", "turn_speed"))
+	p.heavy_hold_ticks = roundi(Tuning.get_value(weapon, "attacks", "heavy_hold_time") * tps)
+
+	p.block_arc = deg_to_rad(Tuning.get_value("combat", "block", "arc"))
+	p.block_damage_taken = Tuning.get_value("combat", "block", "damage_taken")
+	p.block_move_multiplier = Tuning.get_value("combat", "block", "move_multiplier")
+	p.block_regen_multiplier = Tuning.get_value("combat", "block", "regen_multiplier")
+	p.block_turn_speed = deg_to_rad(Tuning.get_value("combat", "block", "turn_speed"))
+	p.guard_break_stagger_ticks = roundi(
+			Tuning.get_value("combat", "block", "guard_break_stagger") * tps)
 	return p
 
 

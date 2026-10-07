@@ -1,7 +1,7 @@
 extends TestCase
 ## Server-applied stagger, death and respawn rules in PlayerState.
 
-const LIGHT := PlayerState.BUTTON_LIGHT
+const ATTACK := PlayerState.BUTTON_ATTACK
 const DODGE := PlayerState.BUTTON_DODGE
 const DELTA := 1.0 / 60.0
 
@@ -24,6 +24,8 @@ func before_each() -> void:
 	light.active_ticks = 2
 	light.recovery_ticks = 4
 	params.light_attack = light
+	params.heavy_attack = light
+	params.heavy_hold_ticks = 5
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 
@@ -37,8 +39,14 @@ func _steps(count: int, buttons: int = 0) -> void:
 		_step(buttons)
 
 
+## Press and release: a light attack starts on the release tick.
+func _tap() -> void:
+	_step(ATTACK)
+	_step()
+
+
 func test_stagger_interrupts_an_attack() -> void:
-	_step(LIGHT)
+	_tap()
 	state.apply_stagger(5)
 	assert_false(state.is_attacking())
 	assert_true(state.is_staggered())
@@ -53,7 +61,7 @@ func test_stagger_interrupts_a_dodge() -> void:
 
 func test_cannot_attack_or_dodge_while_staggered() -> void:
 	state.apply_stagger(10)
-	_step(LIGHT)
+	_tap()
 	_step(DODGE)
 	assert_false(state.is_attacking())
 	assert_false(state.is_dodging())
@@ -69,7 +77,7 @@ func test_stagger_lasts_its_ticks() -> void:
 
 func test_press_during_stagger_fires_when_it_ends() -> void:
 	state.apply_stagger(3)
-	_step(LIGHT)
+	_step(ATTACK)
 	_step()
 	assert_false(state.is_attacking(), "still staggered")
 	_step()
@@ -77,7 +85,7 @@ func test_press_during_stagger_fires_when_it_ends() -> void:
 
 
 func test_zero_stagger_does_nothing() -> void:
-	_step(LIGHT)
+	_tap()
 	state.apply_stagger(0)
 	assert_true(state.is_attacking())
 	assert_eq(state.server_events, 0)
@@ -86,14 +94,14 @@ func test_zero_stagger_does_nothing() -> void:
 func test_dead_player_cannot_act_or_regen() -> void:
 	state.stamina = 50.0
 	state.kill()
-	_steps(10, LIGHT | DODGE)
+	_steps(10, ATTACK | DODGE)
 	assert_false(state.is_attacking())
 	assert_false(state.is_dodging())
 	assert_almost(state.stamina, 50.0)
 
 
 func test_death_cancels_attack_and_stagger() -> void:
-	_step(LIGHT)
+	_tap()
 	state.apply_stagger(5)
 	state.kill()
 	assert_false(state.is_attacking())
@@ -115,7 +123,7 @@ func test_revive_restores_stamina_and_control() -> void:
 	assert_true(state.can_act())
 	assert_almost(state.stamina, 100.0)
 	assert_eq(state.server_events, 2)
-	_step(LIGHT)
+	_tap()
 	assert_true(state.is_attacking())
 
 
