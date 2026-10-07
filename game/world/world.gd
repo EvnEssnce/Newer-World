@@ -35,8 +35,9 @@ var _render_time := -1.0
 var _interpolation_delay := 0.1
 var _input_redundancy := 3
 var _snapshots_received := 0
-## The click that captures the mouse mustn't also attack: wait for a release first.
-var _attack_blocked := true
+## The click that captures the mouse mustn't also attack, so attacks need the
+## mouse to have been captured on the previous tick already.
+var _was_captured := false
 var _hits_landed := 0
 var _hits_taken := 0
 var _bot := false
@@ -211,18 +212,19 @@ func _client_tick(delta: float) -> void:
 		if Input.is_action_just_pressed(&"dodge"):
 			buttons |= PlayerState.BUTTON_DODGE
 		var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-		var attack_pressed := Input.is_action_pressed(&"attack")
-		if not captured or not attack_pressed:
-			_attack_blocked = not captured
-		if captured and attack_pressed and not _attack_blocked:
-			buttons |= PlayerState.BUTTON_ATTACK
+		if captured and _was_captured:
+			if Input.is_action_just_pressed(&"attack_light"):
+				buttons |= PlayerState.BUTTON_LIGHT
+			if Input.is_action_just_pressed(&"attack_heavy"):
+				buttons |= PlayerState.BUTTON_HEAVY
+		_was_captured = captured
 	var inputs := _local_player.client_predict(move, buttons, aim_yaw, delta, _input_redundancy)
 	_submit_inputs.rpc_id(1, inputs)
 
 
 ## Bot input for testing without a second person. Repeats every 6 s:
-## 0–3.5 s: walk to the nearest player. When in reach (until 2.8 s), tap light
-## attacks every 0.4 s, except hold a heavy from 2.0 to 2.5.
+## 0–3.5 s: walk to the nearest player. When in reach (until 2.8 s), light attack
+## every 0.4 s, and heavy attack at 2.0 s.
 ## 3.5–6 s: walk in circles; jump at 3.5, air dodge at 3.65, ground dodge at 5.0.
 ## Fighting comes first because players spawn close together.
 ## Returns [move, buttons, aim_yaw].
@@ -252,10 +254,10 @@ func _bot_input() -> Array:
 				move = flat.normalized()
 		# Stop swinging by 2.8 s so the last attack is over before the 3.5 s jump.
 		if in_reach and phase < 2.8:
-			if phase >= 2.0 and phase < 2.5:
-				buttons |= PlayerState.BUTTON_ATTACK
+			if crossed.call(2.0):
+				buttons |= PlayerState.BUTTON_HEAVY
 			elif fmod(phase, 0.4) < fmod(_bot_last_phase, 0.4):
-				buttons |= PlayerState.BUTTON_ATTACK
+				buttons |= PlayerState.BUTTON_LIGHT
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 

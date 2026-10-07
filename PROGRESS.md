@@ -7,6 +7,24 @@ Next up: death/respawn and hit reactions, block, one enemy.
 
 ## Session log
 
+### 2026-10-07 (6): Attack playtest feedback
+
+Playtest verdict (developer): hitbox size is fine for now (revisit with real animations);
+light attack recovery feels good.
+
+Done:
+- Heavy attack moved to right click; light attack (left click) now fires on press.
+  The tap/hold logic is gone. Note: New World uses right click for block, so block
+  will need a key decision when we build it.
+- Attacks track the camera during the whole swing (facing and hitbox turn toward the
+  aim at `turn_speed` in `weapon_sword.cfg`, 720°/s), instead of locking at the start.
+- Shorter reach: light 2.2 → 1.8 m, heavy 2.4 → 2.0 m.
+- `run_local_test.ps1` now makes the second window a bot by default (`-NoBot` for two
+  player windows). The bot fights the nearest player, circles, jumps and dodges.
+- Tests: 40, all pass. Smoke test: 0 corrections, all bot attacks land.
+
+Needs a hand playtest: right-click heavy, aim tracking speed during swings.
+
 ### 2026-10-07 (5): Light and heavy sword attacks
 
 Done:
@@ -81,7 +99,7 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest the sword attacks and tune `data/weapon_sword.cfg`.
+1. Hand-playtest right-click heavy and attack aim tracking.
 2. Milestone 1, one session each:
    - Death/respawn and hit reactions (stagger on heavy hits?).
    - Light attack combo chain (New World-style 3-hit string)?

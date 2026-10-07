@@ -7,20 +7,16 @@ extends RefCounted
 ## The server sends this in every snapshot, and the client restores it when it
 ## reconciles, so everything that affects the simulation must live here.
 
+## Jump is set while held; dodge and attacks only on the tick they're pressed.
 const BUTTON_JUMP := 1
 const BUTTON_DODGE := 2
-## Set on every tick the attack button is held. Tap = light, hold = heavy.
-const BUTTON_ATTACK := 4
-const ALL_BUTTONS := BUTTON_JUMP | BUTTON_DODGE | BUTTON_ATTACK
+const BUTTON_LIGHT := 4
+const BUTTON_HEAVY := 8
+const ALL_BUTTONS := BUTTON_JUMP | BUTTON_DODGE | BUTTON_LIGHT | BUTTON_HEAVY
 
 const ATTACK_NONE := 0
 const ATTACK_LIGHT := 1
 const ATTACK_HEAVY := 2
-
-## attack_hold values besides a tick count.
-const HOLD_RELEASED := -1
-## The held press already became a heavy attack; nothing more until released.
-const HOLD_SPENT := -2
 
 var stamina := 0.0
 ## Ticks left before stamina regen starts again.
@@ -37,8 +33,6 @@ var air_dodges_used := 0
 var attack_type := ATTACK_NONE
 ## Ticks since the current attack started, or -1 when not attacking.
 var attack_tick := -1
-## Ticks the attack button has been held, or HOLD_RELEASED / HOLD_SPENT.
-var attack_hold := HOLD_RELEASED
 ## An attack waiting to start (pressed mid-attack or mid-roll), and ticks it stays queued.
 var queued_attack := ATTACK_NONE
 var queued_attack_ticks := 0
@@ -47,7 +41,7 @@ var yaw := 0.0
 
 
 ## Advances one tick. move is the world-space XZ input (length <= 1); aim_yaw is
-## the camera's facing, used as the direction of an attack that starts this tick.
+## the camera's facing: an attack starts facing it and keeps turning toward it.
 func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: PlayerParams,
 		delta: float) -> void:
 	if on_floor:
@@ -63,6 +57,8 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 
 	_handle_dodge_input(move, buttons, on_floor, params)
 	_handle_attack_input(buttons, aim_yaw, params)
+	if attack_tick > 0:
+		yaw = rotate_toward(yaw, aim_yaw, params.attack_turn_speed * delta)
 
 	if dodge_tick < 0:
 		if stamina_regen_wait > 0:
@@ -150,19 +146,10 @@ func is_attack_recovering(params: PlayerParams) -> bool:
 
 func _handle_attack_input(buttons: int, aim_yaw: float, params: PlayerParams) -> void:
 	var requested := ATTACK_NONE
-	if buttons & BUTTON_ATTACK:
-		if attack_hold == HOLD_RELEASED:
-			attack_hold = 0
-		elif attack_hold >= 0:
-			attack_hold += 1
-		if attack_hold >= params.heavy_hold_ticks:
-			requested = ATTACK_HEAVY
-			attack_hold = HOLD_SPENT
-	else:
-		if attack_hold >= 0:
-			requested = ATTACK_LIGHT  # released before it became a heavy
-		attack_hold = HOLD_RELEASED
-
+	if buttons & BUTTON_HEAVY:
+		requested = ATTACK_HEAVY
+	elif buttons & BUTTON_LIGHT:
+		requested = ATTACK_LIGHT
 	if requested != ATTACK_NONE:
 		queued_attack = requested
 		queued_attack_ticks = params.attack_buffer_ticks + 1
@@ -193,8 +180,7 @@ static func yaw_for_direction(direction: Vector2) -> float:
 
 func to_array() -> Array:
 	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, dodge_buffer, yaw,
-			air_dodges_used, attack_type, attack_tick, attack_hold, queued_attack,
-			queued_attack_ticks]
+			air_dodges_used, attack_type, attack_tick, queued_attack, queued_attack_ticks]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -208,9 +194,8 @@ static func from_array(data: Array) -> PlayerState:
 	s.air_dodges_used = data[6]
 	s.attack_type = data[7]
 	s.attack_tick = data[8]
-	s.attack_hold = data[9]
-	s.queued_attack = data[10]
-	s.queued_attack_ticks = data[11]
+	s.queued_attack = data[9]
+	s.queued_attack_ticks = data[10]
 	return s
 
 
@@ -227,6 +212,5 @@ func matches(other: PlayerState) -> bool:
 			and air_dodges_used == other.air_dodges_used
 			and attack_type == other.attack_type
 			and attack_tick == other.attack_tick
-			and attack_hold == other.attack_hold
 			and queued_attack == other.queued_attack
 			and queued_attack_ticks == other.queued_attack_ticks)

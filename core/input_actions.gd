@@ -13,8 +13,8 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 }
 
 const MOUSE_BINDINGS: Dictionary[StringName, Array] = {
-	# Tap for a light attack, hold for a heavy attack.
-	&"attack": [MOUSE_BUTTON_LEFT],
+	&"attack_light": [MOUSE_BUTTON_LEFT],
+	&"attack_heavy": [MOUSE_BUTTON_RIGHT],
 }
 
 

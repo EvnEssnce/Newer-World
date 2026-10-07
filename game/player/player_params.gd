@@ -37,9 +37,9 @@ var max_health := 0.0
 # Attacks (equipped weapon)
 var light_attack: AttackParams
 var heavy_attack: AttackParams
-## Ticks the attack button must be held for a heavy attack.
-var heavy_hold_ticks := 0
 var attack_buffer_ticks := 0
+## Radians per second the facing tracks the aim during an attack.
+var attack_turn_speed := 0.0
 
 static var _current: PlayerParams
 
@@ -81,8 +81,8 @@ static func from_tuning() -> PlayerParams:
 	var weapon := "weapon_sword"
 	p.light_attack = AttackParams.from_tuning(weapon, "light", tps)
 	p.heavy_attack = AttackParams.from_tuning(weapon, "heavy", tps)
-	p.heavy_hold_ticks = roundi(Tuning.get_value(weapon, "attacks", "heavy_hold_time") * tps)
 	p.attack_buffer_ticks = roundi(Tuning.get_value(weapon, "attacks", "buffer") * tps)
+	p.attack_turn_speed = deg_to_rad(Tuning.get_value(weapon, "attacks", "turn_speed"))
 	return p
 
 

@@ -64,10 +64,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   channel 1): the last `input_redundancy` inputs, each
   `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
-  `PlayerState.BUTTON_*` bits: jump and attack are sent while held, dodge only on the tick
-  it's pressed (the sim buffers it). Tap vs hold (light vs heavy) is decided inside the
-  sim from the held bit. `aim_yaw` is the camera yaw; attacks face it. New actions
-  (block) get new bits.
+  `PlayerState.BUTTON_*` bits: jump is sent while held; dodge, light and heavy only on
+  the tick they're pressed (the sim buffers them). `aim_yaw` is the camera yaw; attacks
+  start facing it and keep turning toward it. New actions (block) get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
@@ -93,9 +92,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 
 ## Combat model
 
-- Attacks: windup → active (hitbox live) → recovery, all in ticks from the weapon file.
-  A dodge can cancel recovery only. Presses during an attack or roll are buffered.
-  Facing locks to `aim_yaw` for the whole attack; movement is slowed by `move_multiplier`.
+- Left click = light, right click = heavy (fires on press). Attacks: windup → active
+  (hitbox live) → recovery, all in ticks from the weapon file. A dodge can cancel
+  recovery only. Presses during an attack or roll are buffered. Facing starts at
+  `aim_yaw` and tracks it at `turn_speed` (weapon file) for the whole attack, so the
+  hitbox follows the camera; movement is slowed by `move_multiplier`.
 - **Hits are server-only.** After each server sim step with a live hitbox, `Player` emits
   `attack_stepped`; `World._on_attack_stepped` tests `MeleeHitbox.hits` against every
   other player's current server position. Each target is hit at most once per attack
@@ -116,8 +117,8 @@ locates it (override with the `GODOT` env var). PowerShell blocks scripts by def
 run them with `-ExecutionPolicy Bypass`:
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1        # server + 2 client windows
-powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Bot   # second client is a bot
+powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # server + you + a bot window
+powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: move, dodge, air dodge, fight; server must resolve hits; 0 corrections
