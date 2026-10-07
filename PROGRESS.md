@@ -15,7 +15,7 @@ Husks behaving as expected.
 
 Done (pure logic and data; nothing in the game world yet, so no shared files touched
 besides two small helpers in `core/tuning.gd`):
-- Rarity tiers (Common → Legendary, 0–4 bonus stats), 7 items (Iron Broadsword, Iron
+- Rarity tiers (Common, Rare, Epic, Legendary: 0–3 bonus stats), 7 items (Iron Broadsword, Iron
   Hatchets for Dual Axes, five Padded armor pieces), 6 bonus stats (affixes), and the
   Husk loot table: 60% drop chance, gear score 100–140.
 - `LootRoller` (seeded, server-side), `Item` (plain data for network/saves),
@@ -24,9 +24,14 @@ besides two small helpers in `core/tuning.gd`):
   match the weights; Legendary is about 1 in 345 kills.
 - Tests: 90 (14 for loot, including one that validates the real data files).
 
-**Design question for the developer:** Legendaries are meant to roll 4 bonus stats, but
-no slot has 4 eligible affixes (weapons 3; head and feet 2), so a Legendary is mostly no
-better than an Epic. Options: more affixes per slot, or Legendaries get a perk.
+Developer decisions after the first sim run:
+- Removed the Uncommon tier, so rarities are Common 0 / Rare 1 / Epic 2 / Legendary 3
+  bonus stats. Weapons, hands and chest have 3+ eligible affixes, so their Legendaries
+  are full. **Still open:** head, legs and feet only have 2 eligible affixes, so their
+  Legendaries roll 2 (same as Epic). Uncommon's weight wasn't redistributed: Common is
+  now ~81% of drops, Rare ~1 in 12 kills, Epic ~1 in 34, Legendary ~1 in 248.
+- Affix names: Blaze (damage), Sear (crit), Amber (max health), Ferocity (max stamina),
+  Rage (stamina regen), Hearth (block stamina cost). Ids in `affixes.cfg` unchanged.
 
 ### 2026-10-07 (9): First enemy (Husk)
 

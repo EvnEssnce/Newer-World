@@ -38,7 +38,7 @@ static func from_dict(data: Dictionary) -> Item:
 
 
 ## One line for logs and the loot simulator, e.g.
-## "Rare Iron Broadsword  GS 123  weapon_power 123  Precise crit_chance +3.1%".
+## "Rare Iron Broadsword  GS 123  weapon_power 123  Sear crit_chance +3.1%".
 func describe(db: ItemDatabase) -> String:
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
 	var rarity_def: ItemDatabase.RarityDef = db.rarities.get(rarity)
