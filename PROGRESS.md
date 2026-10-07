@@ -11,6 +11,23 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-07 (10): Items and loot rolls (milestone 2, session 1)
+
+Done (pure logic and data; nothing in the game world yet, so no shared files touched
+besides two small helpers in `core/tuning.gd`):
+- Rarity tiers (Common → Legendary, 0–4 bonus stats), 7 items (Iron Broadsword, Iron
+  Hatchets for Dual Axes, five Padded armor pieces), 6 bonus stats (affixes), and the
+  Husk loot table: 60% drop chance, gear score 100–140.
+- `LootRoller` (seeded, server-side), `Item` (plain data for network/saves),
+  `ItemDatabase` with `validate()`.
+- `tools\roll_loot.ps1`: 50,000 Husk kills in about a second. Rarity and item spread
+  match the weights; Legendary is about 1 in 345 kills.
+- Tests: 90 (14 for loot, including one that validates the real data files).
+
+**Design question for the developer:** Legendaries are meant to roll 4 bonus stats, but
+no slot has 4 eligible affixes (weapons 3; head and feet 2), so a Legendary is mostly no
+better than an Epic. Options: more affixes per slot, or Legendaries get a perk.
+
 ### 2026-10-07 (9): First enemy (Husk)
 
 Done:
@@ -168,7 +185,7 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 Milestone 2, one session each. Checked against `design/classes.md` (another session is
 building its Wave 1 in parallel: 1A ability framework/weapon swap/Fighter, 1B parties):
-1. **Now (no shared files):** items and loot rolls, pure logic + tests: item definitions,
+1. **Done (session 10):** items and loot rolls, pure logic + tests: item definitions,
    rarity tiers, rolled stats, gear score ranges, Husk loot table, all in `data/`, plus a
    script that rolls 50,000 drops and prints the real rarity distribution. **No
    attributes** (design decision): gear stats are things like damage %, armor, max

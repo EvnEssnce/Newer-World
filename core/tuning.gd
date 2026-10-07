@@ -48,6 +48,20 @@ func _apply_override(override: String) -> void:
 	print("Tuning: %s/%s/%s = %s (launch override)" % [path[0], path[1], path[2], value])
 
 
+## Section names in a data file, in file order (for files that list things, like items).
+func get_sections(file: String) -> PackedStringArray:
+	var cfg: ConfigFile = _files.get(file)
+	if cfg == null:
+		push_error("Tuning: no data file %s%s.cfg" % [DATA_DIR, file])
+		return PackedStringArray()
+	return cfg.get_sections()
+
+
+func has_value(file: String, section: String, key: String) -> bool:
+	var cfg: ConfigFile = _files.get(file)
+	return cfg != null and cfg.has_section_key(section, key)
+
+
 func get_value(file: String, section: String, key: String) -> Variant:
 	var cfg: ConfigFile = _files.get(file)
 	if cfg == null:

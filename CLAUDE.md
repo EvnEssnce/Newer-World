@@ -52,8 +52,13 @@ game/
   enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
   enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
+  items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
+  items/item.gd              One rolled item (plain data, to_dict/from_dict).
+  items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
 ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info).
-data/                Tuning files: network, movement, combat, camera, weapon_sword, enemy_husk (.cfg).
+data/                Tuning files: network, movement, combat, camera, weapon_sword, enemy_husk,
+                     loot (rarities + loot tables), items, affixes (.cfg).
+design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
 tools/               PowerShell run scripts, unit test runner, smoke test.
@@ -152,6 +157,24 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
+
+## Loot (milestone 2; rolls only so far)
+
+- `data/loot.cfg`: rarity tiers (affix count, color) and loot tables (`[table_<id>]`:
+  drop chance, rolls, gear score range, item and rarity weights). `data/items.cfg`: item
+  definitions (slot, weapon type for weapons, primary stat per gear score).
+  `data/affixes.cfg`: bonus stats, their slots and value ranges per 100 gear score.
+- **No attributes** (STR/DEX...): `design/classes.md` decided against them. Gear stats
+  modify combat numbers directly (damage_pct, crit_chance, max_health, ...).
+- Weapon items only name a weapon type (`data/weapon_<type>.cfg` holds the attacks) and
+  are class-locked. `weapon_power` is a percent of the weapon file's damage.
+- `LootRoller` is server only and seeded by a `RandomNumberGenerator`. Loot will be
+  personal: each player who damaged an enemy gets their own roll.
+- `ItemDatabase.validate()` checks the three files against each other; a unit test runs
+  it on the real data. `tools\roll_loot.ps1 [-Table husk] [-Kills 50000]` prints what a
+  table really drops.
+- Not built yet: drops in the world, pickup (F), inventory (I), equipping. See
+  PROGRESS.md for the order and its dependency on the other session's Wave 1.
 - Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
 
 ## Running
@@ -165,6 +188,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # ser
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
+powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, fight each other and Husks, block, die, respawn
 ```
 
