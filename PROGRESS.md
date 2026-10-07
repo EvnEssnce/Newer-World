@@ -53,7 +53,7 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ### 2026-10-07 (1): Project setup and networked movement
 
-- Godot 4.7.2, git, private GitHub repo (`EvnEssnce/newer-world`), folder layout, docs.
+- Godot 4.7.2, git, private GitHub repo (`EvnEssnce/Newer-World`), folder layout, docs.
 - Dedicated server (`--headless -- --server`), client connect screen.
 - Server-authoritative movement, client prediction + reconciliation, snapshot
   interpolation for other players. Hand-tested with two windows: smooth.
