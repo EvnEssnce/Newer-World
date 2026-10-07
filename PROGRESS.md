@@ -2,10 +2,30 @@
 
 ## Current milestone
 
-**1. Networked combat slice.** Movement, stamina and dodge roll are networked. Next up:
-attacks, block, one enemy.
+**1. Networked combat slice.** Movement, stamina, dodge and sword attacks are networked.
+Next up: death/respawn and hit reactions, block, one enemy.
 
 ## Session log
+
+### 2026-10-07 (5): Light and heavy sword attacks
+
+Done:
+- Left click: tap = light attack (starts on release), hold 0.25 s = heavy attack (starts
+  while still held; releasing afterwards does nothing). Attacks face the camera.
+- Each attack: windup → active (hitbox live) → recovery. Movement slowed during attacks,
+  no jumping. A dodge can cancel recovery only. Presses mid-attack/mid-roll are buffered.
+- Server-side hit detection: box hitbox vs capsule (`MeleeHitbox`), one hit per target
+  per attack, respects i-frames ("Evaded" shown on the target).
+- Health (1000), HUD health bar, health under other players' names, damage numbers,
+  red hit flash. At 0 health it refills and shows "Defeated!" (placeholder).
+- F3 (or `--hitboxes`) shows hitboxes: faint during the attack, bright while live.
+- All values in `data/weapon_sword.cfg` and `data/combat.cfg` [health].
+- Tests: 38 (12 attack rules, 6 hitbox math). Bots now fight; smoke test requires the
+  server to resolve hits. Result: 3–8 attacks per bot, all landed, 0 corrections.
+- `--screenshot-dir` flag so visuals can be checked from the game's own frames.
+
+Needs a hand playtest: attack feel (timings, reach, slow-down), tap vs hold threshold,
+whether dodge should also cancel windup, and hitting a player who's rolling.
 
 ### 2026-10-07 (4): Neutral dodge rolls forward
 
@@ -61,11 +81,10 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest the air dodge.
+1. Hand-playtest the sword attacks and tune `data/weapon_sword.cfg`.
 2. Milestone 1, one session each:
-   - Light and heavy attacks (sword) with server-side hitbox detection against other
-     players, respecting i-frames. Damage and timings in `data/combat.cfg`.
-   - Health, hit reactions, death/respawn.
+   - Death/respawn and hit reactions (stagger on heavy hits?).
+   - Light attack combo chain (New World-style 3-hit string)?
    - Block (stamina drain on hit).
    - One enemy type with server-driven AI.
    - Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
@@ -81,6 +100,12 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
   and delta compression before a public playtest.
 - No render smoothing after a correction yet: a big correction snaps the local player.
 - Holding Space keeps jumping (jump is sent as "held").
-- Dodge momentum stops abruptly at the end of the roll (ground deceleration takes over).
-  May want a recovery phase; judge in playtest.
+- Dodge recovery into movement was judged smooth in playtest (no recovery phase needed).
+- No lag compensation for hits: the server checks targets' current positions, while
+  the attacker sees them ~100 ms in the past. Fine on LAN; matters over the internet.
+- Hit events arrive before the attacker's swing is drawn on other clients (remote
+  players are drawn 100 ms in the past, hit events aren't delayed).
+- Attacks pass through crates (the hitbox ignores world geometry).
+- Placeholder sword swing/flash/damage-number constants live in `player.gd` (cosmetic
+  only, to be replaced by real animation and VFX).
 - This repo has a local git `user.name`/`user.email` (no global identity configured).

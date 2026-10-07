@@ -31,6 +31,16 @@ var dodge_buffer_ticks := 0
 ## Dodges allowed per time in the air. 0 = ground only.
 var max_air_dodges := 0
 
+# Health
+var max_health := 0.0
+
+# Attacks (equipped weapon)
+var light_attack: AttackParams
+var heavy_attack: AttackParams
+## Ticks the attack button must be held for a heavy attack.
+var heavy_hold_ticks := 0
+var attack_buffer_ticks := 0
+
 static var _current: PlayerParams
 
 
@@ -64,4 +74,23 @@ static func from_tuning() -> PlayerParams:
 	p.iframe_end_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_end") * tps)
 	p.dodge_buffer_ticks = roundi(Tuning.get_value("combat", "dodge", "buffer") * tps)
 	p.max_air_dodges = Tuning.get_value("combat", "dodge", "air_dodges")
+
+	p.max_health = Tuning.get_value("combat", "health", "max")
+
+	# Only the sword exists so far; later this follows the equipped weapon.
+	var weapon := "weapon_sword"
+	p.light_attack = AttackParams.from_tuning(weapon, "light", tps)
+	p.heavy_attack = AttackParams.from_tuning(weapon, "heavy", tps)
+	p.heavy_hold_ticks = roundi(Tuning.get_value(weapon, "attacks", "heavy_hold_time") * tps)
+	p.attack_buffer_ticks = roundi(Tuning.get_value(weapon, "attacks", "buffer") * tps)
 	return p
+
+
+## The params for PlayerState.ATTACK_LIGHT / ATTACK_HEAVY, or null.
+func attack(attack_type: int) -> AttackParams:
+	match attack_type:
+		PlayerState.ATTACK_LIGHT:
+			return light_attack
+		PlayerState.ATTACK_HEAVY:
+			return heavy_attack
+	return null

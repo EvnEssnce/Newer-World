@@ -31,7 +31,7 @@ func _airborne_run(buttons: int) -> Array:
 	var state := PlayerState.new()
 	state.stamina = params.max_stamina
 	for i in TICKS:
-		PlayerMovement.step(body, state, Vector2.RIGHT, buttons if i == 0 else 0, params, DELTA)
+		PlayerMovement.step(body, state, Vector2.RIGHT, buttons if i == 0 else 0, 0.0, params, DELTA)
 	var result := [body.global_position, body.velocity]
 	body.free()
 	return result

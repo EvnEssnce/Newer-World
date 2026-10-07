@@ -2,22 +2,36 @@ class_name InputActions
 ## Gameplay key bindings, registered in code so they live in one readable place
 ## instead of the project.godot input map.
 
-const BINDINGS: Dictionary[StringName, Array] = {
+const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	&"move_forward": [KEY_W, KEY_UP],
 	&"move_back": [KEY_S, KEY_DOWN],
 	&"move_left": [KEY_A, KEY_LEFT],
 	&"move_right": [KEY_D, KEY_RIGHT],
 	&"jump": [KEY_SPACE],
 	&"dodge": [KEY_SHIFT],
+	&"toggle_hitboxes": [KEY_F3],
+}
+
+const MOUSE_BINDINGS: Dictionary[StringName, Array] = {
+	# Tap for a light attack, hold for a heavy attack.
+	&"attack": [MOUSE_BUTTON_LEFT],
 }
 
 
 static func register() -> void:
-	for action: StringName in BINDINGS:
-		if InputMap.has_action(action):
-			continue
-		InputMap.add_action(action)
-		for key: Key in BINDINGS[action]:
+	for action: StringName in KEY_BINDINGS:
+		for key: Key in KEY_BINDINGS[action]:
 			var event := InputEventKey.new()
 			event.physical_keycode = key
-			InputMap.action_add_event(action, event)
+			_add(action, event)
+	for action: StringName in MOUSE_BINDINGS:
+		for button: MouseButton in MOUSE_BINDINGS[action]:
+			var event := InputEventMouseButton.new()
+			event.button_index = button
+			_add(action, event)
+
+
+static func _add(action: StringName, event: InputEvent) -> void:
+	if not InputMap.has_action(action):
+		InputMap.add_action(action)
+	InputMap.action_add_event(action, event)

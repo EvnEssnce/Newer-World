@@ -27,7 +27,7 @@ func before_each() -> void:
 
 
 func _step(buttons: int = 0, move: Vector2 = Vector2.RIGHT, on_floor: bool = true) -> void:
-	state.step(move, buttons, on_floor, params, DELTA)
+	state.step(move, buttons, 0.0, on_floor, params, DELTA)
 
 
 func _steps(count: int, buttons: int = 0, move: Vector2 = Vector2.RIGHT, on_floor: bool = true) -> void:

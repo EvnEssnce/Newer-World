@@ -7,9 +7,9 @@ class_name PlayerMovement
 
 
 static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, buttons: int,
-		params: PlayerParams, delta: float) -> void:
+		aim_yaw: float, params: PlayerParams, delta: float) -> void:
 	var on_floor := body.is_on_floor()
-	state.step(move, buttons, on_floor, params, delta)
+	state.step(move, buttons, aim_yaw, on_floor, params, delta)
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as
@@ -17,7 +17,11 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	if state.is_dodging():
 		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
 	else:
-		var target := Vector3(move.x, 0.0, move.y) * params.move_speed
+		var speed := params.move_speed
+		var attack := state.current_attack(params)
+		if attack:
+			speed *= attack.move_multiplier
+		var target := Vector3(move.x, 0.0, move.y) * speed
 		var acceleration := params.air_acceleration
 		if on_floor:
 			acceleration = (params.ground_deceleration if move.is_zero_approx()
@@ -25,7 +29,8 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		horizontal = horizontal.move_toward(target, acceleration * delta)
 
 	var vertical := body.velocity.y
-	if on_floor and buttons & PlayerState.BUTTON_JUMP and not state.is_dodging():
+	var can_jump := not state.is_dodging() and not state.is_attacking()
+	if on_floor and buttons & PlayerState.BUTTON_JUMP and can_jump:
 		vertical = params.jump_velocity
 	elif not on_floor:
 		vertical -= params.gravity * delta

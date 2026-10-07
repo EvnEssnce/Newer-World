@@ -40,13 +40,16 @@ core/
   input_actions.gd   Key bindings, registered in code.
 game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
-  world/world.gd     Server sim loop + snapshots; client input sending, prediction, interpolation.
-  player/player.gd   One player; server/local/remote roles (see below), visuals.
+  world/world.gd     Server sim loop, snapshots, hit resolution; client input sending,
+                     prediction, interpolation, hit display; test bot.
+  player/player.gd   One player; server/local/remote roles (see below), health, visuals.
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
-  player/player_state.gd     Stamina, dodge, facing, input buttons. Pure logic, unit tested.
+  player/player_state.gd     Stamina, dodge, attacks, facing, input buttons. Pure logic, unit tested.
   player/player_params.gd    Player tuning converted to ticks/radians, loaded once.
-ui/                  connect_menu (client start screen), hud (stamina bar, debug info).
-data/                Tuning files: network, movement, combat, camera (.cfg).
+  combat/attack_params.gd    One attack's tuning (phases, damage, hitbox).
+  combat/melee_hitbox.gd     Box hitbox vs capsule test. Pure math, unit tested.
+ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info).
+data/                Tuning files: network, movement, combat, camera, weapon_sword (.cfg).
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
 tools/               PowerShell run scripts, unit test runner, smoke test.
@@ -58,17 +61,20 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   RPCs are matched by node path. Player nodes are named by peer id under `World/Players`.
 - `server_relay` is off: clients never hear from each other directly, only via snapshots.
 - **Client → server**, every physics tick, `World._submit_inputs` (unreliable ordered,
-  channel 1): the last `input_redundancy` inputs, each `[seq, move: Vector2, buttons: int]`.
-  `move` is a world-space XZ direction (camera rotation already applied), length ≤ 1.
-  `buttons` holds `PlayerState.BUTTON_*` bits. Jump is sent while held, dodge only on the
-  tick it's pressed (the sim buffers it). New actions (attacks, block) get new bits.
+  channel 1): the last `input_redundancy` inputs, each
+  `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
+  direction (camera rotation already applied), length ≤ 1. `buttons` holds
+  `PlayerState.BUTTON_*` bits: jump and attack are sent while held, dodge only on the tick
+  it's pressed (the sim buffers it). Tap vs hold (light vs heavy) is decided inside the
+  sim from the held bit. `aim_yaw` is the camera yaw; attacks face it. New actions
+  (block) get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
 - **Server → each client**, `snapshot_rate` times per second, `World._receive_snapshot`
   (unreliable ordered, channel 2): `tick` and every player's
-  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array()]`. Snapshots
-  also drive spawning/despawning on clients: new id → spawn, missing id → remove.
+  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array(), health]`.
+  Snapshots also drive spawning/despawning on clients: new id → spawn, missing id → remove.
 - **Local player**: applies each input immediately and remembers the predicted position
   and `PlayerState` per seq. On a snapshot, if the server's position or state for
   `last_processed_seq` differs from the prediction, it restores the server's position,
@@ -82,8 +88,26 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   affects the sim and isn't in `to_array()`, reconciliation will break. Anything that
   changes the sim goes in `PlayerState.step` or `PlayerMovement.step`, which both server
   and prediction run. Keep them deterministic: no randomness, no `Input`, durations in ticks.
-- **I-frames**: `PlayerState.is_invulnerable(params)`. Hit detection (not built yet) must
-  check it on the server. Clients flash the body white while it's true.
+- **I-frames**: `PlayerState.is_invulnerable(params)`. Clients flash the body white while
+  it's true.
+
+## Combat model
+
+- Attacks: windup → active (hitbox live) → recovery, all in ticks from the weapon file.
+  A dodge can cancel recovery only. Presses during an attack or roll are buffered.
+  Facing locks to `aim_yaw` for the whole attack; movement is slowed by `move_multiplier`.
+- **Hits are server-only.** After each server sim step with a live hitbox, `Player` emits
+  `attack_stepped`; `World._on_attack_stepped` tests `MeleeHitbox.hits` against every
+  other player's current server position. Each target is hit at most once per attack
+  (`Player.attack_results`). A target in i-frames "evades" (reported once) but can still
+  be hit later in the same active window.
+- Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
+  snapshots. Hit events go to clients via reliable `World._receive_hit`
+  (`HIT_DAMAGED` / `HIT_EVADED` / `HIT_DEFEATED`) for damage numbers and the red flash.
+- No death yet: at 0 health the server refills it and reports `HIT_DEFEATED`.
+- No lag compensation yet: hits use targets' current server positions, while the
+  attacker sees them `interpolation_delay` in the past.
+- Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
 
 ## Running
 
@@ -96,14 +120,20 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1        # serve
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Bot   # second client is a bot
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: see each other move, ground + air dodge, 0 corrections
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: move, dodge, air dodge, fight; server must resolve hits; 0 corrections
 ```
 
 Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect, walk in circles, jump + air dodge + ground dodge every 3 s), `--verbose` (log positions every 2 s),
+`--bot` (auto-connect; repeats every 6 s: fight the nearest player, then circle with
+jump/air dodge/ground dodge; see `World._bot_input`), `--verbose` (log positions every 2 s,
+server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
+`--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test).
+
+To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
+read the saved frames. Never screenshot the desktop: it captures the developer's screen.
 
 After adding a `class_name` script outside the editor, run
 `<godot_console.exe> --headless --import` once so Godot registers the class.

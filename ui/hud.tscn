@@ -16,6 +16,13 @@ corner_radius_top_right = 3
 corner_radius_bottom_right = 3
 corner_radius_bottom_left = 3
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_health_fill"]
+bg_color = Color(0.85, 0.2, 0.2, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [node name="Hud" type="CanvasLayer"]
 script = ExtResource("1_hud")
 
@@ -27,6 +34,24 @@ offset_right = 600.0
 offset_bottom = 120.0
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
+
+[node name="Health" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -86.0
+offset_right = 150.0
+offset_bottom = -70.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/background = SubResource("StyleBoxFlat_stamina_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_health_fill")
+value = 100.0
+show_percentage = false
 
 [node name="Stamina" type="ProgressBar" parent="."]
 unique_name_in_owner = true
@@ -52,9 +77,9 @@ anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
 offset_top = -36.0
-offset_right = 800.0
+offset_right = 1200.0
 offset_bottom = -8.0
 grow_vertical = 0
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
-text = "WASD move   Space jump   Shift dodge   Click to look around   Esc frees the mouse"
+text = "WASD move   Space jump   Shift dodge   Left click: tap = light, hold = heavy   F3 hitboxes   Esc frees the mouse"

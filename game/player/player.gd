@@ -2,35 +2,62 @@ class_name Player
 extends CharacterBody3D
 ## A player character. The same scene plays three roles:
 ##
-## - Server: simulates one step per input received from its client.
+## - Server: simulates one step per input received from its client, and owns
+##   health. Emits attack_stepped while an attack's hitbox is live; World
+##   resolves the hits.
 ## - Local client player: predicts from the keyboard immediately, then corrects
 ##   itself when a server snapshot disagrees (reconciliation).
 ## - Remote client player: drawn slightly in the past, interpolating between
 ##   server snapshots.
 ##
-## Inputs are [seq: int, move: Vector2, buttons: int]. "move" is a world-space XZ
-## direction with length <= 1, already rotated by the client's camera; "buttons"
-## holds PlayerState.BUTTON_* bits.
+## Inputs are [seq: int, move: Vector2, buttons: int, aim_yaw: float]. "move" is a
+## world-space XZ direction with length <= 1, already rotated by the client's
+## camera; "buttons" holds PlayerState.BUTTON_* bits; "aim_yaw" is the camera's yaw.
+
+## Server only: emitted after each sim step in which an attack's hitbox is live.
+signal attack_stepped(player: Player)
 
 const MAX_PENDING_INPUTS := 120
 const MAX_SNAPSHOTS := 30
 ## Meters the server may differ from our prediction before we rewind and replay.
 const RECONCILE_TOLERANCE := 0.01
+## Must match the capsule in player.tscn. Used by server hit detection.
+const BODY_RADIUS := 0.4
+const BODY_HEIGHT := 1.8
+
+# Placeholder visuals (cosmetic only; replaced by real animation/VFX later).
 const LOCAL_COLOR := Color(0.25, 0.55, 0.95)
 const REMOTE_COLOR := Color(0.95, 0.55, 0.2)
 ## Body color while i-frames are active, so they're visible while tuning.
 const INVULNERABLE_COLOR := Color(0.95, 0.95, 1.0)
+const HIT_COLOR := Color(1.0, 0.15, 0.1)
+const HIT_FLASH_MS := 150
+## Sword pivot rotation (x = pitch, y = sweep) at rest and at each swing's extremes.
+const SWORD_IDLE := Vector2(-0.7, 0.0)
+const LIGHT_WOUND := Vector2(0.0, -1.4)
+const LIGHT_STRUCK := Vector2(0.0, 1.4)
+const HEAVY_WOUND := Vector2(1.7, 0.0)
+const HEAVY_STRUCK := Vector2(-1.3, 0.0)
+
+## Shows attack hitboxes on all players. Toggled with F3.
+static var show_hitboxes := false
 
 var peer_id := 0
 var is_local := false
 var state := PlayerState.new()
 var params := PlayerParams.current()
-## Dodges started (counted once per real simulation step, not on replays).
+## Server-authoritative; clients copy it from snapshots.
+var health := 0.0
+## Counted once per real simulation step (not on replays); for the smoke test.
 var dodges := 0
 var air_dodges := 0
+var attacks := 0
 
 # Server
 var last_processed_seq := 0
+## Targets the current attack has already been resolved against:
+## true = hit (can't be hit again), false = evaded so far (can still be hit).
+var attack_results: Dictionary[int, bool] = {}
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -50,14 +77,19 @@ var distance_seen := 0.0
 
 var _material: StandardMaterial3D
 var _base_color := REMOTE_COLOR
+var _hit_flash_until := 0
+var _hitbox_material: StandardMaterial3D
 
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
+@onready var _sword_pivot: Node3D = $Model/RollPivot/SwordPivot
+@onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
 @onready var _name_label: Label3D = $NameLabel
 
 
 func _ready() -> void:
 	state.stamina = params.max_stamina
+	health = params.max_health
 	if multiplayer.is_server():
 		_name_label.visible = false
 		return
@@ -65,45 +97,49 @@ func _ready() -> void:
 	_material = StandardMaterial3D.new()
 	_material.albedo_color = _base_color
 	($Model/RollPivot/Body as MeshInstance3D).material_override = _material
-	_name_label.text = "You" if is_local else "Player %d" % (peer_id % 10000)
+	_hitbox_material = StandardMaterial3D.new()
+	_hitbox_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_hitbox_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_hitbox_debug.material_override = _hitbox_material
+	_update_label()
 	if is_local:
 		_setup_camera()
 
 
 func _process(_delta: float) -> void:
 	if is_local:
-		_show(state.yaw, state.dodge_progress(params), state.is_invulnerable(params))
+		_show(state.yaw, state.dodge_progress(params), state.is_invulnerable(params),
+				state.attack_type, state.attack_tick)
 
 
-func _simulate(move: Vector2, buttons: int, delta: float) -> void:
+func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> void:
 	var was_on_floor := is_on_floor()
-	PlayerMovement.step(self, state, move, buttons, params, delta)
+	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta)
 	if state.dodge_tick == 0:
 		dodges += 1
 		if not was_on_floor:
 			air_dodges += 1
-
-
-## Applies the facing, roll and i-frame look. Client only.
-func _show(yaw: float, dodge_progress: float, invulnerable: bool) -> void:
-	_model.rotation.y = yaw
-	# A full forward somersault over the roll.
-	_roll_pivot.rotation.x = 0.0 if dodge_progress < 0.0 else -TAU * dodge_progress
-	_material.albedo_color = INVULNERABLE_COLOR if invulnerable else _base_color
+	if state.attack_tick == 0:
+		attacks += 1
+		attack_results.clear()
+	if multiplayer.is_server() and state.is_attack_active(params):
+		attack_stepped.emit(self)
 
 
 # --- Server ---
 
 func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 	for input: Variant in inputs:
-		if not (input is Array and input.size() == 3 and input[0] is int
-				and input[1] is Vector2 and input[2] is int):
+		if not (input is Array and input.size() == 4 and input[0] is int
+				and input[1] is Vector2 and input[2] is int and input[3] is float):
 			continue
 		var seq: int = input[0]
 		var move: Vector2 = input[1]
-		if seq <= _last_queued_seq or not move.is_finite():
+		var aim_yaw: float = input[3]
+		if seq <= _last_queued_seq or not move.is_finite() or not is_finite(aim_yaw):
 			continue
-		_input_queue.append([seq, move.limit_length(1.0), input[2] & PlayerState.ALL_BUTTONS])
+		_input_queue.append([seq, move.limit_length(1.0), input[2] & PlayerState.ALL_BUTTONS,
+				aim_yaw])
 		_last_queued_seq = seq
 	while _input_queue.size() > max_buffer:
 		_input_queue.pop_front()
@@ -114,28 +150,29 @@ func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 func server_process_inputs(max_per_tick: int, delta: float) -> void:
 	for i in mini(max_per_tick, _input_queue.size()):
 		var input: Array = _input_queue.pop_front()
-		_simulate(input[1], input[2], delta)
+		_simulate(input[1], input[2], input[3], delta)
 		last_processed_seq = input[0]
 
 
 func get_snapshot() -> Array:
-	return [peer_id, global_position, velocity, last_processed_seq, state.to_array()]
+	return [peer_id, global_position, velocity, last_processed_seq, state.to_array(), health]
 
 
 # --- Local client ---
 
 ## Predicts one step from this tick's input and returns the inputs to send.
 ## move_input is camera-relative (x right, y back).
-func client_predict(move_input: Vector2, buttons: int, delta: float, redundancy: int) -> Array:
+func client_predict(move_input: Vector2, buttons: int, aim_yaw: float, delta: float,
+		redundancy: int) -> Array:
 	_reconcile(delta)
 	var world := Vector3(move_input.x, 0.0, move_input.y).rotated(Vector3.UP, get_camera_yaw())
 	var move := Vector2(world.x, world.z).limit_length(1.0)
-	var input := [_next_seq, move, buttons]
+	var input := [_next_seq, move, buttons, aim_yaw]
 	_next_seq += 1
 	_pending_inputs.append(input)
 	if _pending_inputs.size() > MAX_PENDING_INPUTS:
 		_predictions.erase(_pending_inputs.pop_front()[0])
-	_simulate(move, buttons, delta)
+	_simulate(move, buttons, aim_yaw, delta)
 	_predictions[input[0]] = [global_position, state.copy()]
 	return _pending_inputs.slice(-redundancy)
 
@@ -170,7 +207,7 @@ func _reconcile(delta: float) -> void:
 	velocity = server_vel
 	state = server_state
 	for input in _pending_inputs:
-		PlayerMovement.step(self, state, input[1], input[2], params, delta)
+		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta)
 		_predictions[input[0]] = [global_position, state.copy()]
 
 
@@ -229,7 +266,8 @@ func interpolate(render_time: float) -> void:
 	var from_state: PlayerState = from[2]
 	var new_pos: Vector3 = from[1]
 	var yaw := from_state.yaw
-	var progress := from_state.dodge_progress(params)
+	var dodge_progress := from_state.dodge_progress(params)
+	var attack_tick := float(from_state.attack_tick)
 	if _snapshots.size() >= 2 and render_time > from[0]:
 		var to: Array = _snapshots[1]
 		var to_state: PlayerState = to[2]
@@ -237,7 +275,98 @@ func interpolate(render_time: float) -> void:
 		new_pos = from[1].lerp(to[1], weight)
 		yaw = lerp_angle(from_state.yaw, to_state.yaw, weight)
 		if from_state.is_dodging() and to_state.dodge_tick > from_state.dodge_tick:
-			progress = lerpf(progress, to_state.dodge_progress(params), weight)
+			dodge_progress = lerpf(dodge_progress, to_state.dodge_progress(params), weight)
+		if (from_state.is_attacking() and to_state.attack_type == from_state.attack_type
+				and to_state.attack_tick > from_state.attack_tick):
+			attack_tick = lerpf(from_state.attack_tick, to_state.attack_tick, weight)
 	distance_seen += global_position.distance_to(new_pos)
 	global_position = new_pos
-	_show(yaw, progress, from_state.is_invulnerable(params))
+	_show(yaw, dodge_progress, from_state.is_invulnerable(params), from_state.attack_type,
+			attack_tick)
+
+
+# --- Client feedback ---
+
+func set_health(value: float) -> void:
+	if value == health:
+		return
+	health = value
+	_update_label()
+
+
+## Shows a hit, evade or defeat reported by the server.
+func show_hit(damage: float, result: int) -> void:
+	var label := Label3D.new()
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.font_size = 56
+	label.outline_size = 10
+	label.position = Vector3(randf_range(-0.3, 0.3), 2.4, 0.0)
+	match result:
+		World.HIT_EVADED:
+			label.text = "Evaded"
+			label.modulate = Color(0.75, 0.9, 1.0)
+		World.HIT_DEFEATED:
+			label.text = "-%d  Defeated!" % damage
+			label.modulate = Color(1.0, 0.3, 0.2)
+		_:
+			label.text = "-%d" % damage
+			label.modulate = Color(1.0, 0.85, 0.3)
+	if result != World.HIT_EVADED:
+		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
+	add_child(label)
+	var tween := label.create_tween()
+	tween.set_parallel()
+	tween.tween_property(label, "position:y", 3.2, 0.8)
+	tween.tween_property(label, "modulate:a", 0.0, 0.8).set_delay(0.3)
+	tween.chain().tween_callback(label.queue_free)
+
+
+func _update_label() -> void:
+	# Your own health is on the HUD; a label over your head just covers others'.
+	_name_label.visible = not is_local
+	_name_label.text = "Player %d\n%d" % [peer_id % 10000, ceili(health)]
+
+
+## Applies facing, roll, sword swing, hitbox and color. Client only.
+## attack_tick is fractional for smooth remote swings; -1 when not attacking.
+func _show(yaw: float, dodge_progress: float, invulnerable: bool, attack_type: int,
+		attack_tick: float) -> void:
+	_model.rotation.y = yaw
+	# A full forward somersault over the roll.
+	_roll_pivot.rotation.x = 0.0 if dodge_progress < 0.0 else -TAU * dodge_progress
+
+	var attack := params.attack(attack_type) if attack_tick >= 0.0 else null
+	var pose := _sword_pose(attack, attack_type, attack_tick)
+	_sword_pivot.rotation = Vector3(pose.x, pose.y, 0.0)
+
+	_hitbox_debug.visible = show_hitboxes and attack != null
+	if _hitbox_debug.visible:
+		var box := _hitbox_debug.mesh as BoxMesh
+		box.size = Vector3(attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
+		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
+		var active := (attack_tick >= attack.windup_ticks
+				and attack_tick < attack.windup_ticks + attack.active_ticks)
+		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
+
+	if Time.get_ticks_msec() < _hit_flash_until:
+		_material.albedo_color = HIT_COLOR
+	elif invulnerable:
+		_material.albedo_color = INVULNERABLE_COLOR
+	else:
+		_material.albedo_color = _base_color
+
+
+## Sword pivot rotation: rest → wind up → strike through → back to rest.
+static func _sword_pose(attack: AttackParams, attack_type: int, tick: float) -> Vector2:
+	if attack == null:
+		return SWORD_IDLE
+	var wound := LIGHT_WOUND if attack_type == PlayerState.ATTACK_LIGHT else HEAVY_WOUND
+	var struck := LIGHT_STRUCK if attack_type == PlayerState.ATTACK_LIGHT else HEAVY_STRUCK
+	var windup := float(attack.windup_ticks)
+	var strike_end := windup + attack.active_ticks
+	if tick < windup:
+		return SWORD_IDLE.lerp(wound, tick / maxf(windup, 1.0))
+	if tick < strike_end:
+		return wound.lerp(struck, (tick - windup) / attack.active_ticks)
+	return struck.lerp(SWORD_IDLE, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
