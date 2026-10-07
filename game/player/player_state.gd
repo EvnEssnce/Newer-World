@@ -22,12 +22,16 @@ var dodge_dir := Vector2.ZERO
 var backstep := false
 ## Ticks a dodge press stays queued while a dodge isn't possible.
 var dodge_buffer := 0
+## Dodges started since last on the floor.
+var air_dodges_used := 0
 ## Facing around Y. 0 faces -Z.
 var yaw := 0.0
 
 
 ## Advances one tick. move is the world-space XZ input (length <= 1).
 func step(move: Vector2, buttons: int, on_floor: bool, params: PlayerParams, delta: float) -> void:
+	if on_floor:
+		air_dodges_used = 0
 	if dodge_tick >= 0:
 		dodge_tick += 1
 		if dodge_tick >= params.dodge_ticks:
@@ -39,6 +43,8 @@ func step(move: Vector2, buttons: int, on_floor: bool, params: PlayerParams, del
 		dodge_buffer -= 1
 		if can_dodge(on_floor, params):
 			_start_dodge(move, params)
+			if not on_floor:
+				air_dodges_used += 1
 
 	if dodge_tick < 0:
 		if stamina_regen_wait > 0:
@@ -50,7 +56,8 @@ func step(move: Vector2, buttons: int, on_floor: bool, params: PlayerParams, del
 
 
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
-	return dodge_tick < 0 and on_floor and stamina >= params.dodge_stamina_cost
+	return (dodge_tick < 0 and stamina >= params.dodge_stamina_cost
+			and (on_floor or air_dodges_used < params.max_air_dodges))
 
 
 func is_dodging() -> bool:
@@ -89,7 +96,8 @@ static func yaw_for_direction(direction: Vector2) -> float:
 # --- Network / reconciliation ---
 
 func to_array() -> Array:
-	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, backstep, dodge_buffer, yaw]
+	return [stamina, stamina_regen_wait, dodge_tick, dodge_dir, backstep, dodge_buffer, yaw,
+			air_dodges_used]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -101,6 +109,7 @@ static func from_array(data: Array) -> PlayerState:
 	s.backstep = data[4]
 	s.dodge_buffer = data[5]
 	s.yaw = data[6]
+	s.air_dodges_used = data[7]
 	return s
 
 
@@ -113,4 +122,5 @@ func matches(other: PlayerState) -> bool:
 	return (absf(stamina - other.stamina) < 0.001
 			and stamina_regen_wait == other.stamina_regen_wait
 			and dodge_tick == other.dodge_tick
-			and dodge_buffer == other.dodge_buffer)
+			and dodge_buffer == other.dodge_buffer
+			and air_dodges_used == other.air_dodges_used)

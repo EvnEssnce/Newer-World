@@ -27,6 +27,7 @@ var state := PlayerState.new()
 var params := PlayerParams.current()
 ## Dodges started (counted once per real simulation step, not on replays).
 var dodges := 0
+var air_dodges := 0
 
 # Server
 var last_processed_seq := 0
@@ -76,9 +77,12 @@ func _process(_delta: float) -> void:
 
 
 func _simulate(move: Vector2, buttons: int, delta: float) -> void:
+	var was_on_floor := is_on_floor()
 	PlayerMovement.step(self, state, move, buttons, params, delta)
 	if state.dodge_tick == 0:
 		dodges += 1
+		if not was_on_floor:
+			air_dodges += 1
 
 
 ## Applies the facing, roll and i-frame look. Client only.

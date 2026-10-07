@@ -7,6 +7,8 @@ const TEST_DIR := "res://tests/"
 
 
 func _ready() -> void:
+	# Wait until the scene tree is set up, so tests can add nodes (e.g. physics bodies).
+	await get_tree().process_frame
 	var passed := 0
 	var failed := 0
 	for file_name in DirAccess.get_files_at(TEST_DIR):

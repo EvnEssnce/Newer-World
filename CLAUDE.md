@@ -96,13 +96,13 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1        # serve
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Bot   # second client is a bot
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: see each other move, dodge, 0 corrections
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: see each other move, ground + air dodge, 0 corrections
 ```
 
 Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect, walk in circles, dodge every 2 s), `--verbose` (log positions every 2 s),
+`--bot` (auto-connect, walk in circles, jump + air dodge + ground dodge every 3 s), `--verbose` (log positions every 2 s),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test).
 
 After adding a `class_name` script outside the editor, run

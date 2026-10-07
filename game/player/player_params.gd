@@ -28,6 +28,8 @@ var dodge_speed := 0.0
 var iframe_start_tick := 0
 var iframe_end_tick := 0
 var dodge_buffer_ticks := 0
+## Dodges allowed per time in the air. 0 = ground only.
+var max_air_dodges := 0
 
 static var _current: PlayerParams
 
@@ -61,4 +63,5 @@ static func from_tuning() -> PlayerParams:
 	p.iframe_start_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_start") * tps)
 	p.iframe_end_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_end") * tps)
 	p.dodge_buffer_ticks = roundi(Tuning.get_value("combat", "dodge", "buffer") * tps)
+	p.max_air_dodges = Tuning.get_value("combat", "dodge", "air_dodges")
 	return p

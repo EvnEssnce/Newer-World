@@ -21,6 +21,7 @@ func before_each() -> void:
 	params.iframe_start_tick = 2
 	params.iframe_end_tick = 12
 	params.dodge_buffer_ticks = 5
+	params.max_air_dodges = 1
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 
@@ -49,7 +50,30 @@ func test_cannot_dodge_without_enough_stamina() -> void:
 	assert_almost(state.stamina, 29.0)
 
 
-func test_cannot_dodge_in_the_air() -> void:
+func test_can_dodge_in_the_air() -> void:
+	_step(DODGE, Vector2.RIGHT, false)
+	assert_true(state.is_dodging())
+	assert_almost(state.stamina, 70.0)
+
+
+func test_air_dodges_limited_per_jump() -> void:
+	_step(DODGE, Vector2.RIGHT, false)
+	_steps(params.dodge_ticks, 0, Vector2.RIGHT, false)
+	_step(DODGE, Vector2.RIGHT, false)
+	assert_false(state.is_dodging(), "second air dodge")
+	assert_almost(state.stamina, 70.0)
+
+
+func test_landing_resets_air_dodges() -> void:
+	_step(DODGE, Vector2.RIGHT, false)
+	_steps(params.dodge_ticks, 0, Vector2.RIGHT, false)
+	_step()  # land
+	_step(DODGE, Vector2.RIGHT, false)  # jumped again
+	assert_true(state.is_dodging())
+
+
+func test_zero_air_dodges_means_ground_only() -> void:
+	params.max_air_dodges = 0
 	_step(DODGE, Vector2.RIGHT, false)
 	assert_false(state.is_dodging())
 	assert_almost(state.stamina, 100.0)
@@ -92,6 +116,7 @@ func test_buffered_press_dodges_as_soon_as_roll_ends() -> void:
 
 
 func test_buffered_press_fires_on_landing() -> void:
+	state.air_dodges_used = 1  # air dodge already spent, so it has to wait
 	_step(DODGE, Vector2.RIGHT, false)
 	_steps(4, 0, Vector2.RIGHT, false)
 	_step()
@@ -99,6 +124,7 @@ func test_buffered_press_fires_on_landing() -> void:
 
 
 func test_buffered_press_expires() -> void:
+	state.air_dodges_used = 1
 	_step(DODGE, Vector2.RIGHT, false)
 	_steps(5, 0, Vector2.RIGHT, false)
 	_step()

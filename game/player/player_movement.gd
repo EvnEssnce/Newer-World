@@ -12,6 +12,8 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	state.step(move, buttons, on_floor, params, delta)
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
+	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as
+	# normal, so an air dodge keeps its arc.
 	if state.is_dodging():
 		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
 	else:

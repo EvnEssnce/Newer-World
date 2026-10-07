@@ -7,6 +7,23 @@ attacks, block, one enemy.
 
 ## Session log
 
+### 2026-10-07 (3): Dodge playtest feedback, air dodge
+
+Playtest verdict (developer): roll distance/speed, recovery into movement, time between
+rolls, i-frame window and stamina values all feel right; keep them. Holding Shift
+rolling only once is intended. Stamina may later depend on equipped weapon/armor.
+
+Done:
+- Air dodge: allowed in the air, changes only horizontal movement; gravity and the jump
+  arc carry on. Limited to `air_dodges` per time in the air (default 1, resets on
+  landing; 0 = ground only) in `data/combat.cfg`.
+- Tests: 19 (air dodge rules, plus physics tests proving an air dodge leaves vertical
+  motion unchanged). Test runner now waits a frame so tests can add physics bodies.
+- Bot now jumps, air dodges and ground dodges; smoke test requires both kinds with
+  0 corrections. Result: 5 dodges (3–4 in the air) per bot, 0 corrections.
+
+Needs a hand playtest: air dodge feel, and whether 1 air dodge per jump is right.
+
 ### 2026-10-07 (2): Stamina and dodge roll
 
 Done:
@@ -39,7 +56,7 @@ right and that the other window shows the roll, then tune `data/combat.cfg`.
 
 ## Next
 
-1. Hand-playtest the dodge and tune `data/combat.cfg`.
+1. Hand-playtest the air dodge.
 2. Milestone 1, one session each:
    - Light and heavy attacks (sword) with server-side hitbox detection against other
      players, respecting i-frames. Damage and timings in `data/combat.cfg`.

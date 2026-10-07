@@ -27,7 +27,7 @@ var _interpolation_delay := 0.1
 var _input_redundancy := 3
 var _snapshots_received := 0
 var _bot := false
-var _bot_dodge_window := 0
+var _bot_last_phase := 0.0
 var _verbose := false
 var _log_timer := 0.0
 
@@ -134,15 +134,17 @@ func _client_tick(delta: float) -> void:
 	var move := Vector2.ZERO
 	var buttons := 0
 	if _bot:
-		# Walk in circles, hop and dodge now and then, for testing without a second person.
+		# Walk in circles; every 3 s jump, air dodge 0.15 s later, and ground dodge
+		# at 1.5 s. For testing without a second person.
 		var t := Time.get_ticks_msec() / 1000.0 + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(t * 0.8), sin(t * 0.8))
-		if fmod(t, 3.0) < 0.05:
+		var phase := fmod(t, 3.0)
+		if phase < 0.05:
 			buttons |= PlayerState.BUTTON_JUMP
-		var dodge_window := floori(t / 2.0)
-		if dodge_window != _bot_dodge_window:
-			_bot_dodge_window = dodge_window
-			buttons |= PlayerState.BUTTON_DODGE
+		for dodge_at: float in [0.15, 1.5]:
+			if _bot_last_phase < dodge_at and phase >= dodge_at:
+				buttons |= PlayerState.BUTTON_DODGE
+		_bot_last_phase = phase
 	else:
 		move = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 		if Input.is_action_pressed(&"jump"):
@@ -231,9 +233,9 @@ func print_summary() -> void:
 		print("SUMMARY server players=%d ticks=%d" % [_players.get_child_count(), _tick])
 		return
 	if _local_player:
-		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d" % [
+		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,
-				_local_player.dodges])
+				_local_player.dodges, _local_player.air_dodges])
 	for player: Player in _players.get_children():
 		if not player.is_local:
 			print("SUMMARY client=%d remote=%d moved=%.1f" % [
