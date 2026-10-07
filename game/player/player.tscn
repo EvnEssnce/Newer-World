@@ -24,12 +24,14 @@ shape = SubResource("CapsuleShape3D_body")
 
 [node name="Model" type="Node3D" parent="."]
 
-[node name="Body" type="MeshInstance3D" parent="Model"]
+[node name="RollPivot" type="Node3D" parent="Model"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+
+[node name="Body" type="MeshInstance3D" parent="Model/RollPivot"]
 mesh = SubResource("CapsuleMesh_body")
 
-[node name="Nose" type="MeshInstance3D" parent="Model"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.45, -0.4)
+[node name="Nose" type="MeshInstance3D" parent="Model/RollPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.55, -0.4)
 mesh = SubResource("BoxMesh_nose")
 
 [node name="NameLabel" type="Label3D" parent="."]

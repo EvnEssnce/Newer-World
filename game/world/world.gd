@@ -27,6 +27,7 @@ var _interpolation_delay := 0.1
 var _input_redundancy := 3
 var _snapshots_received := 0
 var _bot := false
+var _bot_dodge_window := 0
 var _verbose := false
 var _log_timer := 0.0
 
@@ -86,7 +87,7 @@ func _server_tick(delta: float) -> void:
 func _broadcast_snapshot() -> void:
 	var states: Array = []
 	for player: Player in _players.get_children():
-		states.append(player.get_state())
+		states.append(player.get_snapshot())
 	var connected := multiplayer.get_peers()
 	for player: Player in _players.get_children():
 		# A peer can be mid-disconnect for a moment before peer_left fires.
@@ -131,16 +132,24 @@ func _on_peer_left(peer_id: int) -> void:
 
 func _client_tick(delta: float) -> void:
 	var move := Vector2.ZERO
-	var jump := false
+	var buttons := 0
 	if _bot:
-		# Walk in circles and hop now and then, for testing without a second person.
+		# Walk in circles, hop and dodge now and then, for testing without a second person.
 		var t := Time.get_ticks_msec() / 1000.0 + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(t * 0.8), sin(t * 0.8))
-		jump = fmod(t, 3.0) < 0.05
+		if fmod(t, 3.0) < 0.05:
+			buttons |= PlayerState.BUTTON_JUMP
+		var dodge_window := floori(t / 2.0)
+		if dodge_window != _bot_dodge_window:
+			_bot_dodge_window = dodge_window
+			buttons |= PlayerState.BUTTON_DODGE
 	else:
 		move = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
-		jump = Input.is_action_pressed(&"jump")
-	var inputs := _local_player.client_predict(move, jump, delta, _input_redundancy)
+		if Input.is_action_pressed(&"jump"):
+			buttons |= PlayerState.BUTTON_JUMP
+		if Input.is_action_just_pressed(&"dodge"):
+			buttons |= PlayerState.BUTTON_DODGE
+	var inputs := _local_player.client_predict(move, buttons, delta, _input_redundancy)
 	_submit_inputs.rpc_id(1, inputs)
 
 
@@ -158,9 +167,9 @@ func _receive_snapshot(tick: int, states: Array) -> void:
 		if player == null:
 			player = _spawn_client_player(peer_id, peer_id == my_id, state[1])
 		if player.is_local:
-			player.client_receive_ack(state[1], state[2], state[4])
+			player.client_receive_ack(state[1], state[2], state[3], state[4])
 		else:
-			player.push_snapshot(server_time, state[1], state[3])
+			player.push_snapshot(server_time, state[1], state[4])
 	for player: Player in _players.get_children():
 		if not seen.has(player.peer_id):
 			print("[client] peer %d left" % player.peer_id)
@@ -204,6 +213,8 @@ func _update_hud() -> void:
 	if _bot:
 		lines.append("BOT MODE")
 	_hud.set_info("\n".join(lines))
+	if _local_player:
+		_hud.set_stamina(_local_player.state.stamina, _local_player.params.max_stamina)
 
 
 func _describe_players() -> String:
@@ -220,8 +231,9 @@ func print_summary() -> void:
 		print("SUMMARY server players=%d ticks=%d" % [_players.get_child_count(), _tick])
 		return
 	if _local_player:
-		print("SUMMARY client=%d snapshots=%d corrections=%d" % [
-				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections])
+		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d" % [
+				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,
+				_local_player.dodges])
 	for player: Player in _players.get_children():
 		if not player.is_local:
 			print("SUMMARY client=%d remote=%d moved=%.1f" % [

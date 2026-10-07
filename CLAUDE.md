@@ -18,8 +18,13 @@ codebase.** Update `PROGRESS.md` at the end of every session.
   these files directly to tune game feel.
 - **Persistence goes through one module** (not built yet; milestone 5). SQLite in dev,
   Postgres later. Nothing else touches the database.
-- **Tests** (GUT, not installed yet) for systems that don't depend on feel: loot rolls,
-  damage formulas, crafting outputs, inventory rules. Combat feel is playtested by hand.
+- **Tests** for systems that don't depend on feel: loot rolls, damage formulas, crafting
+  outputs, inventory rules, stamina/dodge rules. Combat feel is playtested by hand. Tests
+  use a small in-repo runner (`tests/framework/`), not GUT: extend `TestCase`, put
+  `test_*` methods in `tests/test_*.gd`, and build params by hand instead of reading
+  `data/` so tuning edits don't break tests.
+- **Keep game logic separate from physics where possible** (like `PlayerState`), so it
+  can be unit tested without a scene.
 - **Original names, art and UI.** Mechanics can be borrowed from New World; names,
   item names, art and UI layouts can't.
 - One testable goal per session. Keep sessions focused (the developer is on Claude Pro).
@@ -36,13 +41,15 @@ core/
 game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
   world/world.gd     Server sim loop + snapshots; client input sending, prediction, interpolation.
-  player/player.gd   One player; server/local/remote roles (see below).
-  player/player_movement.gd  Shared deterministic movement step.
-ui/                  connect_menu (client start screen), hud (debug overlay).
-data/                Tuning files: network.cfg, movement.cfg, camera.cfg.
+  player/player.gd   One player; server/local/remote roles (see below), visuals.
+  player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
+  player/player_state.gd     Stamina, dodge, facing, input buttons. Pure logic, unit tested.
+  player/player_params.gd    Player tuning converted to ticks/radians, loaded once.
+ui/                  connect_menu (client start screen), hud (stamina bar, debug info).
+data/                Tuning files: network, movement, combat, camera (.cfg).
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
-tests/               GUT tests (none yet).
-tools/               PowerShell run scripts and the smoke test.
+tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
+tools/               PowerShell run scripts, unit test runner, smoke test.
 ```
 
 ## Networking model
@@ -51,24 +58,32 @@ tools/               PowerShell run scripts and the smoke test.
   RPCs are matched by node path. Player nodes are named by peer id under `World/Players`.
 - `server_relay` is off: clients never hear from each other directly, only via snapshots.
 - **Client → server**, every physics tick, `World._submit_inputs` (unreliable ordered,
-  channel 1): the last `input_redundancy` inputs, each `[seq, move: Vector2, jump: bool]`.
+  channel 1): the last `input_redundancy` inputs, each `[seq, move: Vector2, buttons: int]`.
   `move` is a world-space XZ direction (camera rotation already applied), length ≤ 1.
+  `buttons` holds `PlayerState.BUTTON_*` bits. Jump is sent while held, dodge only on the
+  tick it's pressed (the sim buffers it). New actions (attacks, block) get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
-  simulates at most `max_inputs_per_tick` per tick. **One input = one movement step**; a
+  simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
 - **Server → each client**, `snapshot_rate` times per second, `World._receive_snapshot`
   (unreliable ordered, channel 2): `tick` and every player's
-  `[peer_id, position, velocity, yaw, last_processed_seq]`. Snapshots also drive
-  spawning/despawning on clients: new id → spawn, missing id → remove.
-- **Local player**: applies each input immediately (`PlayerMovement.step`) and remembers
-  the predicted position per seq. On a snapshot, if the server's position for
-  `last_processed_seq` differs from the prediction by more than `RECONCILE_TOLERANCE`,
-  it rewinds to the server state and replays unacknowledged inputs ("corrections" on the HUD).
+  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array()]`. Snapshots
+  also drive spawning/despawning on clients: new id → spawn, missing id → remove.
+- **Local player**: applies each input immediately and remembers the predicted position
+  and `PlayerState` per seq. On a snapshot, if the server's position or state for
+  `last_processed_seq` differs from the prediction, it restores the server's position,
+  velocity and state and replays unacknowledged inputs ("corrections" on the HUD; should
+  stay 0 on localhost).
 - **Remote players**: drawn `interpolation_delay` seconds in the past, interpolated
-  between snapshots on a render clock synced to server ticks.
+  between snapshots on a render clock synced to server ticks. Roll and i-frame visuals
+  come from the interpolated `PlayerState`.
 - Players don't collide with each other (layer 2, mask 1). The world is layer 1.
-- Anything that changes movement must change `PlayerMovement.step`, which both the server
-  and the prediction run. Keep it deterministic and free of `Input` reads.
+- **All simulated state lives in `PlayerState`** (plus position/velocity). If something
+  affects the sim and isn't in `to_array()`, reconciliation will break. Anything that
+  changes the sim goes in `PlayerState.step` or `PlayerMovement.step`, which both server
+  and prediction run. Keep them deterministic: no randomness, no `Input`, durations in ticks.
+- **I-frames**: `PlayerState.is_invulnerable(params)`. Hit detection (not built yet) must
+  check it on the server. Clients flash the body white while it's true.
 
 ## Running
 
@@ -80,11 +95,14 @@ run them with `-ExecutionPolicy Bypass`:
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1        # server + 2 client windows
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Bot   # second client is a bot
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # automated: 2 bots must see each other move
+powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots: see each other move, dodge, 0 corrections
 ```
 
+Run both `run_tests.ps1` and `smoke_test.ps1` before committing.
+
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect and walk in circles), `--verbose` (log positions every 2 s),
+`--bot` (auto-connect, walk in circles, dodge every 2 s), `--verbose` (log positions every 2 s),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test).
 
 After adding a `class_name` script outside the editor, run

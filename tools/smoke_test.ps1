@@ -36,6 +36,20 @@ foreach ($name in 'client1', 'client2') {
     } else {
         Write-Host "PASS ${name}: $($summary.Line)" -ForegroundColor Green
     }
+    # The bot dodges every 2 s. Prediction must match the server, dodges included.
+    $local = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ snapshots=\d+ corrections=(\d+) dodges=(\d+)'
+    if (-not $local) {
+        Write-Host "FAIL ${name}: no local player summary" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$local.Matches[0].Groups[2].Value -lt 1) {
+        Write-Host "FAIL ${name}: bot never dodged ($($local.Line))" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$local.Matches[0].Groups[1].Value -gt 2) {
+        Write-Host "FAIL ${name}: prediction disagreed with the server ($($local.Line))" -ForegroundColor Red
+        $failed = $true
+    } else {
+        Write-Host "PASS ${name}: $($local.Line)" -ForegroundColor Green
+    }
 }
 $errors = Get-ChildItem $logDir -Filter '*.err.log' | Select-String -Pattern 'ERROR|SCRIPT ERROR'
 if ($errors) {
