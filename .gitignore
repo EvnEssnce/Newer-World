@@ -1,0 +1,20 @@
+# Godot 4 editor/import cache (regenerated on open)
+.godot/
+
+# Godot-specific ignores
+*.translation
+export_credentials.cfg
+
+# Build output
+/build/
+
+# Mono/C# (not used, kept in case)
+.mono/
+data_*/
+mono_crash.*.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp
+.vscode/

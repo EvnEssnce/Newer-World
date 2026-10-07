@@ -1,0 +1,13 @@
+# Normalize line endings so Godot's text files diff cleanly across machines.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.glb binary
+*.fbx binary
+*.wav binary
+*.ogg binary
+*.ttf binary
