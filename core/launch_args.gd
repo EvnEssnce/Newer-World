@@ -4,7 +4,7 @@ class_name LaunchArgs
 ##   godot --headless -- --server --port=24565
 ##   godot -- --connect --address=192.168.1.20:24565
 ##
-## Flags: --server, --connect, --bot, --verbose, --hitboxes. Values: --port=,
+## Flags: --server, --connect, --bot, --bot-party, --verbose, --hitboxes. Values: --port=,
 ## --address=, --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning).
 
 

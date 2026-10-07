@@ -10,6 +10,12 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	&"jump": [KEY_SPACE],
 	&"dodge": [KEY_SHIFT],
 	&"toggle_hitboxes": [KEY_F3],
+	# Party (PartySystem). Invite/kick target the player nearest the crosshair.
+	&"party_invite": [KEY_T],
+	&"party_accept": [KEY_Y],
+	&"party_decline": [KEY_N],
+	&"party_leave": [KEY_L],
+	&"party_kick": [KEY_DELETE],
 }
 
 const MOUSE_BINDINGS: Dictionary[StringName, Array] = {

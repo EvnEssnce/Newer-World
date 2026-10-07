@@ -33,6 +33,8 @@ const INVULNERABLE_COLOR := Color(0.95, 0.95, 1.0)
 const HIT_COLOR := Color(1.0, 0.15, 0.1)
 const DEAD_COLOR := Color(0.35, 0.35, 0.38)
 const HIT_FLASH_MS := 150
+## Nameplate colour of party members (others' are white).
+const PARTY_NAME_COLOR := Color(0.45, 0.9, 1.0)
 ## Body tilt (radians, backward) while staggered.
 const STAGGER_TILT := 0.4
 ## Shield pivot position/yaw at the left side, and raised in front while blocking.
@@ -343,6 +345,12 @@ func _update_label() -> void:
 	_name_label.visible = not is_local
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
 	_name_label.text = "Player %d\n%s" % [peer_id % 10000, status]
+
+
+## Nameplate colour for players in your party (client, cosmetic). Set by
+## PartySystem every frame.
+func set_party_member(member: bool) -> void:
+	_name_label.modulate = PARTY_NAME_COLOR if member else Color.WHITE
 
 
 ## Applies facing, roll, stagger/death pose, sword swing, hitbox and color.
