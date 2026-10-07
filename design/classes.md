@@ -16,19 +16,31 @@ that:
 | **Weapon** | Weapon type | Light/heavy attacks, a pool of weapon abilities | That weapon's mastery level |
 | **Wings** | Class | Class abilities (the phoenix half) | Wing tree, from character level |
 
+- **Class** is picked when the character is created and **can't be changed**. Weapon lists
+  are strict: each weapon belongs to exactly one class, and no other class can equip it.
+- **No attributes** (strength, dexterity and so on) for now. Builds come from the trees.
+  Phoenix/fire-themed attributes may be added later.
 - **Weapons.** You equip 2 of your class's weapons and swap with a key. Each weapon has
   light and heavy attacks plus **3 ability slots**, filled from a pool of about 6 abilities
   that you unlock in its mastery tree. Abilities run on cooldowns.
 - **Wings.** Every class has **2 Wing ability slots** that stay the same when you swap
   weapons. They're fuelled by **Ember** (see below) and also have short cooldowns.
-- **Ember (proposed).** This is the phoenix resource and the main thing that sets this game
-  apart from New World. A 0–100 meter fills when you deal damage, take damage or heal, and
-  slowly drains when you're out of combat. Wing abilities spend it. This makes Wings feel
-  like something you earn in a fight, not just another cooldown.
-- **Rebirth (proposed, all classes).** You can self-revive once in a while. When you die
-  with a full Ember meter, you can rise again in place with part of your health instead of
-  waiting for the respawn timer. It has a long cooldown and fits the phoenix theme. The
-  Paladin's tree makes it stronger and lets them use it on allies.
+- **Ember.** This is the phoenix resource and the main thing that sets this game apart from
+  New World. It works like this:
+  - **Cap:** 100 by default. Upgrades earned through progression raise it.
+  - **Resting level:** 50. Out of combat, Ember settles back to 50: it refills if you're
+    below and drains if you're above. So every fight starts with 50.
+  - **Gaining Ember:** dealing damage, taking damage and healing all add to it.
+  - **Spending Ember:** Wing abilities cost Ember. **Mage weapon abilities also cost Ember**
+    (Mages have no mana), so Mages need a higher Ember gain rate. Tune it once both exist.
+- **Rebirth (all classes).** When you die with at least **50 Ember**, you rise again
+  **automatically** after a **5 second** rebirth animation, in place, with **30% health**,
+  instead of waiting for the respawn timer. It spends the 50 Ember and has a **5 minute
+  cooldown**. This creates the main Ember decision in a fight: spend it on Wings now, or
+  keep 50 in reserve so you can come back. Paladin abilities can shorten allies' Rebirth
+  cooldowns and grant temporary extra Rebirths.
+- **PvE first.** The game is balanced for fighting enemies. PvP is a much smaller focus, so
+  taunts and threat are worth building, and party members never damage each other.
 
 ### Tree shape (weapon mastery and Wings)
 
@@ -40,8 +52,8 @@ There are three kinds of node:
 - **Upgrade:** changes an ability you've unlocked (shorter cooldown, adds a slow, and so on).
 
 You get 1 point per level. With a level cap of 20 (19 points) and about 13 points per
-branch, you can max one branch and dip into the other, but you can't max both. Respecs are
-cheap, so trying out builds is encouraged.
+branch, you can max one branch and dip into the other, but you can't max both. **Respecs are
+free and can be done at any time**, so trying out builds costs nothing.
 
 ### Roster at a glance
 
@@ -63,7 +75,9 @@ the **Longstaff** (a melee quarterstaff) to keep them apart. See the open questi
 Each ability below is tagged with the engine systems it needs. That shows what has to be
 built before the ability can exist:
 
-- `PROJ`: projectiles (none exist yet; every ranged weapon needs them)
+- `PROJ`: projectiles (none exist yet; every ranged weapon needs them). Most projectiles
+  (arrows, bolts, knives, Firebolts) are **feather-shaped**: that's the game's visual
+  signature.
 - `STATUS`: buffs and debuffs with durations (bleed, burn, slow, root, stun, silence, damage reduction)
 - `DASH`: the caster moves themselves (lunge, leap, blink)
 - `FORCE`: moves other players (knockback, pull, knock-up)
@@ -182,7 +196,7 @@ Medium range with heavy hits and reloads. Burst, then a vulnerable window.
 | Quick Reload | Instant reload, and the next bolt slows. | STATUS |
 
 ### Firebolts
-Rapid-fire phoenix flame from the hands at short-to-mid range. Built around stacking burn.
+Hand-fired, rapid-fire burning feathers at short-to-mid range. Built around stacking burn.
 - **Branch: Kindling.** Builds burn stacks. *Capstone:* burn can stack twice as high.
 - **Branch: Flashfire.** Cashes out stacks for burst. *Capstone:* Ignite refunds Ember for
   each stack it consumes.
@@ -349,7 +363,7 @@ Area damage and big spells. Fire-themed to match the phoenix.
 - **Branch: Conflagration.** Area of effect and burns. *Capstone:* your burning ground
   spreads to adjacent ground over time.
 - **Branch: Focus.** Single target and charged spells. *Capstone:* fully charged casts cost
-  no mana.
+  no Ember.
 
 | Ability | Effect | Tags |
 |---|---|---|
@@ -428,56 +442,72 @@ Reach and sweeps. Protects an area.
 
 ### Paladin Wings: defensive wings and cleansing
 - **Branch: Aegis.** Protecting others. *Capstone:* Sheltering Wings reflect projectiles.
-- **Branch: Purifier.** Cleansing and rebirth. *Capstone:* you can use Rebirth on a fallen
-  ally.
+- **Branch: Purifier.** Cleansing and Rebirth support. Passives in this branch:
+  - Cleansing Flame also takes 30 s off the Rebirth cooldown of each ally it touches.
+  - Allies near you need 10 less Ember to Rebirth.
+
+  *Capstone:* Phoenix Blessing also refills the Ember of each ally it touches to at least 50.
 
 | Ability | Effect | Tags |
 |---|---|---|
 | Sheltering Wings | Spreads the wings into a frontal barrier that stops projectiles for you and allies behind you. | SUMMON |
 | Cleansing Flame | Removes debuffs from you and allies nearby. | ALLY, STATUS |
 | Guardian Wing | Links to an ally; you take part of their damage. | ALLY, STATUS |
-| Kindle Life | Revives a downed ally quickly, or pushes back their death timer. | ALLY |
+| Phoenix Blessing | For 30 s, allies nearby get one extra Rebirth that ignores the cooldown. Long cooldown. | ALLY, STATUS |
+| Kindle Life | Channel on a fallen ally to Rebirth them, even if their Rebirth is on cooldown or they're short on Ember. | ALLY |
 
 ---
 
 ## Build order
 
-Every class depends on systems that don't exist yet. Here is a suggested order, matched to
-the brief's milestones:
+Every class depends on systems that don't exist yet. The work is split into waves. Tasks
+within a wave run in parallel on separate branches. A wave starts only once the one
+before it has been merged and tested.
 
-1. **Ability framework + weapon swap** (milestone 4): cooldowns in ticks inside
-   `PlayerState`, ability slots, one `data/weapon_<name>.cfg` per weapon. Build it with
-   **Fighter: Broadsword + Dual Axes** and one Fighter Wing ability. That needs no new
-   systems apart from `STATUS` and `DASH`.
-2. **Status effects** (`STATUS`): durations in ticks, kept in `PlayerState` if they affect
-   movement or actions (slow, root, stun), or server-only if they only affect damage
-   (bleed, Exposed). Unlocks most of the list.
-3. **Forced movement** (`FORCE`): knockback and pull. These are server events, like
-   stagger, so they don't count as corrections.
-4. **Projectiles** (`PROJ`): server-simulated, with client-side visuals. Unlocks the Ranger,
-   Mage, Throwing Knives and every throw.
-5. **Parties + ally targeting** (`ALLY`): needed for healers. Unlocks Mage Gauntlet and
-   Paladin.
-6. **Ember meter + Wing slots.**
-7. **Ground effects, summons, traps** (`AREA`, `SUMMON`).
-8. **Enemy AI threat** (needed for taunt), **stealth**, **Updraft hover**: last.
+**Wave 1** (milestone 4: second weapon and weapon swap)
+- **1A. Ability framework + weapon swap + the Fighter class.**
+  - Ability slots, with cooldowns in ticks inside `PlayerState`.
+  - One `data/weapon_<name>.cfg` per weapon.
+  - Mastery tree logic, with free respecs.
+  - Built with **Broadsword** (today's sword) and **Dual Axes**, using only abilities
+    that need nothing new, or only `DASH`.
+- **1B. Parties + ally rules** (`ALLY` foundation).
+  - Invite, accept and leave, decided by the server.
+  - Party members can't damage each other.
+  - Party health frames on the HUD.
+  - Doesn't touch `PlayerState`.
 
-A sensible order for classes: Fighter → Juggernaut (melee only, mostly `FORCE`) → Assassin
-(Talons first) → Ranger → Mage → Paladin.
+**Wave 2** (each one also adds the Fighter abilities that need it)
+- **2A. Status effects** (`STATUS`). Durations in ticks. Effects that change movement or
+  actions (slow, root, stun) live in `PlayerState`. Effects that only change damage
+  (bleed, Exposed) can stay on the server.
+- **2B. Forced movement** (`FORCE`): knockback and pull. These are server events, like
+  stagger, so they don't count as corrections.
+- **2C. Projectiles** (`PROJ`). Simulated on the server, drawn on clients, feather-shaped.
+- **2D. Ember, Wing slots and Rebirth.** Rebirth plugs into the existing death and
+  respawn flow.
 
-## Open questions
+**Wave 3**
+- The Spear and the rest of the Fighter's Wing abilities.
+- Enemy threat (needed for taunt).
+- The Juggernaut.
 
-1. **Class choice.** Is it fixed per character, or switchable at a camp or town? Each
-   choice is fine but affects how much grinding a switch costs.
-2. **Shared Great Staff.** Is the Paladin's a melee Longstaff as drafted here, or should
-   both classes share one staff with different abilities?
-3. **Firebolts.** Is it a magic hand-fired weapon as drafted here, or something like a
-   flame-tipped bolt launcher?
-4. **Ember.** Do you want a separate resource for Wings, or only cooldowns? Does the Mage
-   also need mana (like New World), or does it run on cooldowns and Ember only?
-5. **Attributes.** New World uses stat points (strength, dexterity and so on) that scale
-   weapons. With classes, these could be dropped, or kept as a small "build" layer.
-6. **Can classes share weapons later?** For example, can a Fighter pick up a Juggernaut
-   weapon at a penalty, or are weapon lists strict?
-7. **PvP vs PvE.** Taunt and threat only matter against AI. Should tanks in PvP rely mainly
-   on crowd control and peel?
+**Later**
+- Ground effects, summons and traps (`AREA`, `SUMMON`).
+- Stealth.
+- Updraft hover.
+
+Class order after the Fighter: Juggernaut (melee only, mostly `FORCE`) → Assassin (Talons
+first) → Ranger → Mage → Paladin.
+
+## Decisions (2026-10-07)
+
+- Class is fixed per character. Classes don't share weapons.
+- Firebolts are a hand-fired weapon. Bolts, arrows, knives and most other projectiles are
+  feather-shaped.
+- Mages use Ember instead of mana.
+- Rebirth is automatic: a 5 s animation, then you're back with 30% health. It needs and
+  spends 50 Ember and has a 5 minute cooldown.
+- No attributes for now. Phoenix/fire-themed ones may come later.
+- PvE is the main focus; PvP is minor.
+- Respecs are free at any time.
