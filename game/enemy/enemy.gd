@@ -45,8 +45,18 @@ var attack_results: Dictionary[int, bool] = {}
 var _rng := RandomNumberGenerator.new()
 var _gravity := 0.0
 
+# Statuses (server; clients get a copy in snapshots for the label)
+## Buffs and debuffs, indices into status_defs. Slow and root change its
+## steering, stun staggers its brain, the rest change damage.
+var statuses := StatusEffects.new()
+var status_defs := StatusDefs.current()
+## Damage over time (bleed) due from this tick's server_step, before its
+## damage_taken multiplier. World applies it.
+var status_damage := 0.0
+
 # Client
 var _snapshots: Array[Array] = []  # [server_time, pos, yaw, mode, attack_tick, dead]
+var _status_text := ""
 var _material: StandardMaterial3D
 var _hitbox_material: StandardMaterial3D
 var _hit_flash_until := 0
@@ -83,9 +93,11 @@ func _ready() -> void:
 func server_step(targets: Dictionary, delta: float) -> void:
 	if dead:
 		return
+	status_damage = statuses.tick(status_defs)
 	var desired := brain.step(global_position, home, targets, params, delta, _rng)
 	if brain.attack_tick == 0:
 		attack_results.clear()
+	desired = _apply_status_movement(desired)
 	velocity.x = desired.x
 	velocity.z = desired.y
 	velocity.y = 0.0 if is_on_floor() else velocity.y - _gravity * delta
@@ -102,14 +114,35 @@ func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
 	if health <= 0.0:
 		dead = true
 		velocity = Vector3.ZERO
+		statuses.clear()
 		return true
-	brain.aggro(attacker_id)
+	if attacker_id > 0:
+		brain.aggro(attacker_id)
 	brain.stagger(roundi(stagger_ticks * params.stagger_multiplier))
 	return false
 
 
+## Server: applies a status (index into status_defs) from source. A stun
+## staggers the brain for its duration (the same STAGGERED state as a hit
+## stagger). Returns false if nothing was applied.
+func apply_status(index: int, stacks: int, duration_ticks: int, source: int) -> bool:
+	if dead or not statuses.apply(status_defs, index, stacks, duration_ticks, source):
+		return false
+	if status_defs.get_def(index).stuns:
+		brain.stagger(statuses.ticks_left(index))
+	return true
+
+
+## Slows scale its steering; a root stops it (it can still turn and swing).
+func _apply_status_movement(desired: Vector2) -> Vector2:
+	if not statuses.can_move(status_defs):
+		return Vector2.ZERO
+	return desired * statuses.move_multiplier(status_defs)
+
+
 func respawn() -> void:
 	dead = false
+	statuses.clear()
 	health = params.max_health
 	global_position = home
 	velocity = Vector3.ZERO
@@ -119,7 +152,8 @@ func respawn() -> void:
 
 
 func get_snapshot() -> Array:
-	return [enemy_id, kind, global_position, brain.yaw, brain.mode, brain.attack_tick, health, dead]
+	return [enemy_id, kind, global_position, brain.yaw, brain.mode, brain.attack_tick, health, dead,
+			statuses.to_packed()]
 
 
 # --- Client ---
@@ -167,9 +201,21 @@ func show_hit(damage: float, result: int) -> void:
 		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
 
 
+## Client: the statuses from the latest snapshot (StatusEffects.to_packed()),
+## shown as a line under its health.
+func set_statuses(data: PackedInt32Array) -> void:
+	var text := StatusEffects.from_packed(data).summary(status_defs)
+	if text == _status_text:
+		return
+	_status_text = text
+	_update_label()
+
+
 func _update_label() -> void:
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
 	_name_label.text = "%s\n%s" % [kind.capitalize(), status]
+	if not _status_text.is_empty():
+		_name_label.text += "\n" + _status_text
 
 
 ## attack_tick is fractional for smooth swings; -1 when not swinging.

@@ -37,6 +37,17 @@ var hitbox_height := 0.0
 ## Stops (skips to recovery) after hitting this many targets. 0 = no limit.
 var max_targets := 0
 
+# Statuses (data/status_effects.cfg ids; "" = none)
+## Applied to whoever this damages (server), with status_stacks stacks, for
+## status_duration_ticks (-1 = the status's own duration).
+var applies_status := ""
+var status_stacks := 1
+var status_duration_ticks := -1
+## Applied to the attacker when it starts, inside the predicted simulation
+## (a self-buff such as Bloodlust), with self_status_stacks stacks.
+var self_status := ""
+var self_status_stacks := 1
+
 
 ## First tick of recovery: after the last hit window.
 func recovery_start_tick() -> int:
@@ -82,6 +93,17 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_width = Tuning.get_value(file, section, "width")
 	hitbox_height = Tuning.get_value(file, section, "height")
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
+	_load_statuses(file, section, tps)
+
+
+## The optional status keys (see data/status_effects.cfg).
+func _load_statuses(file: String, section: String, tps: float) -> void:
+	applies_status = Tuning.get_optional(file, section, "applies_status", "")
+	status_stacks = Tuning.get_optional(file, section, "status_stacks", 1)
+	var duration: float = Tuning.get_optional(file, section, "status_duration", -1.0)
+	status_duration_ticks = roundi(duration * tps) if duration > 0.0 else -1
+	self_status = Tuning.get_optional(file, section, "self_status", "")
+	self_status_stacks = Tuning.get_optional(file, section, "self_status_stacks", 1)
 
 
 static func shape_from_name(shape_name: String) -> int:

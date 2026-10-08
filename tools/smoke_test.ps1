@@ -105,6 +105,28 @@ if (-not $abilitySummary) {
 } else {
     Write-Host "PASS abilities: $($abilitySummary.Line)" -ForegroundColor Green
 }
+# Statuses: the bots slot their status abilities (Opening Strike, Bloodlust,
+# Hamstring), so the server must apply statuses (some on Husks) and deal bleed
+# damage. Allies must never debuff each other.
+$statusSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY statuses applied=(\d+) on_enemies=(\d+) self_buffs=(\d+) dot_ticks=(\d+) dot_damage=(\d+) ally_refused=(\d+) ally_applied=(\d+)'
+if (-not $statusSummary) {
+    Write-Host "FAIL statuses: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$statusSummary.Matches[0].Groups[6].Value -ne 0 -or [int]$statusSummary.Matches[0].Groups[7].Value -ne 0) {
+    Write-Host "FAIL statuses: a debuff was tried or applied between allies ($($statusSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $Party -and [int]$statusSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL statuses: none applied ($($statusSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $Party -and [int]$statusSummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL statuses: none applied to a Husk ($($statusSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $Party -and [int]$statusSummary.Matches[0].Groups[4].Value -lt 1) {
+    Write-Host "FAIL statuses: no bleed damage ticked ($($statusSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS statuses: $($statusSummary.Line)" -ForegroundColor Green
+}
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'
     if (-not $summary) {

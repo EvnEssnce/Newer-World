@@ -119,21 +119,56 @@ func request_weapons(weapons: PackedStringArray) -> void:
 
 
 ## Test bot: a free respec of the weapon it has out. Alternates between its
-## tree's default allocation and that minus the last passive node, so the
-## smoke test exercises the server's validation and the loadout server event.
+## tree's default allocation and that plus one more passive node (or, if none
+## fits, minus the last passive), so the smoke test exercises the server's
+## validation and the loadout server event. Abilities stay unlocked.
 func bot_respec(weapon_id: String, cycle: int) -> void:
 	if local_build == null or not local_build.trees.has(weapon_id):
 		return
 	var tree: MasteryTree = local_build.trees[weapon_id]
 	var nodes := tree.default_nodes.duplicate()
 	if cycle % 2 == 0:
-		for i in range(nodes.size() - 1, -1, -1):
-			if tree.get_node(nodes[i]).kind == MasteryTree.KIND_PASSIVE:
-				nodes = tree.remove(nodes, nodes[i])
+		var added := false
+		for id in tree.node_order:
+			if (tree.get_node(id).kind == MasteryTree.KIND_PASSIVE and not id in nodes
+					and tree.can_add(nodes, id)):
+				nodes.append(id)
+				added = true
 				break
+		if not added:
+			for i in range(nodes.size() - 1, -1, -1):
+				if tree.get_node(nodes[i]).kind == MasteryTree.KIND_PASSIVE:
+					nodes = tree.remove(nodes, nodes[i])
+					break
 	var slots := local_build.get_slots(weapon_id).duplicate()
 	var unlocked := tree.unlocked_abilities(nodes)
 	for i in slots.size():
 		if not (slots[i] in unlocked):
 			slots[i] = ""
 	request_mastery(weapon_id, nodes, slots)
+
+
+## Test bot: slots each equipped weapon's unlocked status abilities (those with
+## applies_status or self_status) first, then its other slotted ones, so the
+## bot applies statuses. Keeps the allocation.
+func bot_slot_status_abilities(params: PlayerParams) -> void:
+	if local_build == null:
+		return
+	for weapon_id in local_build.weapons:
+		var tree: MasteryTree = local_build.trees.get(weapon_id)
+		if tree == null:
+			continue
+		var nodes := local_build.get_allocated(weapon_id)
+		var unlocked := tree.unlocked_abilities(nodes)
+		var slots := PackedStringArray()
+		for ability in params.weapon(weapon_id).abilities:
+			if (ability.id in unlocked and not ability.internal
+					and not (ability.applies_status.is_empty() and ability.self_status.is_empty())):
+				slots.append(ability.id)
+		for ability_id in local_build.get_slots(weapon_id):
+			if not ability_id.is_empty() and not ability_id in slots:
+				slots.append(ability_id)
+		slots = slots.slice(0, PlayerState.ABILITY_SLOTS)
+		while slots.size() < PlayerState.ABILITY_SLOTS:
+			slots.append("")
+		request_mastery(weapon_id, nodes, slots)

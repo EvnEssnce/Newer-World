@@ -96,6 +96,9 @@ var attack_results: Dictionary[int, bool] = {}
 var _results_key := Vector2i(-1, -1)
 ## Server tick at which a dead player respawns.
 var respawn_at_tick := -1
+## Damage over time (bleed) from this tick's sim steps, not yet applied to
+## health. World applies it after processing inputs.
+var status_damage_pending := 0.0
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -120,6 +123,7 @@ var view_state := PlayerState.new()
 var _material: StandardMaterial3D
 var _base_color := REMOTE_COLOR
 var _hit_flash_until := 0
+var _status_text := ""
 var _hitbox_material: StandardMaterial3D
 var _box_mesh: BoxMesh
 var _radial_mesh: CylinderMesh
@@ -178,6 +182,8 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> voi
 	if server and state.swap_tick == 0:
 		swaps += 1
 		weapon_swapped.emit(self)
+	if server:
+		status_damage_pending += state.status_damage
 	var window := state.attack_window(params)
 	if server and window >= 0:
 		var key := Vector2i(state.attack_serial, window)
@@ -401,6 +407,7 @@ func interpolate(render_time: float) -> void:
 	distance_seen += global_position.distance_to(new_pos)
 	global_position = new_pos
 	view_state = from_state
+	_set_status_text(from_state.statuses.summary(params.statuses))
 	_show(from_state, yaw, dodge_progress, attack_tick)
 
 
@@ -425,6 +432,16 @@ func _update_label() -> void:
 	_name_label.visible = not is_local
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
 	_name_label.text = "Player %d\n%s" % [peer_id % 10000, status]
+	if not _status_text.is_empty():
+		_name_label.text += "\n" + _status_text
+
+
+## The status line under a remote player's health ("Bleed x3, Slow"; client).
+func _set_status_text(text: String) -> void:
+	if text == _status_text:
+		return
+	_status_text = text
+	_update_label()
 
 
 ## Nameplate colour for players in your party (client, cosmetic). Set by
@@ -551,7 +568,7 @@ static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 			return SWORD_IDLE
 		"riposte":
 			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
-	if attack_type == PlayerState.ATTACK_HEAVY:
+	if attack_type == PlayerState.ATTACK_HEAVY or ability_id == "opening_strike":
 		return _phase_pose(attack, tick, SWORD_IDLE, HEAVY_WOUND, HEAVY_STRUCK)
 	return _phase_pose(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
 
@@ -566,7 +583,11 @@ static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: Str
 	var chop := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_STRUCK, 0.0)).x
 	if ability_id == "frenzy":
 		return _frenzy_pitches(attack, tick, chop)
-	if attack_type == PlayerState.ATTACK_LIGHT:
+	if ability_id == "bloodlust":
+		# Both axes raised high, then lowered.
+		var raised := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_WOUND, 0.0)).x
+		return Vector2(raised, raised)
+	if attack_type == PlayerState.ATTACK_LIGHT or ability_id == "hamstring":
 		return Vector2(chop, AXE_IDLE)
 	return Vector2(chop, chop)
 

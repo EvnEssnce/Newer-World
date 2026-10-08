@@ -9,6 +9,9 @@ const SLOT_COLOR := Color(0.08, 0.09, 0.12, 0.8)
 const SLOT_BORDER := Color(0.85, 0.7, 0.35, 0.9)
 const EMPTY_BORDER := Color(0.4, 0.4, 0.45, 0.6)
 const COOLDOWN_COLOR := Color(0.0, 0.0, 0.0, 0.6)
+## Status chips: bottom edge colour.
+const BUFF_BORDER := Color(0.4, 0.85, 0.45)
+const DEBUFF_BORDER := Color(0.9, 0.3, 0.3)
 
 @onready var _info: Label = %Info
 @onready var _health: ProgressBar = %Health
@@ -20,10 +23,12 @@ var _slot_panels: Array[Panel] = []
 var _slot_names: Array[Label] = []
 var _slot_overlays: Array[ColorRect] = []
 var _slot_timers: Array[Label] = []
+var _status_row: HBoxContainer
 
 
 func _ready() -> void:
 	_build_ability_bar()
+	_build_status_row()
 
 
 func set_info(text: String) -> void:
@@ -70,6 +75,59 @@ func set_ability(slot: int, ability_name: String, cooldown_fraction: float,
 	overlay.anchor_top = 1.0 - clampf(cooldown_fraction, 0.0, 1.0)
 	_slot_timers[slot].visible = cooldown_fraction > 0.0
 	_slot_timers[slot].text = "%.1f" % seconds_left if seconds_left < 10.0 else str(ceili(seconds_left))
+
+
+## The local player's statuses, one chip each: [name, stacks, seconds left,
+## is_debuff] per entry. Buffs have a green edge, debuffs red.
+func set_statuses(entries: Array) -> void:
+	while _status_row.get_child_count() < entries.size():
+		_status_row.add_child(_build_status_chip())
+	for i in _status_row.get_child_count():
+		var chip := _status_row.get_child(i) as PanelContainer
+		chip.visible = i < entries.size()
+		if not chip.visible:
+			continue
+		var entry: Array = entries[i]
+		var text: String = entry[0]
+		if entry[1] > 1:
+			text += " x%d" % entry[1]
+		text += "  %.1fs" % entry[2]
+		(chip.get_child(0) as Label).text = text
+		var style := chip.get_theme_stylebox("panel") as StyleBoxFlat
+		style.border_color = DEBUFF_BORDER if entry[3] else BUFF_BORDER
+
+
+func _build_status_row() -> void:
+	_status_row = HBoxContainer.new()
+	_status_row.add_theme_constant_override("separation", 6)
+	_status_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_status_row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_status_row.offset_left = -400.0
+	_status_row.offset_right = 400.0
+	_status_row.offset_top = _weapon_label.offset_top - 30.0
+	_status_row.offset_bottom = _weapon_label.offset_top - 4.0
+	_status_row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_status_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_status_row)
+
+
+func _build_status_chip() -> PanelContainer:
+	var chip := PanelContainer.new()
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = SLOT_COLOR
+	style.set_border_width_all(0)
+	style.border_width_bottom = 3
+	style.set_corner_radius_all(3)
+	style.content_margin_left = 8.0
+	style.content_margin_right = 8.0
+	style.content_margin_top = 2.0
+	style.content_margin_bottom = 2.0
+	chip.add_theme_stylebox_override("panel", style)
+	var label := Label.new()
+	label.add_theme_font_size_override("font_size", 13)
+	chip.add_child(label)
+	return chip
 
 
 ## Three slots centered above the health bar, with the weapon line above them.
