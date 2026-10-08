@@ -338,13 +338,25 @@ func _setup_camera() -> void:
 	camera.make_current()
 
 
+func _modal_ui_open() -> bool:
+	for node in get_tree().get_nodes_in_group(&"modal_ui"):
+		if node is CanvasItem and node.visible:
+			return true
+	return false
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_local:
 		return
 	if event.is_action_pressed(&"ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# Clicks recapture the mouse, but not wheel scrolls (a scroll that a
+		# panel's list didn't use falls through to here) or while a panel is open.
+		var wheel: bool = event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN,
+				MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]
+		if not wheel and not _modal_ui_open():
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var sensitivity := deg_to_rad(Tuning.get_value("camera", "camera", "mouse_sensitivity"))
 		var min_pitch := deg_to_rad(Tuning.get_value("camera", "camera", "min_pitch"))

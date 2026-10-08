@@ -7,12 +7,21 @@ extends Node
 const WORLD_SCENE := preload("res://game/world/world.tscn")
 const CONNECT_MENU_SCENE := preload("res://ui/connect_menu.tscn")
 
+## Frames slower than this are logged with --perf-log (ms).
+const PERF_SPIKE_MS := 50.0
+
 var _world: World
 var _menu: ConnectMenu
+var _perf_log := false
+var _perf_spikes := 0
+var _perf_worst_ms := 0.0
+var _perf_worst_physics_ms := 0.0
 
 
 func _ready() -> void:
 	InputActions.register()
+	_perf_log = LaunchArgs.has_flag("perf-log")
+	set_process(_perf_log)
 	var quit_after := float(LaunchArgs.get_value("quit-after", "0"))
 	if quit_after > 0.0:
 		_quit_after(quit_after)
@@ -110,10 +119,28 @@ func _spawn_world() -> void:
 	add_child(_world)
 
 
+## --perf-log: prints every slow frame (a hitch the player would feel), with how
+## long since launch, so startup lag can be told apart from steady-state lag.
+func _process(delta: float) -> void:
+	# Time spent in the last physics step(s): the sim, hit checks, snapshots.
+	_perf_worst_physics_ms = maxf(_perf_worst_physics_ms,
+			Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+	var ms := delta * 1000.0
+	if ms < PERF_SPIKE_MS:
+		return
+	_perf_spikes += 1
+	_perf_worst_ms = maxf(_perf_worst_ms, ms)
+	print("[perf] t=%.2fs frame=%.0fms fps=%d world=%s" % [
+			Time.get_ticks_msec() / 1000.0, ms, Engine.get_frames_per_second(), _world != null])
+
+
 func _quit_after(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 	if _world:
 		_world.print_summary()
+	if _perf_log:
+		print("SUMMARY perf spikes=%d worst_ms=%.0f worst_physics_ms=%.1f" % [
+				_perf_spikes, _perf_worst_ms, _perf_worst_physics_ms])
 	_quit()
 
 

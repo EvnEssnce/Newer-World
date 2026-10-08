@@ -123,6 +123,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - **Remote players**: drawn `interpolation_delay` seconds in the past, interpolated
   between snapshots on a render clock synced to server ticks. Roll and i-frame visuals
   come from the interpolated `PlayerState`.
+- **ENet's packet throttle is off** (`Net._disable_packet_throttle`, both directions).
+  Left on, it drops unreliable packets (inputs, snapshots) in bursts whenever ping
+  spikes, e.g. while several clients start at once; enough to defeat input
+  redundancy, so the server skips inputs ("never arrived" in `--verbose`) and clients
+  get corrections that feel like lag.
 - Players don't collide with each other (layer 2, mask 1). The world is layer 1.
 - **All simulated state lives in `PlayerState`** (plus position/velocity). If something
   affects the sim and isn't in `to_array()`, reconciliation will break. Anything that
@@ -216,8 +221,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 ## Controls
 
 WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
-click = block, Q/E/R abilities, X swap weapon, K mastery panel, T/Y/N/L/Delete party
-(see below), F3 hitboxes, Esc frees the mouse. Z and C are reserved for the two Wing
+click = block, Q/E/R abilities, X swap weapon, K mastery panel (K or Esc closes it),
+T/Y/N/L/Delete party (see below), F3 hitboxes, Esc frees the mouse. Panels that need
+the mouse join the `modal_ui` group: while one is visible, clicks and wheel scrolls
+don't recapture the mouse. Z and C are reserved for the two Wing
 abilities, 1–9 for later, F for pickup and I for inventory (milestone 2): don't bind
 them to anything else.
 
@@ -300,6 +307,8 @@ still swings at its ally when no Husk is near, which the server ignores; see
 `PartySystem._bot_step`), `--verbose` (log positions every 2 s, server logs hits and
 refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--mastery-panel` (open the K panel at start, for screenshot checks),
+`--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
+`SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals; a
 relative path avoids trouble with the space in the project path),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),

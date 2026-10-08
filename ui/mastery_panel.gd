@@ -28,6 +28,7 @@ func setup(builds: BuildService) -> void:
 
 func _ready() -> void:
 	visible = false
+	add_to_group(&"modal_ui")  # Player won't capture the mouse while it's open
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Swallows clicks so they don't reach the game (which captures the mouse).
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -68,6 +69,15 @@ func toggle() -> void:
 	if visible:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_refresh()
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED  # back to the game
+
+
+## Esc closes the panel like K (before Player's Esc handling frees the mouse).
+func _input(event: InputEvent) -> void:
+	if visible and event.is_action_pressed(&"ui_cancel"):
+		toggle()
+		get_viewport().set_input_as_handled()
 
 
 func _refresh() -> void:

@@ -11,6 +11,28 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (13): Wave 1 playtest fixes; startup lag found
+
+Playtest verdict (developer): ability timing, feel and distances are good as they are.
+
+Done:
+- **Startup lag fixed.** Cause: ENet's packet throttle. While clients start up, ping
+  spikes and ENet drops bursts of unreliable packets (several in a row, enough to beat
+  input redundancy), so the server skipped inputs and the client got corrections.
+  In a 9-bot stress test: 24 skipped inputs and 24 corrections in one bot's first few
+  seconds. Throttle now off (`core/net.gd`): 0 skipped inputs in 2 reruns; 1
+  correction, which was the known flat-ground issue below.
+- **K panel:** Esc now closes it like K. Closing it (either key) recaptures the mouse.
+  Scrolling the panel no longer hides the cursor: wheel scrolls never capture the
+  mouse, and no click does while a panel is open (`modal_ui` group).
+- `--perf-log` flag: logs frames slower than 50 ms and the worst physics step. With 9
+  bots, the server's worst physics step was 9–14 ms (limit at 60 ticks/s: 16.7 ms).
+- Tests: 211. Smoke: default 3 of 3 passed, `-Party` 3 of 3.
+
+Needs a hand playtest:
+- Launch with `run_local_test.ps1`: is the startup lag gone?
+- K panel: scroll it, close it with Esc.
+
 ### 2026-10-07 (12): Abilities, weapon swap and the Fighter (class build Wave 1A)
 
 Built by a parallel agent from `design/classes.md`, merged into main after Wave 1B and
@@ -288,7 +310,13 @@ Later / unscheduled:
 - About 1 smoke run in 20 shows a few (≤4) small unexpected corrections on flat ground
   (~0.1 m sideways), not near any server event. Cause unconfirmed; the server logged no
   dropped inputs in 12 runs that tried to catch it. Smoke test tolerates ≤5. Run with
-  `--verbose` to get the details if it shows up in play.
+  `--verbose` to get the details if it shows up in play. Seen again on 2026-10-08: one
+  ~9 cm position mismatch with an identical `PlayerState`, so it's in the physics step,
+  not the sim state.
+- A unit test failed once in 8 runs on 2026-10-08 (211 tests; it didn't recur, so the
+  name wasn't caught). If `run_tests.ps1` shows a failure, note which test.
+- When 9 bots quit at once, the server had one ~100 ms tick (disconnect handling).
+  Harmless now; look at it if mass disconnects matter later.
 
 - Movement and combat tuning are read separately by server and client. If they run
   different `data/*.cfg` files, prediction will constantly correct. Later: the server

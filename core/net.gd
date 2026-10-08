@@ -78,8 +78,21 @@ func _start_connect_timeout(attempt: int) -> void:
 		connection_failed.emit("Timed out.")
 
 
+## ENet's packet throttle drops unreliable packets (our inputs and snapshots)
+## whenever round-trip times spike, e.g. while several clients start up at once,
+## and takes seconds to recover. Lost inputs mean prediction corrections, which
+## feel like lag. We send small packets at a fixed rate, so keep the throttle at
+## its maximum (scale 32 = send everything): it rises at once, never falls.
+func _disable_packet_throttle(packet_peer: ENetPacketPeer) -> void:
+	if packet_peer:
+		packet_peer.throttle_configure(5000, 32, 0)
+
+
 func _on_peer_connected(peer_id: int) -> void:
 	if is_server:
+		var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+		if peer:
+			_disable_packet_throttle(peer.get_peer(peer_id))
 		peer_joined.emit(peer_id)
 
 
@@ -89,6 +102,9 @@ func _on_peer_disconnected(peer_id: int) -> void:
 
 
 func _on_connected_to_server() -> void:
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer:
+		_disable_packet_throttle(peer.get_peer(1))
 	connected_to_server.emit()
 
 
