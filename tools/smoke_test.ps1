@@ -9,8 +9,9 @@
 # 0 bot-on-bot hits and at least one bot swing ignored because they're allies
 # (both clients in a party of 2), while Husk fights still happen.
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
-# 16 s = two of the bot's 8 s cycles (see World._bot_input).
-param([int]$Port = 24599, [int]$Seconds = 16, [switch]$Party)
+# 24 s = three of the bot's 8 s cycles (see World._bot_input): two cycles left
+# too little room for the luck-dependent checks (statuses, guard hits).
+param([int]$Port = 24599, [int]$Seconds = 24, [switch]$Party)
 . "$PSScriptRoot\find_godot.ps1"
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
@@ -28,7 +29,9 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
     '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=300',
-    '--tune=enemy_husk/stats/respawn_time=2')
+    '--tune=enemy_husk/stats/respawn_time=2',
+    # Bloodlust lasts the whole run, so any later hit proves bleed works.
+    '--tune=status_effects/status_bloodlust/duration=30')
 
 $botFlags = @('--bot', '--verbose')
 if ($Party) { $botFlags += '--bot-party' }

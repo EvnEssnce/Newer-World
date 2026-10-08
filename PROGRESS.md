@@ -11,6 +11,43 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (14): Status effects (class build Wave 2A)
+
+Built by a parallel agent, merged into main. Wave 2B (forced movement + Spear) is still
+in progress.
+
+Done:
+- **Status effects** (`data/status_effects.cfg`, `game/status/`):
+  - Defined: bleed, slow, root, stun, Exposed, Empowered (damage up), Warded (damage
+    reduction), Bloodlust.
+  - They work on players (predicted where they change movement or actions) and on Husks
+    (server-only).
+  - Allies never debuff each other. Death clears them. Stun reuses stagger.
+  - Bleed shows dark-red damage numbers and can kill.
+- **New Fighter abilities:**
+  - **Opening Strike** (Broadsword): Exposed, +25% damage taken for 6 s. It's learned by
+    default but not slotted; use the K panel.
+  - **Bloodlust** (Dual Axes): your next 4 hits within 8 s each add a bleed stack.
+  - **Hamstring** (Dual Axes): 60% speed for 3 s. It now fills the axes' R slot.
+- **HUD:** a status row for you, and a status line under other players and Husks.
+- **Smoke test** now runs 24 s (three bot cycles; two left too little room for the
+  status checks). Bloodlust is tuned to last 30 s in the smoke run only.
+- Tests: 257. Smoke after merge: default 5 of 6 passed (the fail was the old guard
+  check), `-Party` 3 of 3.
+
+Needs a hand playtest (`run_local_test.ps1`):
+- Slot Opening Strike and hit a Husk: it should show "Exposed" and take bigger numbers.
+- Use Bloodlust on the axes, then hit Husks: they should show "Bleed xN" with ticks.
+- Hamstring: the target should visibly slow.
+- Tuning to judge: bleed 10/s per stack (max 5), slow 60%, Exposed +25%, cooldowns
+  12 / 14 / 9 s.
+
+Known gaps:
+- Root, stun, Empowered and Warded exist, but nothing applies them yet (Wave 2D/3).
+- Statuses only tick while the player's inputs arrive (keeps prediction exact; a lagging
+  player's bleed pauses).
+- Bloodlust survives a weapon swap.
+
 ### 2026-10-08 (13): Wave 1 playtest fixes; startup lag found
 
 Playtest verdict (developer): ability timing, feel and distances are good as they are.
@@ -313,8 +350,12 @@ Later / unscheduled:
   `--verbose` to get the details if it shows up in play. Seen again on 2026-10-08: one
   ~9 cm position mismatch with an identical `PlayerState`, so it's in the physics step,
   not the sim state.
-- A unit test failed once in 8 runs on 2026-10-08 (211 tests; it didn't recur, so the
-  name wasn't caught). If `run_tests.ps1` shows a failure, note which test.
+- A unit test fails about 1 run in 10, only when the machine is busy (right after an
+  import, a stress test, or while another agent runs Godot). Not caught in 14 quiet
+  runs, so probably a timing-sensitive physics test. If `run_tests.ps1` shows a
+  `FAIL` line, note the test name.
+- Smoke "no hit landed on a guard" still fails about 1 run in 10: the bot-vs-bot guard
+  check depends on wall-clock bot phases lining up.
 - When 9 bots quit at once, the server had one ~100 ms tick (disconnect handling).
   Harmless now; look at it if mass disconnects matter later.
 
