@@ -53,10 +53,25 @@ var status_duration_ticks := -1
 var self_status := ""
 var self_status_stacks := 1
 
+# Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
+## Thrown at projectile_tick (from the attack's start), projectile_count of
+## them fanned over projectile_spread radians. Its hit uses this attack's
+## damage, stagger, statuses and force (server). The release is predicted (the
+## attack timeline); the projectile itself is server state (ProjectileSystem).
+var projectile := ""
+var projectile_tick := 0
+var projectile_count := 1
+var projectile_spread := 0.0
+
 
 ## First tick of recovery: after the last hit window.
 func recovery_start_tick() -> int:
 	return windup_ticks + (windows - 1) * window_interval_ticks + active_ticks
+
+
+## True on the tick (from the attack's start) its projectiles are released.
+func releases_projectile_at(tick: int) -> bool:
+	return not projectile.is_empty() and tick == projectile_tick
 
 
 func total_ticks() -> int:
@@ -101,6 +116,11 @@ func load_from(file: String, section: String, tps: float) -> void:
 	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
 	_load_statuses(file, section, tps)
 	force = ForceParams.from_tuning(file, section, tps)
+	projectile = Tuning.get_optional(file, section, "projectile", "")
+	if not projectile.is_empty():
+		projectile_tick = roundi(Tuning.get_value(file, section, "projectile_time") * tps)
+		projectile_count = maxi(1, Tuning.get_optional(file, section, "projectile_count", 1))
+		projectile_spread = deg_to_rad(Tuning.get_optional(file, section, "projectile_spread", 0.0))
 
 
 ## The optional status keys (see data/status_effects.cfg).

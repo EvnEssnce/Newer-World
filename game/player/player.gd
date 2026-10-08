@@ -20,6 +20,10 @@ signal attack_stepped(player: Player)
 signal ability_started(player: Player)
 ## Server only: emitted on the sim step a weapon swap starts.
 signal weapon_swapped(player: Player)
+## Server, and the local client's own prediction (not replays): emitted on the
+## sim step an attack releases its projectiles (AttackParams.projectile_tick).
+## The server throws the real ones; the local client shows a cosmetic copy.
+signal projectile_released(player: Player)
 
 const MAX_PENDING_INPUTS := 120
 const MAX_SNAPSHOTS := 30
@@ -223,6 +227,9 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> voi
 				ability_started.emit(self)
 		else:
 			attacks += 1
+	var current := state.current_attack(params)
+	if current and current.releases_projectile_at(state.attack_tick):
+		projectile_released.emit(self)
 	if server and state.swap_tick == 0:
 		swaps += 1
 		weapon_swapped.emit(self)
@@ -390,6 +397,12 @@ func _reconcile(delta: float) -> void:
 
 func get_camera_yaw() -> float:
 	return _camera_pivot.rotation.y if _camera_pivot else 0.0
+
+
+## Test bot screenshots: turn the camera to look where the bot aims.
+func set_camera_yaw(yaw: float) -> void:
+	if _camera_pivot:
+		_camera_pivot.rotation.y = yaw
 
 
 func _setup_camera() -> void:

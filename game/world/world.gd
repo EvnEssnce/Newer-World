@@ -40,6 +40,12 @@ const BOT_ENEMY_RANGE := 15.0
 const BOT_BUFF_REACH := 2.0
 ## Ability phase: the first press waits (briefly) until the target is this close.
 const BOT_ABILITY_REACH := 2.5
+## Bot: throws a projectile ability at a target at least this far away
+## (meters), and within this fraction of the projectile's reach.
+const BOT_THROW_MIN := 3.0
+const BOT_THROW_REACH := 0.75
+const ABILITY_BUTTONS := (PlayerState.BUTTON_ABILITY_1 | PlayerState.BUTTON_ABILITY_2
+		| PlayerState.BUTTON_ABILITY_3 | PlayerState.BUTTON_WING_1 | PlayerState.BUTTON_WING_2)
 
 # Server
 var _tick := 0
@@ -102,6 +108,8 @@ var _healed := 0.0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
+## Projectiles (World/Projectiles, both sides).
+var _projectiles: ProjectileSystem
 
 # Client
 var _hud: Hud
@@ -144,6 +152,7 @@ var _builds: BuildService
 func _ready() -> void:
 	_verbose = LaunchArgs.has_flag("verbose")
 	_add_party_system()
+	_add_projectile_system()
 	_builds = BuildService.new()
 	_builds.name = "Builds"
 	add_child(_builds)
@@ -228,6 +237,7 @@ func _server_tick(delta: float) -> void:
 		else:
 			enemy.server_step(targets, delta)
 			_apply_enemy_status_damage(enemy)
+	_projectiles.server_step(delta)
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
 
@@ -270,6 +280,7 @@ func _client_ready(class_id: String) -> void:
 	player.attack_stepped.connect(_on_attack_stepped)
 	player.ability_started.connect(_on_ability_started)
 	player.weapon_swapped.connect(func(_p: Player) -> void: _swaps += 1)
+	player.projectile_released.connect(_projectiles.server_fire)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
 	_builds.send_build(player)
@@ -339,18 +350,29 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
 		attacker.attack_results[enemy.enemy_id] = true
-		var damage := (attack.damage * damage_scale
-				* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
-		var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
-		_enemy_damaged += 1
 		connected += 1
-		_ember_from_damage(attacker.peer_id, null, damage)
-		if not _damage_enemy(enemy, damage, _with_surge_stagger(attacker.peer_id, attack.stagger_ticks),
-				attacker.peer_id, HIT_DAMAGED):
-			_give_hit_statuses(attacker.peer_id, attack,
-					attacker.on_hit_statuses_for_window(), enemy)
-			_force_enemy(attacker.global_position, attacker.state.yaw, attack, enemy, was_staggered)
+		strike_enemy(attacker.peer_id, attacker.global_position, attacker.state.yaw, attack,
+				enemy, damage_scale, attacker.on_hit_statuses_for_window)
 	return connected
+
+
+## Server: a player's attack (or projectile) connected with a living enemy:
+## damage (× its damage-taken statuses), Ember, stagger, and if it survives the
+## attack's statuses (plus on_hit's, e.g. Bloodlust's bleed; on_hit returns
+## Array[Vector2i]) and force away from attacker_pos. Returns true if it died.
+func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
+		attack: AttackParams, enemy: Enemy, damage_scale: float, on_hit: Callable) -> bool:
+	var damage := (attack.damage * damage_scale
+			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
+	var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
+	_enemy_damaged += 1
+	_ember_from_damage(attacker_id, null, damage)
+	if _damage_enemy(enemy, damage, _with_surge_stagger(attacker_id, attack.stagger_ticks),
+			attacker_id, HIT_DAMAGED):
+		return true
+	_give_hit_statuses(attacker_id, attack, on_hit.call(), enemy)
+	_force_enemy(attacker_pos, attacker_yaw, attack, enemy, was_staggered)
+	return false
 
 
 func _on_ability_started(player: Player) -> void:
@@ -414,6 +436,19 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		return -1
 	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
+		return -1
+	return resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
+			damage_scale)
+
+
+## Server: the rest of _strike_player once something touched the target (a
+## hitbox, or a projectile: then attacker_pos is a point back along its path,
+## so a guard or a parry must face where it came from, and knockback pushes
+## along it). Same rules and results.
+func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
+		attack: AttackParams, results: Dictionary[int, bool], target: Player,
+		damage_scale: float = 1.0) -> int:
+	if target.state.dead or results.get(target.peer_id, false):
 		return -1
 	if are_allies(attacker_id, target.peer_id):
 		results[target.peer_id] = true  # counted once per attack
@@ -844,6 +879,41 @@ func _add_party_system() -> void:
 	add_child(party)
 
 
+# --- Projectiles (the PROJ tag; see ProjectileSystem) ---
+
+## World/Projectiles must exist on the server and every client (RPCs by path).
+func _add_projectile_system() -> void:
+	_projectiles = ProjectileSystem.new()
+	_projectiles.name = "Projectiles"
+	_projectiles.world = self
+	_projectiles.players = _players
+	_projectiles.enemies = _enemies
+	add_child(_projectiles)
+
+
+func server_tick() -> int:
+	return _tick
+
+
+func is_verbose() -> bool:
+	return _verbose
+
+
+## Client: the render clock in server ticks (what remote players are drawn
+## at), or -1 before the first snapshot.
+func render_tick() -> float:
+	return _render_time * Engine.physics_ticks_per_second if _render_time >= 0.0 else -1.0
+
+
+## Server: a projectile connected (any result but an ally pass), for the same
+## counters melee hits feed (the party check's pvp_hits, ability_hits).
+func note_projectile_hit(from_ability: bool, on_player: bool) -> void:
+	if on_player:
+		_pvp_hits += 1
+	if from_ability:
+		_ability_hits += 1
+
+
 # --- Client ---
 
 func _client_tick(delta: float) -> void:
@@ -859,6 +929,12 @@ func _client_tick(delta: float) -> void:
 		move = bot[0]
 		buttons = bot[1]
 		aim_yaw = bot[2]
+		if not LaunchArgs.get_value("screenshot-dir").is_empty():
+			# Screenshots look where the bot aims (its throws fly away from the
+			# camera); its move is world space, so undo the camera's turn.
+			_local_player.set_camera_yaw(aim_yaw)
+			var world_move := Vector3(move.x, 0.0, move.y).rotated(Vector3.UP, -aim_yaw)
+			move = Vector2(world_move.x, world_move.z)
 		if not party.bot_may_attack():
 			buttons &= ~(PlayerState.BUTTON_ATTACK | PlayerState.BUTTON_ABILITY_1
 					| PlayerState.BUTTON_ABILITY_2 | PlayerState.BUTTON_ABILITY_3
@@ -990,6 +1066,8 @@ func _bot_input() -> Array:
 				# Not on the off turn: that guard stays up.
 				buttons |= _bot_self_buff_input(flat.length(), t, cycle)
 			buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length())
+			if (buttons & ABILITY_BUTTONS) == 0:
+				buttons |= _bot_projectile_button(flat.length())
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 
@@ -1103,6 +1181,26 @@ func _bot_wing_slot(ability_id: String) -> int:
 		if state.ember - wing.ember_cost >= keep:
 			return slot
 	return -1
+
+
+## Bot, before the circling phase: a ready projectile ability (Javelin Cast,
+## Boomerang Axe) is thrown whenever the target is at least BOT_THROW_MIN
+## meters away and within BOT_THROW_REACH of the projectile's reach. Returns its
+## button, or 0.
+func _bot_projectile_button(distance: float) -> int:
+	var state := _local_player.state
+	if distance < BOT_THROW_MIN or state.is_attacking() or state.dead:
+		return 0
+	var weapon := state.weapon(_local_player.params)
+	for slot in PlayerState.ABILITY_SLOTS:
+		var index := state.slot_ability(slot)
+		var ability := weapon.ability(index)
+		if ability == null or ability.projectile.is_empty() or state.cooldown_left(index) > 0:
+			continue
+		var kind := ProjectileParams.get_kind(ability.projectile)
+		if kind and distance <= kind.reach() * BOT_THROW_REACH:
+			return PlayerState.BUTTON_ABILITY_1 << slot
+	return 0
 
 
 ## The slot of a ready ability with a self_status (Bloodlust), or 0.
@@ -1226,6 +1324,7 @@ func _spawn_client_player(peer_id: int, local: bool, pos: Vector3) -> Player:
 	_players.add_child(player)
 	if local:
 		_local_player = player
+		player.projectile_released.connect(_projectiles.client_fire)
 	else:
 		print("[client %d] sees peer %d" % [multiplayer.get_unique_id(), peer_id])
 	return player
@@ -1375,7 +1474,9 @@ func print_summary() -> void:
 				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])
 		_print_force_summary()
 		_print_ember_summary()
+		_projectiles.print_summary()
 		return
+	_projectiles.print_client_summary()
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,
