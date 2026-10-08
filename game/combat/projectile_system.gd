@@ -370,6 +370,7 @@ func _process(_delta: float) -> void:
 	if multiplayer.is_server():
 		return
 	var render_tick := world.render_tick()
+	var axe_throwers := {}  # owner peer id -> true
 	for f in _flying:
 		var flight := f.flight
 		var fraction := Engine.get_physics_interpolation_fraction()
@@ -381,6 +382,11 @@ func _process(_delta: float) -> void:
 			fraction = clampf(exact - (flight.age - 1), 0.0, 1.0)
 		f.visual.visible = true
 		f.visual.show_at(flight.prev_position.lerp(flight.position, fraction), flight.velocity)
+		if flight.params.visual == ProjectileParams.VISUAL_AXE:
+			axe_throwers[flight.owner_id] = true
+	# A thrown axe leaves its thrower's hand until it's caught or ends.
+	for player: Player in players.get_children():
+		player.set_axe_thrown(axe_throwers.has(player.peer_id))
 
 
 func print_client_summary() -> void:

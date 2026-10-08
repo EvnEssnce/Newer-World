@@ -49,15 +49,22 @@ const STAGGER_TILT := 0.4
 const SHIELD_REST := Vector3(-0.5, 0.0, 0.0)
 const SHIELD_REST_YAW := PI / 2.0
 const SHIELD_RAISED := Vector3(-0.1, 0.2, -0.5)
-## Sword pivot rotation (x = pitch, y = sweep) at rest and at each swing's extremes.
-const SWORD_IDLE := Vector2(-0.7, 0.0)
-const LIGHT_WOUND := Vector2(0.0, -1.4)
-const LIGHT_STRUCK := Vector2(0.0, 1.4)
-const HEAVY_WOUND := Vector2(1.7, 0.0)
-const HEAVY_STRUCK := Vector2(-1.3, 0.0)
+## Sword pivot pose (x = pitch, y = sweep, z = meters pulled back, negative =
+## thrust forward) at rest and at each swing's extremes.
+const SWORD_IDLE := Vector3(-0.7, 0.0, 0.0)
+const LIGHT_WOUND := Vector3(0.0, -1.4, 0.0)
+const LIGHT_STRUCK := Vector3(0.0, 1.4, 0.0)
+const HEAVY_WOUND := Vector3(1.7, 0.0, 0.0)
+const HEAVY_STRUCK := Vector3(-1.3, 0.0, 0.0)
 ## Sword held out to the side for Whirlwind Edge, and across the body for Riposte.
-const SWORD_SPIN := Vector2(0.0, -PI / 2.0)
-const SWORD_PARRY := Vector2(0.3, 0.9)
+const SWORD_SPIN := Vector3(0.0, -PI / 2.0, 0.0)
+const SWORD_PARRY := Vector3(0.3, 0.9, 0.0)
+## Opening Strike: pointed forward and drawn back, then thrust out. Diving
+## Strike: the same, angled down at what it lands on.
+const SWORD_THRUST_WOUND := Vector3(0.05, 0.0, 0.35)
+const SWORD_THRUST_STRUCK := Vector3(0.0, 0.0, -0.6)
+const SWORD_DIVE_WOUND := Vector3(0.1, 0.0, 0.35)
+const SWORD_DIVE_STRUCK := Vector3(-0.6, 0.0, -0.5)
 ## Axe pivot pitch at rest, raised, and at the end of a chop.
 const AXE_IDLE := -0.9
 const AXE_WOUND := 1.6
@@ -69,8 +76,8 @@ const PARRY_COLOR := Color(0.55, 0.85, 1.0)
 ## Whirlwind Edge: radians the body winds back before spinning one full turn.
 const SPIN_WINDBACK := 0.6
 ## Rising Cut: sword low at the side, then swept up high.
-const RISING_WOUND := Vector2(-1.5, 0.4)
-const RISING_STRUCK := Vector2(1.7, 0.0)
+const RISING_WOUND := Vector3(-1.5, 0.4, 0.0)
+const RISING_STRUCK := Vector3(1.7, 0.0, 0.0)
 ## Spear pivot pose: x = pitch (up), y = sweep (left), z = meters pulled back
 ## (negative = thrust forward).
 const SPEAR_REST := Vector3(0.0, 0.0, 0.0)
@@ -180,6 +187,8 @@ var _rebirth_mesh: CylinderMesh
 @onready var _axe_left_pivot: Node3D = $Model/RollPivot/AxeLeftPivot
 @onready var _spear_pivot: Node3D = $Model/RollPivot/SpearPivot
 @onready var _spear_rest_position: Vector3 = _spear_pivot.position
+@onready var _sword_rest_position: Vector3 = _sword_pivot.position
+var _axe_thrown := false
 @onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
 @onready var _name_label: Label3D = $NameLabel
 
@@ -527,6 +536,12 @@ func set_party_member(member: bool) -> void:
 	_name_label.modulate = PARTY_NAME_COLOR if member else Color.WHITE
 
 
+## True while one of this player's thrown axes is in flight: the right hand's
+## axe is hidden (client, cosmetic). Set by ProjectileSystem every frame.
+func set_axe_thrown(thrown: bool) -> void:
+	_axe_thrown = thrown
+
+
 ## Applies facing, roll, stagger/death pose, weapon model and swing, hitbox and
 ## color. Client only, placeholder animation. view supplies the discrete state
 ## (attack type, ability, weapon, dead, staggered, i-frames, parry); yaw,
@@ -566,7 +581,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var spear := model == "spear"
 	_sword_pivot.visible = not axes and not spear
 	_shield_pivot.visible = not axes and not spear
-	_axe_right_pivot.visible = axes
+	_axe_right_pivot.visible = axes and not _axe_thrown
 	_axe_left_pivot.visible = axes
 	_spear_pivot.visible = spear
 	var shield_up := view.blocking or ability_id in ["shield_charge", "riposte"]
@@ -585,6 +600,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	else:
 		var pose := _sword_pose(attack, view.attack_type, ability_id, attack_tick)
 		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
+		_sword_pivot.position = _sword_rest_position + Vector3(0.0, 0.0, pose.z)
 
 	_show_hitbox(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
@@ -645,23 +661,28 @@ static func _phase_pose(attack: AttackParams, tick: float, rest: Vector2, wound:
 	return struck.lerp(rest, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
 
 
-## Sword pivot rotation (x = pitch, y = sweep).
+## Sword pivot pose (see SWORD_IDLE): thrusts for Opening Strike and Diving
+## Strike.
 static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: String,
-		tick: float) -> Vector2:
+		tick: float) -> Vector3:
 	if attack == null:
 		return SWORD_IDLE
 	match ability_id:
 		"whirlwind_edge":
-			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_SPIN, SWORD_SPIN)
+			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_SPIN, SWORD_SPIN)
 		"shield_charge":
 			return SWORD_IDLE
 		"riposte":
-			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
+			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
 		"rising_cut":
-			return _phase_pose(attack, tick, SWORD_IDLE, RISING_WOUND, RISING_STRUCK)
-	if attack_type == PlayerState.ATTACK_HEAVY or ability_id == "opening_strike":
-		return _phase_pose(attack, tick, SWORD_IDLE, HEAVY_WOUND, HEAVY_STRUCK)
-	return _phase_pose(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
+			return _phase_pose3(attack, tick, SWORD_IDLE, RISING_WOUND, RISING_STRUCK)
+		"opening_strike":
+			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_THRUST_WOUND, SWORD_THRUST_STRUCK)
+		"diving_strike":
+			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_DIVE_WOUND, SWORD_DIVE_STRUCK)
+	if attack_type == PlayerState.ATTACK_HEAVY:
+		return _phase_pose3(attack, tick, SWORD_IDLE, HEAVY_WOUND, HEAVY_STRUCK)
+	return _phase_pose3(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
 
 
 ## Spear pivot pose (see SPEAR_IDLE): thrusts for light, heavy and Lunge, a low
@@ -695,7 +716,8 @@ static func _phase_pose3(attack: AttackParams, tick: float, rest: Vector3, wound
 	return struck.lerp(rest, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
 
 
-## Axe pivot pitches (x = right axe, y = left axe). Light: the right axe chops;
+## Axe pivot pitches (x = right axe, y = left axe). Light, Hamstring and
+## Boomerang Axe (it throws the right one): the right axe chops;
 ## heavy and Crashing Leap: both; Frenzy: they take turns.
 static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: String,
 		tick: float) -> Vector2:
@@ -709,7 +731,7 @@ static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: Str
 		# Both axes raised high, then lowered.
 		var raised := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_WOUND, 0.0)).x
 		return Vector2(raised, raised)
-	if attack_type == PlayerState.ATTACK_LIGHT or ability_id == "hamstring":
+	if attack_type == PlayerState.ATTACK_LIGHT or ability_id in ["hamstring", "boomerang_axe"]:
 		return Vector2(chop, AXE_IDLE)
 	return Vector2(chop, chop)
 

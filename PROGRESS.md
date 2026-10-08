@@ -11,7 +11,27 @@ Husks behaving as expected.
 
 ## Session log
 
-### 2026-10-08 (20): Wave 2 playtest feedback (TO DO, mostly not built yet)
+### 2026-10-08 (21): Broadsword stab, Boomerang Axe visuals (items 4 and 3 below)
+
+Done (client visuals only, `player.gd` and `ProjectileSystem._process`):
+- **Broadsword stab:** `_sword_pose` now returns a `Vector3` like `_spear_pose` (z =
+  meters pulled back, negative = forward) and moves `SwordPivot` along it. Opening
+  Strike draws the level sword back 0.35 m and thrusts it 0.6 m forward
+  (`SWORD_THRUST_*`); Diving Strike with the Broadsword out does the same angled down
+  at the landing (`SWORD_DIVE_*`). Heavy attacks keep the overhead chop.
+- **Boomerang Axe:** only the right axe swings, and it's hidden while that player's
+  axe projectile is in flight (any projectile with `visual="axe"`), back when it's
+  caught or ends. `ProjectileSystem` calls `Player.set_axe_thrown` every frame from
+  the visible copies, so other players see it on the render clock too.
+
+Tests: 349 passed. Smoke: default and `-Party` both passed (0 corrections). Bot
+screenshots showed the right axe gone while the Boomerang Axe was out. The sword stab
+wasn't caught clearly on screen (the bot's camera is behind it): check it by hand.
+
+Left from session 20's list: items 1 (Crashing Leap aimed by pitch) and 2 (Diving
+Strike shape). Then a playtest of all four.
+
+### 2026-10-08 (20): Wave 2 playtest feedback (items 3 and 4 done in session 21)
 
 Done: Vault's peak height 0.8 → 1.6 m (`weapon_spear.cfg` `leap_height`; cosmetic).
 
