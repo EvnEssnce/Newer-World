@@ -1,0 +1,139 @@
+class_name CharacterBuild
+extends RefCounted
+## A character's class, equipped weapons, and per weapon its mastery allocation
+## and slotted abilities. Pure logic, unit tested (tests/test_character_build.gd).
+##
+## The server owns one per player and validates every change against the class
+## and the mastery rules. What affects the simulation (equipped weapons,
+## slotted abilities) goes into PlayerState with apply_to_state(); passive and
+## upgrade modifiers stay server-side. Clients get a copy (to_dict) for the UI.
+
+var class_def: ClassDef
+## Equipped weapon ids, one per weapon slot.
+var weapons := PackedStringArray()
+## Weapon id -> MasteryTree, for every weapon of the class that has one.
+var trees: Dictionary = {}
+## Weapon id -> allocated node ids (PackedStringArray).
+var allocated: Dictionary = {}
+## Weapon id -> ability id per ability slot ("" = empty) (PackedStringArray).
+var slots: Dictionary = {}
+
+
+## A new character's build: the class's default loadout and each tree's
+## default allocation and slots (pruned to what's valid, in case the data
+## files disagree).
+static func create(class_def: ClassDef, class_trees: Dictionary) -> CharacterBuild:
+	var b := CharacterBuild.new()
+	b.class_def = class_def
+	b.trees = class_trees
+	b.weapons = class_def.default_loadout.duplicate()
+	for weapon_id in class_def.weapons:
+		var tree: MasteryTree = class_trees.get(weapon_id)
+		var nodes := PackedStringArray()
+		var weapon_slots := PackedStringArray(["", "", ""])
+		if tree:
+			nodes = tree.prune(tree.default_nodes)
+			if tree.validate_slots(nodes, tree.default_slots) == "":
+				weapon_slots = tree.default_slots.duplicate()
+		b.allocated[weapon_id] = nodes
+		b.slots[weapon_id] = weapon_slots
+	return b
+
+
+## The default build for a class, with its trees loaded from data/.
+static func create_default(class_def: ClassDef) -> CharacterBuild:
+	var class_trees := {}
+	for weapon_id in class_def.weapons:
+		var tree := MasteryTree.for_weapon(weapon_id)
+		if tree:
+			class_trees[weapon_id] = tree
+	return create(class_def, class_trees)
+
+
+## Equips other weapons (one per weapon slot). "" on success, else why not.
+func set_weapons(loadout: PackedStringArray) -> String:
+	var error := class_def.validate_loadout(loadout)
+	if error.is_empty():
+		weapons = loadout.duplicate()
+	return error
+
+
+## Replaces a weapon's whole allocation and slots (a free respec). "" on
+## success, else why not (nothing changes then).
+func set_mastery(weapon_id: String, nodes: PackedStringArray, new_slots: PackedStringArray) -> String:
+	if not class_def.allows_weapon(weapon_id):
+		return "A %s can't use %s." % [class_def.display_name, weapon_id]
+	var tree: MasteryTree = trees.get(weapon_id)
+	if tree == null:
+		return "%s has no mastery tree." % weapon_id
+	var error := tree.validate(nodes)
+	if error.is_empty():
+		error = tree.validate_slots(nodes, new_slots)
+	if error.is_empty():
+		allocated[weapon_id] = nodes.duplicate()
+		slots[weapon_id] = new_slots.duplicate()
+	return error
+
+
+func get_allocated(weapon_id: String) -> PackedStringArray:
+	return allocated.get(weapon_id, PackedStringArray())
+
+
+func get_slots(weapon_id: String) -> PackedStringArray:
+	return slots.get(weapon_id, PackedStringArray(["", "", ""]))
+
+
+## PlayerState.ability_slots for the equipped weapons: ability-pool indices.
+func state_slots(params: PlayerParams) -> PackedInt32Array:
+	var result := PackedInt32Array()
+	for weapon_slot in PlayerState.WEAPON_SLOTS:
+		var weapon_id := weapons[weapon_slot] if weapon_slot < weapons.size() else ""
+		var weapon_slots := get_slots(weapon_id)
+		var weapon := params.weapon(weapon_id)
+		for slot in PlayerState.ABILITY_SLOTS:
+			var ability_id := weapon_slots[slot] if slot < weapon_slots.size() else ""
+			var index := -1 if ability_id.is_empty() else weapon.ability_index(ability_id)
+			if index >= 0 and weapon.abilities[index].internal:
+				index = -1
+			result.append(index)
+	return result
+
+
+## Puts the equipped weapons and slotted abilities into the simulated state.
+func apply_to_state(state: PlayerState, params: PlayerParams) -> void:
+	state.set_loadout(weapons, state_slots(params))
+
+
+func damage_multiplier(weapon_id: String, attack_kind: String, ability_id: String,
+		health_fraction: float) -> float:
+	var tree: MasteryTree = trees.get(weapon_id)
+	if tree == null:
+		return 1.0
+	return tree.damage_multiplier(get_allocated(weapon_id), attack_kind, ability_id, health_fraction)
+
+
+func block_stamina_multiplier(weapon_id: String) -> float:
+	var tree: MasteryTree = trees.get(weapon_id)
+	return tree.block_stamina_multiplier(get_allocated(weapon_id)) if tree else 1.0
+
+
+# --- Network ---
+
+func to_dict() -> Dictionary:
+	return {"class": class_def.id, "weapons": weapons, "allocated": allocated, "slots": slots}
+
+
+## Rebuilds a server's build on a client (trusted data). Null if the class is unknown.
+static func from_dict(data: Dictionary) -> CharacterBuild:
+	var class_def := ClassDef.for_id(str(data.get("class", "")))
+	if class_def == null:
+		return null
+	var b := create_default(class_def)
+	b.weapons = PackedStringArray(data.get("weapons", b.weapons))
+	var data_allocated: Dictionary = data.get("allocated", {})
+	var data_slots: Dictionary = data.get("slots", {})
+	for weapon_id: String in data_allocated:
+		b.allocated[weapon_id] = PackedStringArray(data_allocated[weapon_id])
+	for weapon_id: String in data_slots:
+		b.slots[weapon_id] = PackedStringArray(data_slots[weapon_id])
+	return b

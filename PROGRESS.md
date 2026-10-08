@@ -11,6 +11,51 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-07 (12): Abilities, weapon swap and the Fighter (class build Wave 1A)
+
+Built by a parallel agent from `design/classes.md`, merged into main after Wave 1B and
+the loot work.
+
+Done:
+- **Class:** Fighter only (`data/class_fighter.cfg`), from `--class=` (default fighter).
+  The server rejects weapons outside the class list.
+- **Weapons:**
+  - The sword is now the **Broadsword** (`weapon_broadsword.cfg`, same feel).
+  - New **Dual Axes** (`weapon_dual_axes.cfg`): faster, weaker lights, blocked hits cost
+    1.6× stamina.
+  - **X swaps** (0.35 s; buffered; not mid-attack, ability or roll).
+- **Abilities on Q/E/R:**
+  - Broadsword: Whirlwind Edge (hits all around), Shield Charge (dash, stops at and
+    staggers the first target), Riposte (parry stance: a frontal hit is negated with
+    "Parried!" and you counter, Husks included).
+  - Dual Axes: Frenzy (up to 4 hits), Crashing Leap (4 m leap, area slam). The third
+    axes slot stays empty until Wave 2.
+  - Cooldowns keep running while a weapon is holstered.
+- **Mastery trees** (`data/mastery*.cfg`):
+  - 2 branches per weapon, tier gates, 19 points (no XP yet).
+  - Free respecs any time except mid-action.
+  - Active nodes unlock abilities. Passives and upgrades are server-side damage/stamina
+    modifiers. Capstones are placeholders.
+  - **K** opens the tree panel.
+- **HUD:** ability bar with cooldowns, plus a weapon line.
+- **Bot and smoke test:** the bot uses abilities, swaps and respecs (8 s cycle). The
+  smoke test runs 16 s and requires ability hits, swaps and a build change.
+- Tests: 211 after the merge. Smoke: default 4 of 4 passed, `-Party` 4 of 4.
+
+Needs a hand playtest (`run_local_test.ps1`):
+- **Broadsword:** Q/E/R, especially Riposte against a Husk swing.
+- **Dual Axes** (swap with X): Frenzy, Crashing Leap.
+- **Swap:** how 0.35 s feels.
+- **K panel:** learn/unlearn, tier gates, moving abilities between slots.
+- **Corrections** should stay 0.
+- **Tuning:** `data/weapon_*.cfg` and `data/mastery*.cfg`.
+
+Known gaps:
+- Mastery allocations are lost on reconnect (persistence is milestone 5).
+- Crashing Leap's height is visual only, so it can't reach ledges.
+- Newly equipped weapons start with cooldowns at 0.
+- Snapshots grew by about 30 values per player.
+
 ### 2026-10-07 (11): Parties and the ally rule (class build Wave 1B)
 
 Built by a parallel agent from `design/classes.md`, merged into main.

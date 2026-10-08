@@ -17,15 +17,15 @@ func before_each() -> void:
 	params.dodge_stamina_cost = 30.0
 	params.dodge_ticks = 20
 	params.dodge_buffer_ticks = 5
-	params.attack_buffer_ticks = 4
-	params.attack_turn_speed = TAU
+	params.default_weapon.attack_buffer_ticks = 4
+	params.default_weapon.attack_turn_speed = TAU
 	var light := AttackParams.new()
 	light.windup_ticks = 3
 	light.active_ticks = 2
 	light.recovery_ticks = 4
-	params.light_attack = light
-	params.heavy_attack = light
-	params.heavy_hold_ticks = 5
+	params.default_weapon.light_attack = light
+	params.default_weapon.heavy_attack = light
+	params.default_weapon.heavy_hold_ticks = 5
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 

@@ -42,13 +42,20 @@ game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
   world/world.gd     Server sim loop, snapshots, hit resolution; client input sending,
                      prediction, interpolation, hit display; test bot.
+  world/build_service.gd  World/Builds node: class/weapon/mastery requests (RPCs), validation.
   player/player.gd   One player; server/local/remote roles (see below), health, visuals.
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
-  player/player_state.gd     Stamina, dodge, attacks, stagger, death, facing. Pure logic, unit tested.
-  player/player_params.gd    Player tuning converted to ticks/radians, loaded once.
-  combat/attack_params.gd    One attack's tuning (phases, damage, hitbox). Players and enemies.
-  combat/melee_hitbox.gd     Box hitbox vs capsule test, frontal arc. Pure math, unit tested.
+  player/player_state.gd     Stamina, dodge, attacks, abilities, cooldowns, weapon swap,
+                             stagger, death, facing. Pure logic, unit tested.
+  player/player_params.gd    Player tuning converted to ticks/radians, every weapon, loaded once.
+  combat/attack_params.gd    One attack's tuning (phases, hit windows, damage, hitbox). Players and enemies.
+  combat/ability_params.gd   An ability: AttackParams + cooldown, dash, parry/counter.
+  combat/weapon_params.gd    One weapon: light/heavy attacks, ability pool (data/weapon_<id>.cfg).
+  combat/melee_hitbox.gd     Box/radial hitbox vs capsule test, frontal arc. Pure math, unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
+  build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
+  build/mastery_tree.gd      A weapon's mastery tree and its rules. Pure logic, unit tested.
+  build/character_build.gd   Class + equipped weapons + per-weapon tree allocation and slots.
   enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
   enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
@@ -57,10 +64,13 @@ game/
   items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
-ui/                  connect_menu (client start screen), hud (health/stamina bars, debug info),
+ui/                  connect_menu (client start screen), hud (health/stamina bars, ability bar,
+                     weapon line, debug info), mastery_panel (K: tree, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
-data/                Tuning files: network, movement, combat, camera, weapon_sword, enemy_husk,
-                     loot (rarities + loot tables), items, affixes, party (.cfg).
+data/                Tuning files: network, movement, combat, camera, enemy_husk,
+                     weapon_<id> (broadsword, dual_axes), class_<id> (fighter),
+                     mastery (shared tree rules), mastery_<weapon>, loot (rarities + loot
+                     tables), items, affixes, party (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -76,10 +86,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   channel 1): the last `input_redundancy` inputs, each
   `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
-  `PlayerState.BUTTON_*` bits: jump, attack and block are sent while held; dodge only on
-  the tick it's pressed (the sim buffers it). Tap vs hold (light vs heavy) is decided
-  inside the sim from the held attack bit. `aim_yaw` is the camera yaw; attacks and
-  block face it. New actions get new bits.
+  `PlayerState.BUTTON_*` bits: jump (1), attack (4) and block (8) are sent while held;
+  dodge (2), swap (16) and abilities 1–3 (32/64/128, Q/E/R) only on the tick they're
+  pressed (the sim buffers them). Tap vs hold (light vs heavy) is decided inside the sim
+  from the held attack bit. `aim_yaw` is the camera yaw; attacks, abilities and block
+  face it. New actions get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
@@ -93,8 +104,19 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `last_processed_seq` differs from the prediction, it restores the server's position,
   velocity and state and replays unacknowledged inputs. "Corrections" on the HUD count
   only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
-  event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn)
-  isn't counted. `--verbose` logs each unexpected one, and server-side input drops.
+  event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn,
+  parry counter, ability stopped on hit, loadout change) isn't counted. `--verbose` logs
+  each unexpected one, and server-side input drops.
+- **Builds** (`World/Builds`, `BuildService`): the client sends its class in
+  `World._client_ready(class_id)`; the server gives the player its class's default
+  `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
+  slots)` (a whole tree allocation + Q/E/R ability ids: a free respec) and
+  `_request_weapons(weapons)`; server → client `_receive_build(build_dict, error)` after
+  every request and on join. The server validates (class weapon list, mastery rules, not
+  mid-attack/ability/swap) and puts what affects the sim (equipped weapon ids, slotted
+  ability indices) into `PlayerState.set_loadout`, a server event, so it reaches the
+  client through snapshots. Passive/upgrade nodes are server-only damage/stamina
+  modifiers, never sim state.
 - **On-floor is synced state**: `PlayerMovement` reads `PlayerState.on_floor` (set after
   each `move_and_slide`), never `body.is_on_floor()` directly, so a restored state
   carries it. Server-side teleports (respawn) should still land exactly on the ground.
@@ -127,10 +149,37 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `HIT_GUARD_BROKEN`.
 - **Hits are server-only.** After each server sim step with a live hitbox, `Player` emits
   `attack_stepped`; `World._on_attack_stepped` tests `MeleeHitbox.hits` against every
-  other player's current server position. Each target is hit at most once per attack
-  (`Player.attack_results`). A target in i-frames "evades" (reported once) but can still
-  be hit later in the same active window. `_strike_player` ignores allies
-  (`World.are_allies`): no damage, stagger, block cost or label.
+  other player's current server position. Each target is hit at most once per hit
+  window (`Player.attack_results`, keyed by `attack_serial` + window). A target in
+  i-frames "evades" (reported once) but can still be hit later in the same window.
+  Damage is scaled by the attacker's mastery modifiers (`Player.damage_multiplier`).
+  `_strike_player` ignores allies (`World.are_allies`): no damage, stagger, block cost
+  or label.
+- **Weapons and swap.** A class (`data/class_<id>.cfg`) lists the only weapons it can
+  equip. Two are equipped (`PlayerState.weapons`, `equipped`); attacks, abilities and
+  `block_stamina_multiplier` come from the one that's out. X swaps (`[swap]` in
+  combat.cfg): not mid-attack/ability/roll (buffered), and while `swap_tick` runs you
+  can move but not attack, block, dodge or use abilities. The new weapon is out from
+  the first swap tick.
+- **Abilities** (`[ability_<id>]` in the weapon file, pool order = `[weapon]
+  abilities`): Q/E/R use the equipped weapon's slots (`ability_slots`, pool indices).
+  `attack_type == ATTACK_ABILITY` and `ability` = pool index, so abilities share the
+  attack timeline (windup → hit windows → recovery; dodge cancels recovery; presses are
+  buffered by `[abilities] buffer`). Cooldown starts with the ability and counts down
+  for both weapons (`cooldowns`, per weapon slot × pool index). Variants:
+  `windows`/`window_interval` (Frenzy: a target can be hit once per window),
+  `shape="radial"` (Whirlwind Edge, Crashing Leap slam), dash (`dash_distance`, moved in
+  `PlayerMovement` like a dodge: Shield Charge, Crashing Leap), `max_targets` (the server
+  calls `end_active_window` once reached: Shield Charge stops at the first target), and
+  parry (`parry_arc` + `counter`: Riposte). **Parry**: a hit on a player in a parry
+  window from within the arc in front is negated (`HIT_PARRIED`) and the server calls
+  `start_counter`, which starts the internal counter ability facing the attacker.
+- **Mastery** (`data/mastery_<weapon>.cfg`, rules in `data/mastery.cfg`): two
+  branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
+  branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
+  unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
+  low_health_damage, block_stamina, none). Respecs are free any time except
+  mid-attack/ability/swap. K opens the panel.
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
   snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
   results) for damage numbers, labels and the red flash.
@@ -161,6 +210,16 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
+- Abilities hit enemies through the same path (`max_targets` and modifiers apply); a
+  Husk swing into a Riposte is parried like a player's.
+
+## Controls
+
+WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
+click = block, Q/E/R abilities, X swap weapon, K mastery panel, T/Y/N/L/Delete party
+(see below), F3 hitboxes, Esc frees the mouse. Z and C are reserved for the two Wing
+abilities, 1–9 for later, F for pickup and I for inventory (milestone 2): don't bind
+them to anything else.
 
 ## Loot (milestone 2; rolls only so far)
 
@@ -178,8 +237,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   it on the real data. `tools\roll_loot.ps1 [-Table husk] [-Kills 50000]` prints what a
   table really drops.
 - Not built yet: drops in the world, pickup (F), inventory (I), equipping. See
-  PROGRESS.md for the order and its dependency on the other session's Wave 1.
-- Only the sword exists; `PlayerParams.from_tuning` reads `data/weapon_sword.cfg`.
+  PROGRESS.md for the order.
 
 ## Parties and allies
 
@@ -223,21 +281,27 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 12 s: move, dodge, fight each other and Husks, block, die, respawn
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 16 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits on each other, Husk fights still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
-Both smoke scripts take `-Port N` (default 24599) so parallel runs don't collide.
+Both smoke scripts take `-Port N` (default 24599) so parallel runs (e.g. two worktrees)
+don't collide.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--bot` (auto-connect; repeats every 6 s: take turns attacking and blocking: the nearest Husk within 15 m, else the nearest player; then circle with
-jump/air dodge/ground dodge; see `World._bot_input`), `--bot-party` (with `--bot`: the
-lower peer id invites the nearest player, and the bot accepts any invite; it doesn't
-attack until it's in a party, then still swings at its ally when no Husk is near, which
-the server ignores; see `PartySystem._bot_step`), `--verbose` (log positions every 2 s,
-server logs hits), `--hitboxes` (start with hitboxes shown; F3 toggles),
-`--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals),
+`--class=ID` (client: character class, default `fighter`; unknown = default),
+`--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
+Husk within 15 m, else the nearest player), then both use abilities (guard up between), then circle
+with weapon swap/jump/air dodge/ground dodge and a free respec; see `World._bot_input`),
+`--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
+accepts any invite; it doesn't attack or use abilities until it's in a party, then
+still swings at its ally when no Husk is near, which the server ignores; see
+`PartySystem._bot_step`), `--verbose` (log positions every 2 s, server logs hits and
+refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
+`--mastery-panel` (open the K panel at start, for screenshot checks),
+`--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals; a
+relative path avoids trouble with the space in the project path),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),
 `--tune=file/section/key=value` (repeatable; overrides a `data/` value for that run;
 give the server and every client the same overrides). The smoke test uses `--tune`

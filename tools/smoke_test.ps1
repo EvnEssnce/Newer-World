@@ -1,14 +1,16 @@
 # Automated networking check: a headless server and two headless bot clients run
-# for a few seconds: each client must see the other move, dodge, attack; the server
-# must resolve hits, a death and a respawn, a guarded hit, and Husks and bots must
-# hit each other; no unexpected prediction corrections.
-#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Party]
+# for a few seconds: each client must see the other move, dodge, attack, use an
+# ability and swap weapons; the server must resolve hits, a death and a respawn, a
+# guarded hit, ability hits and a build change, and Husks and bots must hit each
+# other; no unexpected prediction corrections.
+#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party]
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
 # deaths and blocks between the bots, the server must report a party formed,
 # 0 bot-on-bot hits and at least one bot swing ignored because they're allies
 # (both clients in a party of 2), while Husk fights still happen.
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
-param([int]$Port = 24599, [int]$Seconds = 12, [switch]$Party)
+# 16 s = two of the bot's 8 s cycles (see World._bot_input).
+param([int]$Port = 24599, [int]$Seconds = 16, [switch]$Party)
 . "$PSScriptRoot\find_godot.ps1"
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
@@ -42,7 +44,7 @@ $clients | ForEach-Object { $_.WaitForExit() }
 if (-not $server.WaitForExit(10000)) { Stop-Process -Id $server.Id -Force }
 
 $failed = $false
-# The bots fight (Husks when near, else each other) for the first 4 s of every 6;
+# The bots fight (Husks when near, else each other) for the first 4 s of every 8 (then use abilities for 2 s);
 # the server must resolve real hits.
 $serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+) blocks=(\d+) guard_breaks=(\d+)'
 $enemySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemies count=(\d+) enemy_hits=(\d+) enemy_damaged=(\d+) enemy_kills=(\d+)'
@@ -86,6 +88,23 @@ if (-not $enemySummary -or [int]$enemySummary.Matches[0].Groups[1].Value -lt 1) 
 } else {
     Write-Host "PASS enemies: $($enemySummary.Line)" -ForegroundColor Green
 }
+# The bots use abilities (on each other or Husks), swap weapons and respec once a cycle.
+$abilitySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY abilities uses=(\d+) ability_hits=(\d+) parries=(\d+) swaps=(\d+) builds=(\d+)'
+if (-not $abilitySummary) {
+    Write-Host "FAIL abilities: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$abilitySummary.Matches[0].Groups[1].Value -lt 2 -or [int]$abilitySummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL abilities: too few ability uses or no ability hits ($($abilitySummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$abilitySummary.Matches[0].Groups[4].Value -lt 2) {
+    Write-Host "FAIL abilities: too few weapon swaps ($($abilitySummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$abilitySummary.Matches[0].Groups[5].Value -lt 1) {
+    Write-Host "FAIL abilities: no build change accepted ($($abilitySummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS abilities: $($abilitySummary.Line)" -ForegroundColor Green
+}
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'
     if (-not $summary) {
@@ -98,7 +117,7 @@ foreach ($name in 'client1', 'client2') {
         Write-Host "PASS ${name}: $($summary.Line)" -ForegroundColor Green
     }
     # The bot dodges on the ground and in the air, and attacks. Prediction must match the server.
-    $local = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ snapshots=\d+ corrections=(\d+) dodges=(\d+) air_dodges=(\d+) attacks=(\d+)'
+    $local = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ snapshots=\d+ corrections=(\d+) dodges=(\d+) air_dodges=(\d+) attacks=(\d+) hits_landed=\d+ abilities=(\d+) swaps=(\d+)'
     if (-not $local) {
         Write-Host "FAIL ${name}: no local player summary" -ForegroundColor Red
         $failed = $true
@@ -107,6 +126,9 @@ foreach ($name in 'client1', 'client2') {
         $failed = $true
     } elseif ([int]$local.Matches[0].Groups[4].Value -lt 1) {
         Write-Host "FAIL ${name}: bot never attacked ($($local.Line))" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$local.Matches[0].Groups[5].Value -lt 1 -or [int]$local.Matches[0].Groups[6].Value -lt 1) {
+        Write-Host "FAIL ${name}: bot didn't use an ability and swap weapons ($($local.Line))" -ForegroundColor Red
         $failed = $true
     } elseif ([int]$local.Matches[0].Groups[1].Value -gt 5) {
         # Usually 0. About 1 run in 20 shows a few small ground corrections of unknown

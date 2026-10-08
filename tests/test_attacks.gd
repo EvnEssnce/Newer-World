@@ -16,11 +16,11 @@ func before_each() -> void:
 	params.dodge_stamina_cost = 30.0
 	params.dodge_ticks = 20
 	params.dodge_buffer_ticks = 5
-	params.heavy_hold_ticks = 5
-	params.attack_buffer_ticks = 4
-	params.attack_turn_speed = TAU  # one full turn per second = TAU / 60 per tick
-	params.light_attack = _attack(3, 2, 4)
-	params.heavy_attack = _attack(6, 2, 5)
+	params.default_weapon.heavy_hold_ticks = 5
+	params.default_weapon.attack_buffer_ticks = 4
+	params.default_weapon.attack_turn_speed = TAU  # one full turn per second = TAU / 60 per tick
+	params.default_weapon.light_attack = _attack(3, 2, 4)
+	params.default_weapon.heavy_attack = _attack(6, 2, 5)
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 
@@ -57,14 +57,14 @@ func test_tap_starts_light_attack_on_release() -> void:
 
 
 func test_hold_starts_heavy_attack_without_release() -> void:
-	_steps(params.heavy_hold_ticks, ATTACK)
+	_steps(params.default_weapon.heavy_hold_ticks, ATTACK)
 	assert_false(state.is_attacking(), "not held long enough yet")
 	_step(ATTACK)
 	assert_eq(state.attack_type, PlayerState.ATTACK_HEAVY)
 
 
 func test_holding_on_gives_one_heavy_and_release_gives_nothing() -> void:
-	_steps(params.heavy_hold_ticks + 1 + params.heavy_attack.total_ticks() + 10, ATTACK)
+	_steps(params.default_weapon.heavy_hold_ticks + 1 + params.default_weapon.heavy_attack.total_ticks() + 10, ATTACK)
 	assert_false(state.is_attacking(), "heavy ended, no repeat while held")
 	_step()
 	assert_false(state.is_attacking(), "releasing after a heavy is not a light")
@@ -76,7 +76,7 @@ func test_attack_starts_facing_aim() -> void:
 
 
 func test_attack_turns_toward_aim_during_the_swing() -> void:
-	_steps(params.heavy_hold_ticks + 1, ATTACK, 0.0)  # heavy: 13 ticks, time to turn 1 rad
+	_steps(params.default_weapon.heavy_hold_ticks + 1, ATTACK, 0.0)  # heavy: 13 ticks, time to turn 1 rad
 	_step(ATTACK, 1.0)
 	assert_almost(state.yaw, TAU / 60.0, 0.001, "one tick of turning")
 	_steps(10, ATTACK, 1.0)
@@ -86,7 +86,7 @@ func test_attack_turns_toward_aim_during_the_swing() -> void:
 
 func test_attack_stops_turning_when_it_ends() -> void:
 	_tap(0.0)
-	_steps(params.light_attack.total_ticks(), 0, 1.0)
+	_steps(params.default_weapon.light_attack.total_ticks(), 0, 1.0)
 	assert_false(state.is_attacking())
 	var yaw_at_end := state.yaw
 	_step(0, 2.0)
@@ -102,7 +102,7 @@ func test_movement_does_not_turn_during_attack() -> void:
 func test_hitbox_only_live_in_active_window() -> void:
 	_tap()
 	var active_ticks := []
-	for i in params.light_attack.total_ticks():
+	for i in params.default_weapon.light_attack.total_ticks():
 		if state.is_attack_active(params):
 			active_ticks.append(state.attack_tick)
 		_step()
@@ -111,7 +111,7 @@ func test_hitbox_only_live_in_active_window() -> void:
 
 func test_attack_lasts_its_total_ticks() -> void:
 	_tap()
-	_steps(params.light_attack.total_ticks() - 1)
+	_steps(params.default_weapon.light_attack.total_ticks() - 1)
 	assert_true(state.is_attacking(), "last tick")
 	_step()
 	assert_false(state.is_attacking(), "over")
@@ -129,7 +129,7 @@ func test_press_during_attack_queues_the_next_one() -> void:
 func test_queued_attack_expires() -> void:
 	_tap()
 	_tap()  # queued at tick 2, buffer runs out before tick 9
-	_steps(params.light_attack.total_ticks())
+	_steps(params.default_weapon.light_attack.total_ticks())
 	assert_false(state.is_attacking())
 
 
@@ -144,7 +144,7 @@ func test_attack_pressed_late_in_a_roll_starts_after_it() -> void:
 
 func test_dodge_cancels_recovery() -> void:
 	_tap()
-	_steps(params.light_attack.windup_ticks + params.light_attack.active_ticks)
+	_steps(params.default_weapon.light_attack.windup_ticks + params.default_weapon.light_attack.active_ticks)
 	assert_true(state.is_attack_recovering(params))
 	_step(DODGE)
 	assert_true(state.is_dodging())

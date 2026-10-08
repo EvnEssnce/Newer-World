@@ -1,8 +1,8 @@
 class_name PlayerParams
 extends RefCounted
 ## Player tuning in simulation units (ticks, m/s, radians). The game builds one
-## from data/movement.cfg and data/combat.cfg with current(); tests build their
-## own with fixed values.
+## from data/movement.cfg, data/combat.cfg and every data/weapon_*.cfg with
+## current(); tests build their own with fixed values.
 
 # Movement
 var move_speed := 0.0
@@ -35,14 +35,16 @@ var max_air_dodges := 0
 var max_health := 0.0
 var respawn_ticks := 0
 
-# Attacks (equipped weapon)
-var light_attack: AttackParams
-var heavy_attack: AttackParams
-var attack_buffer_ticks := 0
-## Radians per second the facing tracks the aim during an attack.
-var attack_turn_speed := 0.0
-## Ticks the attack button must be held for a heavy attack.
-var heavy_hold_ticks := 0
+# Weapons. Attacks and abilities come from the equipped weapon
+# (PlayerState.weapon()).
+## Every weapon by id.
+var weapons: Dictionary[String, WeaponParams] = {}
+## Used for a weapon id that isn't in `weapons`: a state with no loadout yet
+## (tests, or a client before its first snapshot).
+var default_weapon := WeaponParams.new()
+var swap_ticks := 0
+var swap_buffer_ticks := 0
+var ability_buffer_ticks := 0
 
 # Block
 ## Full width of the protected arc in front of the blocker, radians.
@@ -92,13 +94,14 @@ static func from_tuning() -> PlayerParams:
 	p.max_health = Tuning.get_value("combat", "health", "max")
 	p.respawn_ticks = roundi(Tuning.get_value("combat", "death", "respawn_time") * tps)
 
-	# Only the sword exists so far; later this follows the equipped weapon.
-	var weapon := "weapon_sword"
-	p.light_attack = AttackParams.from_tuning(weapon, "light", tps)
-	p.heavy_attack = AttackParams.from_tuning(weapon, "heavy", tps)
-	p.attack_buffer_ticks = roundi(Tuning.get_value(weapon, "attacks", "buffer") * tps)
-	p.attack_turn_speed = deg_to_rad(Tuning.get_value(weapon, "attacks", "turn_speed"))
-	p.heavy_hold_ticks = roundi(Tuning.get_value(weapon, "attacks", "heavy_hold_time") * tps)
+	for file in Tuning.files_with_prefix("weapon_"):
+		var weapon := WeaponParams.from_tuning(file.trim_prefix("weapon_"), tps)
+		p.weapons[weapon.id] = weapon
+	if not p.weapons.is_empty():
+		p.default_weapon = p.weapons.values()[0]
+	p.swap_ticks = maxi(1, roundi(Tuning.get_value("combat", "swap", "duration") * tps))
+	p.swap_buffer_ticks = roundi(Tuning.get_value("combat", "swap", "buffer") * tps)
+	p.ability_buffer_ticks = roundi(Tuning.get_value("combat", "abilities", "buffer") * tps)
 
 	p.block_arc = deg_to_rad(Tuning.get_value("combat", "block", "arc"))
 	p.block_damage_taken = Tuning.get_value("combat", "block", "damage_taken")
@@ -110,11 +113,6 @@ static func from_tuning() -> PlayerParams:
 	return p
 
 
-## The params for PlayerState.ATTACK_LIGHT / ATTACK_HEAVY, or null.
-func attack(attack_type: int) -> AttackParams:
-	match attack_type:
-		PlayerState.ATTACK_LIGHT:
-			return light_attack
-		PlayerState.ATTACK_HEAVY:
-			return heavy_attack
-	return null
+## The weapon with this id, or default_weapon.
+func weapon(weapon_id: String) -> WeaponParams:
+	return weapons.get(weapon_id, default_weapon)

@@ -19,9 +19,9 @@ func before_each() -> void:
 	params.dodge_stamina_cost = 30.0
 	params.dodge_ticks = 20
 	params.dodge_buffer_ticks = 5
-	params.heavy_hold_ticks = 5
-	params.attack_buffer_ticks = 4
-	params.attack_turn_speed = TAU
+	params.default_weapon.heavy_hold_ticks = 5
+	params.default_weapon.attack_buffer_ticks = 4
+	params.default_weapon.attack_turn_speed = TAU
 	params.block_arc = deg_to_rad(120.0)
 	params.block_regen_multiplier = 0.5
 	params.block_turn_speed = TAU
@@ -31,7 +31,7 @@ func before_each() -> void:
 	light.active_ticks = 2
 	light.recovery_ticks = 4
 	light.block_stamina_damage = 20.0
-	params.light_attack = light
+	params.default_weapon.light_attack = light
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 
@@ -71,7 +71,7 @@ func test_attack_while_blocking_drops_the_guard_then_it_returns() -> void:
 	_step(BLOCK)  # released attack: light starts
 	assert_true(state.is_attacking())
 	assert_false(state.blocking, "no guard while swinging")
-	_steps(params.light_attack.total_ticks(), BLOCK)
+	_steps(params.default_weapon.light_attack.total_ticks(), BLOCK)
 	assert_false(state.is_attacking())
 	assert_true(state.blocking, "guard back up while still held")
 
