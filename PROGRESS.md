@@ -11,6 +11,47 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (19): Feather projectiles (class build Wave 2C); Wave 2 complete
+
+Built by an agent, merged into main with no conflicts.
+
+Done:
+- **Projectiles** (`data/projectiles.cfg`, `game/combat/projectile*.gd`):
+  - Simulated on the server with a swept hit test, so fast ones can't tunnel.
+  - Speed, gravity, lifetime, hit radius, pierce, walls, guard-stops, boomerang return.
+  - Hits resolve like melee: i-frames evade, a guard facing the throw blocks, allies are
+    ignored, statuses/force/Ember apply. **Riposte parries projectiles** from the front.
+  - Network: one reliable spawn event, plus turn/end events; every machine flies it
+    with the same math. Nothing in snapshots.
+  - The thrower sees their own throw instantly (a cosmetic copy the server confirms).
+  - Feather-shaped visuals (tapered vane, quill, streak), coloured per kind.
+  - Any attack or ability can fire one: `projectile`, `projectile_time`,
+    `projectile_count`, `projectile_spread`.
+- **Javelin Cast** (Spear): 110 damage, slows 3 s, 9 s cooldown. 28 m/s with a slight
+  drop (about 22 m reach). Stopped by walls and guards.
+- **Boomerang Axe** (Dual Axes): 65 per hit, 8 s cooldown. Flies 9 m out, returns to
+  you as you move, hits each target once per leg, cuts through groups.
+- Both are learned by default but **not slotted**: put them on Q/E/R in the K panel.
+- Tests: 349. Smoke after merge: default 2 of 2 passed, `-Party` 1 of 1 (the agent:
+  3 of 4 and 3 of 3; new flake "no player was moved by force" when every Husk hit
+  was blocked).
+
+Needs a hand playtest (`run_local_test.ps1`; two windows with `-NoBot` for PvP checks):
+- **Javelin:** range, speed, drop, Slow on a Husk, stops on crates and the ground.
+- **Boomerang:** returns as you move; hits going out and coming back.
+- **Defense vs throws:** blocking facing the throw, Riposte, dodging through.
+- **Corrections:** stay 0 while throwing.
+
+Known gaps:
+- Projectiles fly flat (no aim pitch).
+- No impact effect.
+- In rare cases the thrower could see their own throw twice.
+
+**Next:** Wave 3 in `design/classes.md`: the rest of the Spear (Skewer, Perforate), enemy
+threat (for taunts), then the Juggernaut. Also the queued task to make the smoke
+test's luck-based checks reliable, and snapshot size (interest management / delta
+compression) before playtests with more than 2 people.
+
 ### 2026-10-08 (18): Ember, Wings and Rebirth (class build Wave 2D)
 
 Built by an agent, merged into main with no conflicts.
