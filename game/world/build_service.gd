@@ -205,22 +205,24 @@ func bot_respec(weapon_id: String, cycle: int) -> void:
 	request_mastery(weapon_id, nodes, slots)
 
 
-## Test bot: slots each equipped weapon's unlocked status abilities (those with
-## applies_status or self_status) first, then its other slotted ones, so the
-## bot applies statuses. Keeps the allocation.
+## Test bot: slots each of its class's weapons' unlocked status abilities (those
+## with applies_status or self_status) first, then its projectile abilities,
+## then its other slotted ones, so the bot applies statuses and throws
+## projectiles. Keeps the allocation.
 func bot_slot_status_abilities(params: PlayerParams) -> void:
 	if local_build == null:
 		return
-	for weapon_id in local_build.weapons:
+	for weapon_id: String in local_build.trees:
 		var tree: MasteryTree = local_build.trees.get(weapon_id)
-		if tree == null:
-			continue
 		var nodes := local_build.get_allocated(weapon_id)
 		var unlocked := tree.unlocked_abilities(nodes)
 		var slots := PackedStringArray()
 		for ability in params.weapon(weapon_id).abilities:
 			if (ability.id in unlocked and not ability.internal
 					and not (ability.applies_status.is_empty() and ability.self_status.is_empty())):
+				slots.append(ability.id)
+		for ability in params.weapon(weapon_id).abilities:
+			if ability.id in unlocked and not ability.projectile.is_empty() and not ability.id in slots:
 				slots.append(ability.id)
 		for ability_id in local_build.get_slots(weapon_id):
 			if not ability_id.is_empty() and not ability_id in slots:

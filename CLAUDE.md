@@ -59,6 +59,12 @@ game/
   combat/force_params.gd     An attack's forced movement (force_* keys): knockback/pull/push, launch.
   combat/forced_motion.gd    A push/launch in progress (players: in PlayerState; enemies). Unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
+  combat/projectile_params.gd  One projectile kind (data/projectiles.cfg [projectile_<id>]).
+  combat/projectile.gd       One projectile in flight: steps, boomerang legs, pierce, hit-once
+                             bookkeeping, swept segment-vs-capsule test. Pure logic, unit tested.
+  combat/projectile_system.gd  World/Projectiles: server flight + hits, spawn/turn/end events,
+                             client copies (render clock / local cosmetic copy).
+  combat/projectile_visual.gd  Client look: feather (quill + vane + streak) or spinning axe.
   build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
   build/mastery_tree.gd      A weapon's mastery tree (or a class's Wing tree) and its rules.
                              Pure logic, unit tested.
@@ -84,7 +90,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      weapon_<id> (broadsword, spear, dual_axes), class_<id> (fighter),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
-                     loot (rarities + loot tables), items, affixes, party, status_effects (.cfg).
+                     loot (rarities + loot tables), items, affixes, party, status_effects,
+                     projectiles (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -169,6 +176,21 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   velocity, ticks left, pending launch speed) is entries 28 (velocity), 29 (ticks) and 30
   (launch) of `to_array()`. The server starts it (`start_force`, a server
   event); `PlayerMovement` applies it on both sides, so the client replays it exactly.
+- **Projectiles are never in snapshots** (packet size). `World/Projectiles`
+  (`ProjectileSystem`, both sides) sends reliable events to every player: on a throw
+  `_receive_spawn(id, kind, owner, origin, velocity, server_tick)`, then
+  `_receive_event(id, type, age, position)`: `type` 0 = TURN (a returning one turned
+  back: its timer, a wall or its pierce), else `Projectile.END_*` (1 hit, 2 wall, 3
+  expired, 4 caught) with where it stopped; `age` = steps flown. Clients fly a copy with
+  the same `Projectile.step` math and apply each event when their copy reaches that age.
+  Other players' throws run on the render clock (age = render tick − spawn tick), so they
+  leave the thrower as drawn. The local player's own throw shows at once: its predicted
+  attack reaching the release tick emits `Player.projectile_released` (also on the server,
+  which throws the real one) and the client makes a cosmetic copy on its own clock; the
+  server's spawn confirms the oldest unconfirmed copy of that kind (unconfirmed after 0.5 s:
+  removed), and late events rewind it to the event and re-fly the difference. Nothing
+  about projectiles touches the thrower's predicted sim beyond the attack timeline, so they
+  cause no corrections.
 
 ## Combat model
 
@@ -244,6 +266,36 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `move_and_slide` (walls) do the rest, and on-floor stays synced state. Enemies:
   `Enemy.start_force` (server) staggers the brain for the same ticks, so steering and
   swings pause. Players show the stagger tilt while moved.
+- **Projectiles** (the `PROJ` tag). Kinds in `data/projectiles.cfg` (`[projectile_<id>]`:
+  speed, gravity, pitch, lifetime, hit_radius, pierce, walls, stopped_by_guard, release
+  point, optional `returns`/`return_after`/`return_speed`/`catch_radius`, and the look:
+  `visual` "feather" or "axe", length, color, spin). An attack or ability throws with
+  `projectile` (kind id), `projectile_time` (s from its start), optional
+  `projectile_count`/`projectile_spread` (degrees); usually `shape="none"`. Its damage,
+  stagger, block cost, statuses and `force_*` are what the projectile's hit does,
+  scaled by the thrower's modifiers at release (`damage_multiplier`, damage-dealt
+  statuses). The release is the predicted attack timeline; the projectile is server
+  state. **Server** (`ProjectileSystem.server_step`, once per tick after players and
+  enemies): `Projectile.step` (gravity; a returning one turns at the start of a step and
+  steers toward its thrower's current server position, or the throw origin if the
+  thrower is gone/dead), then the step's segment: a ray against layer 1 (walls/ground;
+  a returning one turns back there, and ignores the world on its way back), and a swept
+  sphere vs every player/enemy capsule (`Projectile.sweep_capsule`, no tunnelling),
+  nearest first. Each target is hit once per projectile, once **per leg** for a
+  boomerang (`Projectile.results`; an evade doesn't count). Players go through
+  `World.resolve_strike` (the rest of `_strike_player`, with the attacker position = 2 m
+  back along the projectile's path): allies ignored (it flies on), i-frames evade (flies
+  on), a guard facing where it came from blocks (stamina; stops it if
+  `stopped_by_guard`), statuses (+ the thrower's on-hit statuses, taken once per
+  projectile) and force on `HIT_DAMAGED`, Ember as usual. **A Riposte parries
+  projectiles** from the front like melee (negated, stops a `stopped_by_guard` one; the
+  counter turns toward where it came from). Enemies: `World.strike_enemy` (same as
+  melee). `pierce` = targets it passes through (0 = stops at the first); a returning one
+  that runs out turns back instead.
+  Fighter: Spear **Javelin Cast** (feather javelin, 28 m/s, ~22 m, slows 3 s) and Dual
+  Axes **Boomerang Axe** (9 m out, back to the thrower, pierces, hits each target once
+  each way; a guard doesn't stop it). Both are tier-1 nodes in their trees and in the
+  default allocation, not in the default slots (slot them in K).
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
   snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
   results) for damage numbers, labels and the red flash.
@@ -454,8 +506,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs or forced moves on each other, Husk fights (and Ember, Wings, a Rebirth) still happen
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
@@ -478,7 +530,10 @@ Wings (`World._bot_wing_input`): Wingbeat Surge as its attack turn starts, Ember
 (or Pyre Heart when below 80% health) as its block turn starts, Diving Strike when the
 target is 3–7 m away; while a Rebirth is ready it only spends Ember above the 50
 threshold. At 7.6 s it also respecs its Wing slots: default on even cycles, Diving
-Strike / Pyre Heart in Z on odd ones, `BuildService.bot_respec_wings`),
+Strike / Pyre Heart in Z on odd ones, `BuildService.bot_respec_wings`.
+Projectiles: it slots projectile abilities right after status ones (every class weapon)
+and throws a ready one whenever its target is 3 m to 75% of the projectile's reach away
+before the circling phase; see `World._bot_projectile_button`),
 `--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
 accepts any invite; it doesn't attack or use abilities (Wings included) until it's in a party, then
 still swings at its ally when no Husk is near, which the server ignores; see
@@ -488,16 +543,19 @@ refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 opens it on the Wings tab),
 `--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
 `SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),
-`--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals; a
-relative path avoids trouble with the space in the project path),
+`--screenshot-dir=PATH` (save the game window every 0.25 s as `frame_<N>.png`, for
+checking visuals; a relative path avoids trouble with the space in the project path; a
+bot's camera then turns to where it aims, and with `--verbose` it prints
+`[client] throws <kind> (frame N)` to find its throws),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),
 `--tune=file/section/key=value` (repeatable; overrides a `data/` value for that run;
 give the server and every client the same overrides; only keys that exist in the file
 can be overridden, strings need no quotes). The smoke test uses `--tune` for low health
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
-checks don't depend on bot luck, and a 1 s Rebirth (`ember/rebirth/duration`) so a
-reborn bot is back in the fight quickly.
+checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`) so a
+reborn bot is back in the fight quickly, and 2 s Javelin Cast / Boomerang Axe cooldowns
+for more throws.
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.

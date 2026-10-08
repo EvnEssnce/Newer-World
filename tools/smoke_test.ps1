@@ -3,7 +3,8 @@
 # ability and swap weapons; the server must resolve hits, a death and a respawn, a
 # guarded hit, ability hits and a build change, and Husks and bots must hit each
 # other; players and Husks must be moved by force (knockback) and the Spear's
-# abilities used; no unexpected prediction corrections.
+# abilities used; projectiles thrown and hitting; no unexpected prediction
+# corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party]
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
 # deaths and blocks between the bots, the server must report a party formed,
@@ -47,6 +48,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=enemy_husk/attack/applies_status=bleed',
     '--tune=weapon_broadsword/heavy/force_distance=0.4',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
+    # More throws per run (each weapon is out for about one cycle), so a
+    # projectile hit doesn't hang on one or two throws.
+    '--tune=weapon_spear/ability_javelin_cast/cooldown=2.0',
+    '--tune=weapon_dual_axes/ability_boomerang_axe/cooldown=2.0',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0')
@@ -196,6 +201,25 @@ if (-not $emberSummary) {
     $failed = $true
 } else {
     Write-Host "PASS ember: $($emberSummary.Line)" -ForegroundColor Green
+}
+# Projectiles: the bots throw Javelin Cast (Spear) and Boomerang Axe (Dual Axes)
+# at range (and in the ability phase); at least one must hit a player or a
+# Husk, and party members' projectiles must never hit each other.
+$projSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY projectiles fired=(\d+) hits=(\d+) on_players=(\d+) on_enemies=(\d+) ally_hits=(\d+) ally_ignored=(\d+)'
+if (-not $projSummary) {
+    Write-Host "FAIL projectiles: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$projSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL projectiles: none fired ($($projSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$projSummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL projectiles: none hit a player or a Husk ($($projSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$projSummary.Matches[0].Groups[5].Value -ne 0) {
+    Write-Host "FAIL projectiles: a projectile hit an ally ($($projSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS projectiles: $($projSummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'
