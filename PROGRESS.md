@@ -11,6 +11,39 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (20): Wave 2 playtest feedback (TO DO, mostly not built yet)
+
+Done: Vault's peak height 0.8 → 1.6 m (`weapon_spear.cfg` `leap_height`; cosmetic).
+
+To do (developer feedback, with the plan):
+1. **Crashing Leap aimed by camera pitch.** Looking level or down = full distance (4 m);
+   looking up shortens it; looking straight up (or the camera's max pitch) = straight
+   up, 0 m. Diving Strike and Vault keep their fixed distances.
+   - **Needs a protocol change:** inputs carry only `aim_yaw`. Add `aim_pitch` (5th
+     input element, validated on the server), passed into `PlayerState.step`.
+   - At ability start, store the distance fraction in the length of `ability_dir`, which
+     is already synced, so `to_array` doesn't change. Make sure `PlayerMovement`'s dash
+     uses that length instead of normalizing.
+   - New ability keys, e.g. `dash_aim_pitch=true`, `aim_full_pitch` (deg, full distance
+     at or below) and `aim_zero_pitch` (deg, 0 at or above; check `camera.cfg`
+     `max_pitch`).
+   - Unit test the mapping. The cosmetic leap height stays.
+2. **Diving Strike shape:** rise steeply first, then swoop down and forward.
+   - **Horizontal:** a new `dash_ease="in"` option (speed ramps up over the dash; the
+     total distance stays exact and deterministic).
+   - **Height:** a new `leap_peak` key (fraction of the dash where the cosmetic height
+     peaks, e.g. 0.3) instead of the symmetric parabola.
+   - **Damage during the swoop:** windup covers the rise; the hit window (radial) is
+     active during the late, horizontal part of the dash, not only on landing.
+3. **Boomerang Axe visuals:** only one axe swings, and that axe leaves the hand
+   (hidden) while its projectile is in flight, reappearing when caught or ended. The
+   client's projectile system knows the owner's in-flight projectiles.
+4. **Broadsword stab:** Opening Strike, and Diving Strike while the Broadsword is out,
+   use a forward thrust like the Spear's. `_sword_pose` returns only rotation; it needs
+   a forward offset like `_spear_pose`.
+
+Then run tests and smoke, commit, and get a playtest.
+
 ### 2026-10-08 (19): Feather projectiles (class build Wave 2C); Wave 2 complete
 
 Built by an agent, merged into main with no conflicts.
