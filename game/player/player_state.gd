@@ -630,6 +630,8 @@ func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Ve
 	ability_dir = -forward(yaw) if started.dash_backward else forward(yaw)
 	if started.dash_from_input:
 		ability_dir = move.normalized() if move.length() > 0.1 else -forward(yaw)
+		# Face the way it goes (its turn_speed 0 keeps it there for the vault).
+		yaw = yaw_for_direction(ability_dir)
 	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
 	_apply_self_status(started, params)
 

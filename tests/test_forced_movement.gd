@@ -353,3 +353,32 @@ func test_ability_iframes_only_inside_their_window() -> void:
 	for i in 4:
 		state.step(Vector2.ZERO, 0, 0.0, true, params, DELTA)  # tick 6
 	assert_false(state.is_invulnerable(params), "after the window")
+
+func test_input_dash_faces_where_it_goes() -> void:
+	vault.dash_backward = false
+	vault.dash_from_input = true
+	state.step(Vector2(1.0, 0.0), Q, 0.5, true, params, DELTA)
+	assert_true(PlayerState.forward(state.yaw).is_equal_approx(Vector2(1.0, 0.0)),
+			"faces the vault direction, not the aim: yaw %s" % state.yaw)
+
+
+# --- Impact: a charge that stops on contact hits everything around it ---
+
+func test_radial_copy_keeps_the_hit_and_hits_all_around() -> void:
+	var charge := AbilityParams.new()
+	charge.damage = 60.0
+	charge.stagger_ticks = 48
+	charge.max_targets = 1
+	charge.hitbox_range = 1.4
+	charge.hitbox_width = 1.4
+	charge.hitbox_height = 2.0
+	var impact := charge.radial_copy(2.5)
+	assert_true(impact is AbilityParams, "same kind of params")
+	assert_eq(impact.damage, 60.0)
+	assert_eq(impact.stagger_ticks, 48)
+	assert_eq(impact.shape, AttackParams.SHAPE_RADIAL)
+	assert_eq(charge.shape, AttackParams.SHAPE_BOX, "original unchanged")
+	# A target 2 m to the side: missed by the box, hit by the impact.
+	var side := Vector3(2.0, 0.0, 0.0)
+	assert_false(MeleeHitbox.hits(Vector3.ZERO, 0.0, charge, side, 0.4, 1.8))
+	assert_true(MeleeHitbox.hits(Vector3.ZERO, 0.0, impact, side, 0.4, 1.8))

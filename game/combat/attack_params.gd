@@ -36,6 +36,9 @@ var hitbox_width := 0.0
 var hitbox_height := 0.0
 ## Stops (skips to recovery) after hitting this many targets. 0 = no limit.
 var max_targets := 0
+## When max_targets stops it (a charge on contact), everything within this many
+## meters of the attacker is hit too. 0 = only what the hitbox touches.
+var impact_radius := 0.0
 ## Knockback / pull / launch on hit (force_* keys), or null for none.
 var force: ForceParams = null
 
@@ -95,6 +98,7 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_width = Tuning.get_value(file, section, "width")
 	hitbox_height = Tuning.get_value(file, section, "height")
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
+	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
 	_load_statuses(file, section, tps)
 	force = ForceParams.from_tuning(file, section, tps)
 
@@ -119,3 +123,15 @@ static func shape_from_name(shape_name: String) -> int:
 			return SHAPE_BOX
 	push_error("AttackParams: unknown hitbox shape \"%s\"" % shape_name)
 	return SHAPE_BOX
+
+
+## A copy of this attack whose hitbox is a circle of `radius` meters around the
+## attacker (same damage, stagger, statuses, force): a charge's impact.
+func radial_copy(radius: float) -> AttackParams:
+	var copy: AttackParams = get_script().new()
+	for property in get_property_list():
+		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			copy.set(property.name, get(property.name))
+	copy.shape = SHAPE_RADIAL
+	copy.hitbox_range = radius
+	return copy

@@ -11,6 +11,20 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (17): More playtest fixes
+
+Developer playtest: Shield Charge still hit only one Husk (the second usually stood a
+step away from the first contact), and Vault always faced forward.
+
+Done:
+- **Shield Charge impact:** a new `impact_radius` key (2.5 m). When a `max_targets`
+  attack stops on contact, everything within that radius of you is hit too
+  (`AttackParams.radial_copy`, `World._hit_targets`).
+- **Vault faces where it goes:** the character turns to the vault direction as it
+  starts (sim yaw, so other players see it too).
+- **Dodge cooldown** 0.2 → 0.3 s.
+- Tests: 289. Smoke: default 3 of 3 passed, `-Party` 2 of 2.
+
 ### 2026-10-08 (16): Wave 2 playtest feedback
 
 Developer playtest: Opening Strike, Bloodlust and Hamstring work well; Hamstring's slow

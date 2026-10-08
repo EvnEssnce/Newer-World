@@ -277,16 +277,30 @@ func _on_peer_left(peer_id: int) -> void:
 ## other players and enemies, each at most once per hit window. An attack with
 ## max_targets skips to its recovery once it has hit that many (Shield Charge
 ## stops at its first contact), but everything its hitbox touches on the step it
-## reaches the limit is still hit, so a charge into a group hits the whole group.
+## reaches the limit is still hit, and so is everything within its impact_radius
+## then, so a charge into a group hits the whole group.
 func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
+	if _target_limit_reached(attacker, attack):
+		return
 	var damage_scale := (attacker.damage_multiplier(attack)
 			* attacker.state.statuses.damage_dealt_multiplier(attacker.params.statuses))
+	var connected := _hit_targets(attacker, attack, damage_scale)
+	if (connected > 0 and attack.impact_radius > 0.0
+			and _target_limit_reached(attacker, attack)):
+		connected += _hit_targets(attacker, attack.radial_copy(attack.impact_radius),
+				damage_scale)
+	if connected > 0:
+		_on_player_attack_connected(attacker, attack, connected)
+
+
+## Server: one pass of an attacker's hitbox (`attack`, which may be a radial
+## impact copy) over every player and enemy not yet hit this window. Returns
+## how many it connected with.
+func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -> int:
 	var connected := 0
-	# Checked once, before this step's hits (see above).
-	var limit_reached := _target_limit_reached(attacker, attack)
 	for target: Player in _players.get_children():
-		if target == attacker or limit_reached:
+		if target == attacker:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
 				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale)
@@ -300,8 +314,6 @@ func _on_attack_stepped(attacker: Player) -> void:
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
 			continue
-		if limit_reached:
-			break
 		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
@@ -315,8 +327,7 @@ func _on_attack_stepped(attacker: Player) -> void:
 			_give_hit_statuses(attacker.peer_id, attack,
 					attacker.on_hit_statuses_for_window(), enemy)
 			_force_enemy(attacker.global_position, attacker.state.yaw, attack, enemy, was_staggered)
-	if connected > 0:
-		_on_player_attack_connected(attacker, attack, connected)
+	return connected
 
 
 func _on_ability_started(player: Player) -> void:
