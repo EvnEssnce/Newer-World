@@ -20,8 +20,11 @@ const HIT_GUARD_BROKEN := 4
 const HIT_PARRIED := 5
 ## Damage over time from a status (bleed).
 const HIT_STATUS_DAMAGE := 6
+## Healing (damage = health restored; attacker = the healer). Pyre Heart, the
+## Mantle of Renewal capstone.
+const HIT_HEALED := 7
 const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried",
-		"status damage"]
+		"status damage", "healed"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
@@ -84,6 +87,18 @@ var _forced_enemies := 0
 var _launches := 0
 ## Weapon id -> abilities started with it.
 var _ability_uses_by_weapon: Dictionary[String, int] = {}
+# Ember, Wings and Rebirth (for the smoke test summary)
+## Ember the server granted (damage dealt/taken, healing) and Ember spent on
+## Wing abilities (in the sim), totals over all players.
+var _ember_gained := 0.0
+var _ember_spent := 0.0
+var _wing_uses := 0
+## Rebirths started (died with enough Ember) and finished (rose again).
+var _rebirths_started := 0
+var _rebirths := 0
+## Heals that restored health, and the health restored.
+var _heals := 0
+var _healed := 0.0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -110,6 +125,8 @@ var _bot_last_phase := 0.0
 var _bot_swaps_before := 0
 ## The bot slots its status abilities once, when its first build arrives.
 var _bot_status_slots_sent := false
+## Wing presses already made this cycle ("<cycle>:<ability id>").
+var _bot_wing_pressed := {}
 ## Time (s) of the hitting ability that follows a self-buff, or -1.
 var _bot_followup_at := -1.0
 var _bot_first_ability_pressed := false
@@ -147,8 +164,11 @@ func _ready() -> void:
 		_mastery_panel = MasteryPanel.new()
 		_hud.add_child(_mastery_panel)
 		_mastery_panel.setup(_builds)
-		if LaunchArgs.has_flag("mastery-panel"):
-			_mastery_panel.toggle()  # for checking the panel from --screenshot-dir frames
+		# For checking the panel from --screenshot-dir frames; =wings opens the Wings tab.
+		if LaunchArgs.has_flag("mastery-panel") or LaunchArgs.get_value("mastery-panel") == "wings":
+			_mastery_panel.toggle()
+			if LaunchArgs.get_value("mastery-panel") == "wings":
+				_mastery_panel.show_wings()
 		_client_ready.rpc_id(1, LaunchArgs.get_value("class", ClassDef.DEFAULT_CLASS))
 
 
@@ -190,10 +210,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func _server_tick(delta: float) -> void:
 	_tick += 1
 	for player: Player in _players.get_children():
-		if player.state.dead and _tick >= player.respawn_at_tick:
-			_respawn(player)
+		if player.state.dead:
+			_server_dead_player(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
 		_apply_player_status_damage(player)
+		_apply_player_status_heal(player)
 	var targets := {}
 	for player: Player in _players.get_children():
 		if not player.state.dead:
@@ -323,7 +344,9 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 		var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
 		_enemy_damaged += 1
 		connected += 1
-		if not _damage_enemy(enemy, damage, attack.stagger_ticks, attacker.peer_id, HIT_DAMAGED):
+		_ember_from_damage(attacker.peer_id, null, damage)
+		if not _damage_enemy(enemy, damage, _with_surge_stagger(attacker.peer_id, attack.stagger_ticks),
+				attacker.peer_id, HIT_DAMAGED):
 			_give_hit_statuses(attacker.peer_id, attack,
 					attacker.on_hit_statuses_for_window(), enemy)
 			_force_enemy(attacker.global_position, attacker.state.yaw, attack, enemy, was_staggered)
@@ -331,6 +354,9 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 
 
 func _on_ability_started(player: Player) -> void:
+	if player.state.is_using_wing():
+		_on_wing_started(player)
+		return
 	_ability_uses += 1
 	if not player.state.current_ability(player.params).self_status.is_empty():
 		_self_buffs += 1
@@ -403,8 +429,10 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	if _try_parry(attacker_id, attacker_pos, target):
 		return HIT_PARRIED
 	var was_staggered := target.state.is_staggered()
-	var damage := (attack.damage * damage_scale
-			* target.state.statuses.damage_taken_multiplier(target.params.statuses))
+	var base_damage := attack.damage * damage_scale
+	var damage := (base_damage
+			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
+			* target.damage_taken_multiplier())
 	var result := HIT_DAMAGED
 	if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
 			target.state.yaw, attacker_pos, target.params.block_arc):
@@ -417,23 +445,34 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		else:
 			_blocks += 1
 	target.health = maxf(0.0, target.health - damage)
+	# Before a fatal hit kills: its Ember counts toward a Rebirth.
+	_ember_from_damage(attacker_id, target, damage)
 	if target.health <= 0.0:
 		result = HIT_DEFEATED
 		_kill_player(target)
 	elif result == HIT_DAMAGED:
-		target.state.apply_stagger(attack.stagger_ticks)
+		target.state.apply_stagger(_with_surge_stagger(attacker_id, attack.stagger_ticks))
 	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
 		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
 	_send_hit(attacker_id, target.peer_id, damage, result)
+	if result != HIT_DEFEATED:
+		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
 	return result
 
 
-## Server: a player's health reached 0 (a hit or damage over time).
+## Server: a player's health reached 0 (a hit or damage over time). With
+## enough Ember and Rebirth ready, a Rebirth starts (_server_dead_player raises
+## them when it's done); otherwise the respawn timer.
 func _kill_player(target: Player) -> void:
 	target.state.kill()
-	target.respawn_at_tick = _tick + target.params.respawn_ticks
 	_deaths += 1
+	if target.state.start_rebirth(target.params):
+		target.respawn_at_tick = -1
+		_rebirths_started += 1
+		print("[server] peer %d rebirth started" % target.peer_id)
+		return
+	target.respawn_at_tick = _tick + target.params.respawn_ticks
 
 
 ## Server: damages an enemy (a hit, or damage over time) and reports it with
@@ -625,10 +664,12 @@ func _apply_player_status_damage(player: Player) -> void:
 	player.status_damage_pending = 0.0
 	if raw <= 0.0 or player.state.dead:
 		return
-	var damage := raw * player.state.statuses.damage_taken_multiplier(player.params.statuses)
+	var damage := (raw * player.state.statuses.damage_taken_multiplier(player.params.statuses)
+			* player.damage_taken_multiplier())
 	player.health = maxf(0.0, player.health - damage)
 	_status_ticks += 1
 	_status_damage += damage
+	_ember_from_damage(player.state.statuses.last_damage_source, player, damage)
 	var result := HIT_STATUS_DAMAGE
 	if player.health <= 0.0:
 		result = HIT_DEFEATED
@@ -645,7 +686,143 @@ func _apply_enemy_status_damage(enemy: Enemy) -> void:
 	var damage := raw * enemy.statuses.damage_taken_multiplier(enemy.status_defs)
 	_status_ticks += 1
 	_status_damage += damage
+	_ember_from_damage(enemy.statuses.last_damage_source, null, damage)
 	_damage_enemy(enemy, damage, 0, enemy.statuses.last_damage_source, HIT_STATUS_DAMAGE)
+
+
+# --- Ember, Wings and Rebirth ---
+
+## Server: a dead player. A finished Rebirth rises where it fell; otherwise
+## the normal respawn timer.
+func _server_dead_player(player: Player) -> void:
+	if player.state.is_rebirthing():
+		if player.state.rebirth_done():
+			_rebirth(player)
+	elif _tick >= player.respawn_at_tick:
+		_respawn(player)
+
+
+## Server: a Rebirth is over: back where they fell with rebirth_health, the
+## Ember left after its cost, and the Rebirth cooldown running.
+func _rebirth(player: Player) -> void:
+	player.health = PlayerState.rebirth_health(player.params)
+	player.state.finish_rebirth(player.params)
+	_rebirths += 1
+	print("[server] peer %d rose again (rebirth)" % player.peer_id)
+
+
+## Server: Ember for damage. The target (a Player; null for an enemy) gains
+## for damage taken, the attacker (if it's a player) for damage dealt; both are
+## then in combat (even for a fully blocked hit).
+func _ember_from_damage(attacker_id: int, target: Player, damage: float) -> void:
+	if target:
+		_give_ember(target, damage * target.params.ember_per_damage_taken, true)
+	var attacker := _player_by_id(attacker_id)
+	if attacker and attacker != target:
+		_give_ember(attacker, damage * attacker.params.ember_per_damage_dealt, true)
+
+
+## Server: adds Ember to a player (a server event; nothing while dead).
+func _give_ember(player: Player, amount: float, in_combat: bool) -> void:
+	if player.state.dead:
+		return
+	var before := player.state.ember
+	player.state.gain_ember(player.params, amount, in_combat)
+	_ember_gained += player.state.ember - before
+
+
+## Server: heals a player, capped at max health, and gives the healer Ember for
+## the health really restored (the one place every heal goes through: Pyre
+## Heart and the Mantle of Renewal now, allies' heals later). healer_id: a peer
+## id, or 0 for the target itself. Healing isn't combat. Returns the health
+## restored.
+func _heal_player(target: Player, amount: float, healer_id: int) -> float:
+	if target.state.dead or amount <= 0.0:
+		return 0.0
+	var healed := minf(amount, target.params.max_health - target.health)
+	if healed <= 0.0:
+		return 0.0
+	target.health += healed
+	_heals += 1
+	_healed += healed
+	var healer := _player_by_id(healer_id)
+	if healer == null:
+		healer = target
+	_give_ember(healer, healed * healer.params.ember_per_heal, false)
+	_send_hit(healer.peer_id, target.peer_id, healed, HIT_HEALED)
+	return healed
+
+
+## Server: healing over time (Pyre Heart) from a player's sim steps this tick.
+func _apply_player_status_heal(player: Player) -> void:
+	var amount := player.status_heal_pending
+	player.status_heal_pending = 0.0
+	if amount > 0.0:
+		_heal_player(player, amount, player.state.statuses.last_heal_source)
+
+
+func _on_wing_started(player: Player) -> void:
+	var wing := player.state.current_ability(player.params)
+	_wing_uses += 1
+	_ember_spent += wing.ember_cost
+	if _verbose:
+		print("[server] peer %d uses wing %s (ember %.0f left)" % [player.peer_id, wing.id,
+				player.state.ember])
+
+
+## The status index of the self-buff a player's Wing ability gives (e.g. Ember
+## Mantle's Warded), or -1.
+func _wing_self_status(player: Player, ability_id: String) -> int:
+	var pool := player.state.wings(player.params)
+	var wing := pool.ability(pool.ability_index(ability_id))
+	if wing == null or wing.self_status.is_empty():
+		return -1
+	return player.params.statuses.index_of(wing.self_status)
+
+
+## Server: an attacker's stagger, with the Crushing Wingbeat capstone
+## ("surge_stagger"): while its Wing ability's self-buff (Wingbeat Surge's
+## Empowered) is on, hits stagger for at least the node's amount (seconds).
+func _with_surge_stagger(attacker_id: int, stagger_ticks: int) -> int:
+	var attacker := _player_by_id(attacker_id)
+	if attacker == null or attacker.build == null:
+		return stagger_ticks
+	var node := attacker.build.wing_effect("surge_stagger")
+	if node == null or not attacker.state.statuses.has(_wing_self_status(attacker, node.applies_to)):
+		return stagger_ticks
+	return maxi(stagger_ticks, roundi(node.amount * Engine.physics_ticks_per_second))
+
+
+## Server, after a hit the target survived: the Mantle of Renewal capstone
+## ("mantle_heal") heals the node's amount x the damage its Wing ability's
+## self-buff (Ember Mantle's Warded) prevented.
+func _mantle_heal(target: Player, base_damage: float, guarded: bool) -> void:
+	if target.build == null:
+		return
+	var node := target.build.wing_effect("mantle_heal")
+	if node == null:
+		return
+	var index := _wing_self_status(target, node.applies_to)
+	var stacks := target.state.statuses.stacks(index)
+	if stacks <= 0:
+		return
+	var prevented := base_damage * maxf(0.0, -target.params.statuses.get_def(index).damage_taken * stacks)
+	if guarded:
+		prevented *= target.params.block_damage_taken
+	_heal_player(target, prevented * node.amount, target.peer_id)
+
+
+## A player by peer id (null for enemies' ids, 0 or a player who left).
+func _player_by_id(id: int) -> Player:
+	if id <= 0:
+		return null
+	return _players.get_node_or_null(str(id)) as Player
+
+
+func _print_ember_summary() -> void:
+	print("SUMMARY ember gained=%d spent=%d wing_uses=%d rebirths_started=%d rebirths=%d heals=%d healed=%d" % [
+			roundi(_ember_gained), roundi(_ember_spent), _wing_uses, _rebirths_started, _rebirths,
+			_heals, roundi(_healed)])
 
 
 # --- Parties and allies ---
@@ -684,7 +861,8 @@ func _client_tick(delta: float) -> void:
 		aim_yaw = bot[2]
 		if not party.bot_may_attack():
 			buttons &= ~(PlayerState.BUTTON_ATTACK | PlayerState.BUTTON_ABILITY_1
-					| PlayerState.BUTTON_ABILITY_2 | PlayerState.BUTTON_ABILITY_3)
+					| PlayerState.BUTTON_ABILITY_2 | PlayerState.BUTTON_ABILITY_3
+					| PlayerState.BUTTON_WING_1 | PlayerState.BUTTON_WING_2)
 	else:
 		move = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
 		if Input.is_action_pressed(&"jump"):
@@ -704,8 +882,8 @@ func _client_tick(delta: float) -> void:
 	_submit_inputs.rpc_id(1, inputs)
 
 
-## Keys for this tick: Q / E / R (abilities) and X (weapon swap), sent only on
-## the tick they're pressed.
+## Keys for this tick: Q / E / R (abilities), Z / C (Wings) and X (weapon
+## swap), sent only on the tick they're pressed.
 func _ability_and_swap_buttons() -> int:
 	var buttons := 0
 	if Input.is_action_just_pressed(&"swap_weapon"):
@@ -713,6 +891,9 @@ func _ability_and_swap_buttons() -> int:
 	for slot in PlayerState.ABILITY_SLOTS:
 		if Input.is_action_just_pressed(StringName("ability_%d" % (slot + 1))):
 			buttons |= PlayerState.BUTTON_ABILITY_1 << slot
+	for slot in PlayerState.WING_SLOTS:
+		if Input.is_action_just_pressed(StringName("wing_%d" % (slot + 1))):
+			buttons |= PlayerState.BUTTON_WING_1 << slot
 	return buttons
 
 
@@ -728,6 +909,8 @@ func _ability_and_swap_buttons() -> int:
 ## be within BOT_ABILITY_REACH; see _bot_ability_button for which ability).
 ## On its own turn and in the ability phase, a ready self-buff (Bloodlust) is
 ## used once the target is within BOT_BUFF_REACH (_bot_self_buff_input).
+## Wing abilities: see _bot_wing_input (Surge, Mantle, Diving Strike); at 7.6
+## it also respecs its Wing slots for the next cycle (BuildService.bot_respec_wings).
 ## 6–8 s: walk in circles; swap weapons at 6.95 (after any ability; again at
 ## 7.2 if that press didn't swap), jump at
 ## 7.25, air dodge at 7.4, ground dodge at 7.95, and a free respec at 7.6
@@ -768,6 +951,7 @@ func _bot_input() -> Array:
 			if not next.is_empty():
 				_builds.bot_respec(next[0], cycle)
 				_builds.bot_request_weapons(next, _local_player.state.equipped)
+			_builds.bot_respec_wings(cycle + 1)
 	else:
 		var other_player := _nearest_remote_player()
 		var target: Node3D = _nearest_enemy(BOT_ENEMY_RANGE)
@@ -805,6 +989,7 @@ func _bot_input() -> Array:
 			if phase >= 4.0 or (turn_time >= 0.0 and turn_time < 2.0):
 				# Not on the off turn: that guard stays up.
 				buttons |= _bot_self_buff_input(flat.length(), t, cycle)
+			buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length())
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 
@@ -868,6 +1053,56 @@ func _bot_self_buff_input(distance: float, t: float, cycle: int) -> int:
 	if button != 0:
 		_bot_followup_at = t + 0.4
 	return button
+
+
+## Bot Wing abilities (Z / C), at most one press of each ability per cycle:
+## Wingbeat Surge as its attack turn starts, Ember Mantle as its block turn
+## starts (or Pyre Heart, if that's slotted and it's hurt), and Diving Strike
+## whenever the target is 3-7 m away before the circling phase. While a Rebirth
+## is ready it only spends Ember above the Rebirth threshold, so it keeps a
+## Rebirth for its next death (the decision the design asks players to make).
+## turn_time: seconds into its attack turn (outside 0-2 = its block turn).
+func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float) -> int:
+	var state := _local_player.state
+	if state.is_attacking() or state.dead:
+		return 0
+	if not _bot_wing_pressed.has("cycle") or _bot_wing_pressed["cycle"] != cycle:
+		_bot_wing_pressed = {"cycle": cycle}
+	var wanted: Array[String] = []
+	if distance >= 3.0 and distance <= 7.0:
+		wanted.append("diving_strike")
+	if phase < 4.0 and turn_time >= 0.0 and turn_time < 0.3:
+		wanted.append("wingbeat_surge")
+	var off_time := turn_time + 2.0 if turn_time < 0.0 else turn_time - 2.0
+	if phase < 4.0 and off_time >= 0.0 and off_time < 0.3:
+		if _local_player.health < _local_player.params.max_health * 0.8:
+			wanted.append("pyre_heart")
+		wanted.append("ember_mantle")
+	for ability_id in wanted:
+		if _bot_wing_pressed.has(ability_id):
+			continue
+		var slot := _bot_wing_slot(ability_id)
+		if slot >= 0:
+			_bot_wing_pressed[ability_id] = true
+			return PlayerState.BUTTON_WING_1 << slot
+	return 0
+
+
+## The Wing slot holding a ready, affordable Wing ability, or -1. While a
+## Rebirth is ready, affordable means Ember stays at the Rebirth threshold.
+func _bot_wing_slot(ability_id: String) -> int:
+	var state := _local_player.state
+	var params := _local_player.params
+	var pool := state.wings(params)
+	for slot in PlayerState.WING_SLOTS:
+		var index := state.wing_slot_ability(slot)
+		var wing := pool.ability(index)
+		if wing == null or wing.id != ability_id or state.wing_cooldown_left(index) > 0:
+			continue
+		var keep := state.rebirth_ember_needed(params) if state.can_rebirth(params) else 0.0
+		if state.ember - wing.ember_cost >= keep:
+			return slot
+	return -1
 
 
 ## The slot of a ready ability with a self_status (Bloodlust), or 0.
@@ -1024,11 +1259,16 @@ func _update_hud() -> void:
 		_hud.set_health(_local_player.health, _local_player.params.max_health)
 		_hud.set_stamina(_local_player.state.stamina, _local_player.params.max_stamina)
 		var banner := ""
-		if _local_player.state.dead:
+		if _local_player.state.is_rebirthing():
+			var rebirth_seconds := ceili(_local_player.state.rebirth_left
+					/ float(Engine.physics_ticks_per_second))
+			banner = "Rebirth\nRising from the ashes in %d" % rebirth_seconds
+		elif _local_player.state.dead:
 			var seconds_left := maxi(0, ceili((_respawn_at_msec - Time.get_ticks_msec()) / 1000.0))
 			banner = "Defeated\nRespawning in %d" % seconds_left
 		_hud.set_banner(banner)
 		_update_loadout_hud()
+		_update_wing_hud()
 		_update_status_hud()
 
 
@@ -1050,6 +1290,39 @@ func _update_loadout_hud() -> void:
 		var left := state.cooldown_left(state.slot_ability(slot))
 		_hud.set_ability(slot, ability.display_name,
 				left / float(maxi(1, ability.cooldown_ticks)), left / tps)
+
+
+## The Wing slots, Ember bar and Rebirth line, from the local player's
+## predicted state.
+func _update_wing_hud() -> void:
+	var state := _local_player.state
+	var params := _local_player.params
+	var tps := float(Engine.physics_ticks_per_second)
+	var pool := state.wings(params)
+	for slot in PlayerState.WING_SLOTS:
+		var index := state.wing_slot_ability(slot)
+		var wing := pool.ability(index)
+		if wing == null:
+			_hud.set_wing(slot, "", 0.0, 0.0, 0.0, false)
+			continue
+		var left := state.wing_cooldown_left(index)
+		_hud.set_wing(slot, wing.display_name, left / float(maxi(1, wing.cooldown_ticks)), left / tps,
+				wing.ember_cost, state.can_afford(wing))
+	var rebirth := ""
+	if state.is_rebirthing():
+		rebirth = "Rebirthing..."
+	elif state.rebirth_cooldown > 0:
+		var seconds := ceili(state.rebirth_cooldown / tps)
+		@warning_ignore("integer_division")
+		rebirth = "Rebirth in %d:%02d" % [seconds / 60, seconds % 60]
+	elif state.ember >= state.rebirth_ember_needed(params):
+		rebirth = "Rebirth ready"
+	else:
+		rebirth = "Rebirth needs %d Ember" % roundi(state.rebirth_ember_needed(params))
+	if state.rebirth_charges > 0:
+		rebirth += "  (+%d extra)" % state.rebirth_charges
+	_hud.set_ember(state.ember, state.ember_cap(params), state.rebirth_ember_needed(params),
+			rebirth, state.can_rebirth(params))
 
 
 ## The status row, from the local player's predicted state.
@@ -1101,6 +1374,7 @@ func print_summary() -> void:
 				_statuses_applied, _statuses_on_enemies, _self_buffs, _status_ticks,
 				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])
 		_print_force_summary()
+		_print_ember_summary()
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [

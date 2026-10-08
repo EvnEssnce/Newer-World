@@ -75,6 +75,19 @@ func _request_weapons(weapons: PackedStringArray) -> void:
 	_finish(player, error)
 
 
+## Client → server: replace the Wing tree allocation and the Wing slots (ability
+## ids for Z and C, "" = empty; a free respec).
+@rpc("any_peer", "call_remote", "reliable")
+func _request_wings(nodes: PackedStringArray, slots: PackedStringArray) -> void:
+	var player := _sender_player()
+	if player == null:
+		return
+	var error := _check_can_change(player)
+	if error.is_empty():
+		error = player.build.set_wing_mastery(nodes, slots)
+	_finish(player, error)
+
+
 func _check_can_change(player: Player) -> String:
 	if player.build == null:
 		return "No build yet."
@@ -116,6 +129,48 @@ func request_mastery(weapon_id: String, nodes: PackedStringArray, slots: PackedS
 
 func request_weapons(weapons: PackedStringArray) -> void:
 	_request_weapons.rpc_id(1, weapons)
+
+
+func request_wings(nodes: PackedStringArray, slots: PackedStringArray) -> void:
+	_request_wings.rpc_id(1, nodes, slots)
+
+
+## Test bot: a free respec of the Wing tree to its default allocation, with the
+## Wing slots for a bot cycle (bot_wing_slots_for_cycle), so the smoke test
+## exercises the server's Wing validation and the bot gets to use every Wing
+## ability. Nothing is sent if that's already the build.
+func bot_respec_wings(cycle: int) -> void:
+	if local_build == null or local_build.wing_tree == null:
+		return
+	var tree := local_build.wing_tree
+	var nodes := tree.default_nodes.duplicate()
+	var slots := bot_wing_slots_for_cycle(cycle)
+	var unlocked := tree.unlocked_abilities(nodes)
+	for i in slots.size():
+		if not (slots[i] in unlocked):
+			slots[i] = ""
+	if nodes == local_build.wing_nodes and slots == local_build.wing_slots:
+		return
+	request_wings(nodes, slots)
+
+
+## Test bot: the Wing slots (Z, C) for a cycle. Even cycles: the default slots
+## (Fighter: Ember Mantle, Wingbeat Surge); odd cycles put the tree's other
+## actives into Z in turn, last one first (Fighter: Diving Strike, then Pyre Heart).
+func bot_wing_slots_for_cycle(cycle: int) -> PackedStringArray:
+	var tree := local_build.wing_tree
+	var slots := tree.default_slots.duplicate()
+	if cycle % 2 == 0:
+		return slots
+	var others := PackedStringArray()
+	for ability in tree.unlocked_abilities(tree.default_nodes):
+		if not (ability in slots):
+			others.append(ability)
+	if others.is_empty():
+		return slots
+	@warning_ignore("integer_division")
+	slots[0] = others[others.size() - 1 - (cycle / 2) % others.size()]
+	return slots
 
 
 ## Test bot: a free respec of a weapon, starting from the tree's default allocation

@@ -69,6 +69,33 @@ var force_max_height := 0.0
 ## A pull stops this far from the puller (center to center).
 var force_pull_gap := 0.0
 
+# Wings (data/wings_<class>.cfg)
+## Every class's Wing ability pool, by class id.
+var wings: Dictionary[String, WingParams] = {}
+## Used for a wing set id that isn't in `wings` (no Wing abilities).
+var default_wings := WingParams.new()
+
+# Ember (data/ember.cfg [ember]). PlayerState.ember_cap() reads the cap.
+var ember_cap := 0.0
+var ember_resting := 0.0
+## Ember per tick it settles toward ember_resting out of combat.
+var ember_settle_per_tick := 0.0
+## Ticks after dealing or taking damage that count as in combat.
+var ember_combat_ticks := 0
+## Ember per point of damage dealt / taken / healed (server).
+var ember_per_damage_dealt := 0.0
+var ember_per_damage_taken := 0.0
+var ember_per_heal := 0.0
+
+# Rebirth (data/ember.cfg [rebirth])
+## Ember needed to Rebirth (PlayerState.rebirth_ember_needed reads it).
+var rebirth_threshold := 0.0
+var rebirth_cost := 0.0
+var rebirth_ticks := 0
+## Health on rising, fraction of max_health.
+var rebirth_health_fraction := 0.0
+var rebirth_cooldown_ticks := 0
+
 static var _current: PlayerParams
 
 
@@ -125,7 +152,31 @@ static func from_tuning() -> PlayerParams:
 			Tuning.get_value("combat", "block", "guard_break_stagger") * tps)
 	p.statuses = StatusDefs.current()
 	_load_force_limits(p)
+	_load_wings_and_ember(p, tps)
 	return p
+
+
+static func _load_wings_and_ember(p: PlayerParams, tps: float) -> void:
+	for file in Tuning.files_with_prefix("wings_"):
+		var wing_set := WingParams.from_tuning(file.trim_prefix("wings_"), tps)
+		p.wings[wing_set.id] = wing_set
+	p.ember_cap = Tuning.get_value("ember", "ember", "cap")
+	p.ember_resting = Tuning.get_value("ember", "ember", "resting")
+	p.ember_settle_per_tick = Tuning.get_value("ember", "ember", "settle_per_second") / tps
+	p.ember_combat_ticks = roundi(Tuning.get_value("ember", "ember", "combat_time") * tps)
+	p.ember_per_damage_dealt = Tuning.get_value("ember", "ember", "per_damage_dealt")
+	p.ember_per_damage_taken = Tuning.get_value("ember", "ember", "per_damage_taken")
+	p.ember_per_heal = Tuning.get_value("ember", "ember", "per_heal")
+	p.rebirth_threshold = Tuning.get_value("ember", "rebirth", "threshold")
+	p.rebirth_cost = Tuning.get_value("ember", "rebirth", "cost")
+	p.rebirth_ticks = maxi(1, roundi(Tuning.get_value("ember", "rebirth", "duration") * tps))
+	p.rebirth_health_fraction = Tuning.get_value("ember", "rebirth", "health_fraction")
+	p.rebirth_cooldown_ticks = roundi(Tuning.get_value("ember", "rebirth", "cooldown") * tps)
+
+
+## A class's Wing abilities, or default_wings (none).
+func wing_set(class_id: String) -> WingParams:
+	return wings.get(class_id, default_wings)
 
 
 static func _load_force_limits(p: PlayerParams) -> void:

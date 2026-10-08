@@ -45,7 +45,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # Bot fights are luck: these give the bleed and Husk-knockback checks a source
     # in every run (Husk swings bleed the bots; Broadsword heavies push Husks).
     '--tune=enemy_husk/attack/applies_status=bleed',
-    '--tune=weapon_broadsword/heavy/force_distance=0.4')
+    '--tune=weapon_broadsword/heavy/force_distance=0.4',
+    # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
+    # the other checks still get their hits, blocks and deaths.
+    '--tune=ember/rebirth/duration=1.0')
 
 $botFlags = @('--bot', '--verbose')
 if ($Party) { $botFlags += '--bot-party' }
@@ -173,6 +176,25 @@ if (-not $spearSummary -or [int]$spearSummary.Matches[0].Groups[1].Value -lt 1) 
     $failed = $true
 } else {
     Write-Host "PASS spear: $($spearSummary.Line)" -ForegroundColor Green
+}
+# Ember, Wings and Rebirth: the bots gain Ember by fighting, use Wing abilities
+# (keeping 50 Ember for a Rebirth while one is ready), and their first death
+# with 50+ Ember is a Rebirth, not a respawn.
+$emberSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ember gained=(\d+) spent=(\d+) wing_uses=(\d+) rebirths_started=(\d+) rebirths=(\d+)'
+if (-not $emberSummary) {
+    Write-Host "FAIL ember: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$emberSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL ember: no Ember gained ($($emberSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$emberSummary.Matches[0].Groups[2].Value -lt 1 -or [int]$emberSummary.Matches[0].Groups[3].Value -lt 1) {
+    Write-Host "FAIL ember: no Wing ability used / Ember spent ($($emberSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$emberSummary.Matches[0].Groups[5].Value -lt 1) {
+    Write-Host "FAIL ember: no Rebirth ($($emberSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS ember: $($emberSummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'

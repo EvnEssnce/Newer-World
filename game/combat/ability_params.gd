@@ -1,7 +1,8 @@
 class_name AbilityParams
 extends AttackParams
 ## One weapon ability's tuning in simulation units, from an [ability_<id>]
-## section of data/weapon_<weapon>.cfg. An ability runs like an attack (windup,
+## section of data/weapon_<weapon>.cfg (or a Wing ability's, from
+## data/wings_<class>.cfg). An ability runs like an attack (windup,
 ## hit windows, recovery) and adds a cooldown, an optional dash, and optional
 ## parry. Tests build their own.
 
@@ -32,6 +33,9 @@ var parry_arc := 0.0
 var counter := ""
 ## Not slottable; only started by another ability (e.g. a parry's counter).
 var internal := false
+## Ember spent when it starts; it can't start with less (Wing abilities; 0 =
+## free, as weapon abilities are so far).
+var ember_cost := 0.0
 
 
 func is_parry() -> bool:
@@ -69,4 +73,5 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 	a.parry_arc = deg_to_rad(Tuning.get_optional(file, section, "parry_arc", 0.0))
 	a.counter = Tuning.get_optional(file, section, "counter", "")
 	a.internal = Tuning.get_optional(file, section, "internal", false)
+	a.ember_cost = Tuning.get_optional(file, section, "ember_cost", 0.0)
 	return a
