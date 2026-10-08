@@ -324,3 +324,32 @@ func test_vault_moves_backward_ignoring_input() -> void:
 	# Yaw 0 faces -Z, so backward is +Z.
 	assert_almost(moved.z, vault.dash_speed * dash_ticks * DELTA, 0.0001, "backward distance")
 	assert_almost(moved.x, 0.0, 0.0001, "no sideways drift")
+
+# --- Vault: dash_direction="input" and i-frames (the real Vault) ---
+
+func test_input_dash_follows_the_movement_input() -> void:
+	vault.dash_backward = false
+	vault.dash_from_input = true
+	state.step(Vector2(1.0, 0.0), Q, 0.5, true, params, DELTA)
+	assert_true(state.ability_dir.is_equal_approx(Vector2(1.0, 0.0)),
+			"dashes the way you move: %s" % state.ability_dir)
+
+
+func test_input_dash_goes_backward_with_no_input() -> void:
+	vault.dash_backward = false
+	vault.dash_from_input = true
+	state.step(Vector2.ZERO, Q, 0.5, true, params, DELTA)
+	assert_true(state.ability_dir.is_equal_approx(-PlayerState.forward(0.5)))
+
+
+func test_ability_iframes_only_inside_their_window() -> void:
+	vault.iframe_start_tick = 2
+	vault.iframe_end_tick = 6
+	state.step(Vector2.ZERO, Q, 0.0, true, params, DELTA)  # attack_tick 0
+	assert_false(state.is_invulnerable(params), "before the window")
+	state.step(Vector2.ZERO, 0, 0.0, true, params, DELTA)
+	state.step(Vector2.ZERO, 0, 0.0, true, params, DELTA)  # tick 2
+	assert_true(state.is_invulnerable(params), "inside the window")
+	for i in 4:
+		state.step(Vector2.ZERO, 0, 0.0, true, params, DELTA)  # tick 6
+	assert_false(state.is_invulnerable(params), "after the window")

@@ -72,9 +72,12 @@ const RISING_STRUCK := Vector2(1.7, 0.0)
 const SPEAR_REST := Vector3(0.0, 0.0, 0.0)
 const SPEAR_IDLE := Vector3(0.25, 0.0, 0.0)
 const SPEAR_LIGHT_WOUND := Vector3(0.1, 0.0, 0.35)
-const SPEAR_LIGHT_STRUCK := Vector3(0.0, 0.0, -0.6)
+const SPEAR_LIGHT_STRUCK := Vector3(0.0, 0.0, 0.0)  # z from the attack's range
 const SPEAR_HEAVY_WOUND := Vector3(0.2, 0.0, 0.6)
-const SPEAR_HEAVY_STRUCK := Vector3(-0.05, 0.0, -0.9)
+const SPEAR_HEAVY_STRUCK := Vector3(-0.05, 0.0, 0.0)  # z from the attack's range
+## Meters from the spear pivot to its tip (Head in player.tscn: z -1.86, 0.36
+## long). A thrust pushes the pivot forward so the tip reaches the hitbox's range.
+const SPEAR_TIP_DISTANCE := 2.04
 ## Low Sweep: low, swept from the right across to the left.
 const SPEAR_SWEEP_WOUND := Vector3(-0.45, -1.3, 0.0)
 const SPEAR_SWEEP_STRUCK := Vector3(-0.45, 1.3, 0.0)
@@ -110,6 +113,10 @@ var build: CharacterBuild
 var attack_results: Dictionary[int, bool] = {}
 ## [attack_serial, window] that attack_results belongs to.
 var _results_key := Vector2i(-1, -1)
+## On-hit statuses (Bloodlust's bleed) already taken for the current hit window:
+## one charge per swing, given to every target that swing hits.
+var _window_on_hit: Array[Vector2i] = []
+var _window_on_hit_taken := false
 ## Server tick at which a dead player respawns.
 var respawn_at_tick := -1
 ## Damage over time (bleed) from this tick's sim steps, not yet applied to
@@ -208,10 +215,22 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> voi
 		if key != _results_key:
 			_results_key = key
 			attack_results.clear()
+			_window_on_hit = []
+			_window_on_hit_taken = false
 		attack_stepped.emit(self)
 
 
 # --- Server ---
+
+## Server: the attacker's on-hit statuses for a damaging hit in the current hit
+## window. The window's first damaging hit uses up the charges (e.g. one
+## Bloodlust stack); other targets the same swing hits get the same statuses
+## without using more, so a swing through a group doesn't burn every charge.
+func on_hit_statuses_for_window() -> Array[Vector2i]:
+	if not _window_on_hit_taken:
+		_window_on_hit_taken = true
+		_window_on_hit = state.take_on_hit_statuses(params)
+	return _window_on_hit
 
 func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 	for input: Variant in inputs:
@@ -611,9 +630,12 @@ static func _spear_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 			return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_SWEEP_WOUND, SPEAR_SWEEP_STRUCK)
 		"vault":
 			return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_PLANTED, SPEAR_PLANTED)
+	# Thrusts: the tip goes as far as the hitbox reaches, so a longer range is a
+	# longer thrust.
+	var thrust := Vector3(0.0, 0.0, -maxf(0.0, attack.hitbox_range - SPEAR_TIP_DISTANCE))
 	if attack_type == PlayerState.ATTACK_LIGHT:
-		return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_LIGHT_WOUND, SPEAR_LIGHT_STRUCK)
-	return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_HEAVY_WOUND, SPEAR_HEAVY_STRUCK)
+		return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_LIGHT_WOUND, SPEAR_LIGHT_STRUCK + thrust)
+	return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_HEAVY_WOUND, SPEAR_HEAVY_STRUCK + thrust)
 
 
 ## _phase_pose for a Vector3 pose.

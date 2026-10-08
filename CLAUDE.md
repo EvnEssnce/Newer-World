@@ -142,14 +142,16 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   and prediction run. Keep them deterministic: no randomness, no `Input`, durations in ticks.
 - **`PlayerState.to_array()` layout**: indices 0–26 as listed in `to_array()`; 27 =
   `StatusEffects.to_packed()` (`PackedInt32Array`, 4 ints per status: index into
-  `StatusDefs`, stacks, ticks left, ticks elapsed). Append new fields at the end.
+  `StatusDefs`, stacks, ticks left, ticks elapsed); 28–30 = forced movement (see below);
+  31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`). Append
+  new fields at the end.
   Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
   statuses (same packing)]`.
-- **I-frames**: `PlayerState.is_invulnerable(params)`. Clients flash the body white while
-  it's true.
+- **I-frames**: `PlayerState.is_invulnerable(params)`: a dodge's window, or an ability's
+  `iframe_start`/`iframe_end` (Vault). Clients flash the body white while it's true.
 - **Forced movement** is sim state too: `PlayerState.force` (a `ForcedMotion`: horizontal
-  velocity, ticks left, pending launch speed) is the last three entries of `to_array()`
-  (27 velocity, 28 ticks, 29 launch). The server starts it (`start_force`, a server
+  velocity, ticks left, pending launch speed) is entries 28 (velocity), 29 (ticks) and 30
+  (launch) of `to_array()`. The server starts it (`start_force`, a server
   event); `PlayerMovement` applies it on both sides, so the client replays it exactly.
 
 ## Combat model
@@ -193,8 +195,12 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `windows`/`window_interval` (Frenzy: a target can be hit once per window),
   `shape="radial"` (Whirlwind Edge, Crashing Leap slam), dash (`dash_distance`, moved in
   `PlayerMovement` like a dodge: Shield Charge, Crashing Leap, Lunge;
-  `dash_direction="back"` dashes away from the facing: Vault), `max_targets` (the server
-  calls `end_active_window` once reached: Shield Charge stops at the first target), and
+  `dash_direction="back"` dashes away from the facing, `"input"` the way the movement input
+  points, backward with none: Vault), ability i-frames (`iframe_start`/`iframe_end`:
+  Vault), `max_targets` (the server calls `end_active_window` once reached; everything the
+  hitbox touches on that step is still hit, so Shield Charge stops at its first contact
+  but hits the whole group there), on-hit statuses (one charge per hit window, given to
+  every target that swing hits: `Player.on_hit_statuses_for_window`), and
   parry (`parry_arc` + `counter`: Riposte). **Parry**: a hit on a player in a parry
   window from within the arc in front is negated (`HIT_PARRIED`) and the server calls
   `start_counter`, which starts the internal counter ability facing the attacker.

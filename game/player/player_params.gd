@@ -22,6 +22,8 @@ var stamina_regen_delay_ticks := 0
 # Dodge
 var dodge_stamina_cost := 0.0
 var dodge_ticks := 0
+## Ticks after a roll ends before the next dodge can start.
+var dodge_cooldown_ticks := 0
 ## Meters per second during the roll.
 var dodge_speed := 0.0
 ## I-frames cover dodge ticks in [iframe_start_tick, iframe_end_tick).
@@ -95,6 +97,7 @@ static func from_tuning() -> PlayerParams:
 	var duration: float = Tuning.get_value("combat", "dodge", "duration")
 	p.dodge_stamina_cost = Tuning.get_value("combat", "dodge", "stamina_cost")
 	p.dodge_ticks = maxi(1, roundi(duration * tps))
+	p.dodge_cooldown_ticks = roundi(float(Tuning.get_value("combat", "dodge", "cooldown")) * tps)
 	p.dodge_speed = Tuning.get_value("combat", "dodge", "distance") / (p.dodge_ticks / tps)
 	p.iframe_start_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_start") * tps)
 	p.iframe_end_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_end") * tps)

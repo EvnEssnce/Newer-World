@@ -151,6 +151,22 @@ func test_dodge_cancels_recovery() -> void:
 	assert_false(state.is_attacking())
 
 
+func test_dodge_cooldown_after_a_roll_buffers_the_next_dodge() -> void:
+	params.dodge_cooldown_ticks = 3
+	_step(DODGE)
+	assert_true(state.is_dodging())
+	_steps(params.dodge_ticks)
+	assert_false(state.is_dodging(), "roll over")
+	_step(DODGE)  # cooldown 3 -> 2
+	assert_false(state.is_dodging(), "still cooling down")
+	_step()  # 1
+	assert_false(state.is_dodging())
+	_step()  # 0: the buffered press fires
+	assert_true(state.is_dodging())
+	var restored := PlayerState.from_array(state.to_array())
+	assert_true(restored.matches(state))
+
+
 func test_dodge_waits_through_windup_and_active() -> void:
 	_tap()
 	_step(DODGE)  # tick 1, windup

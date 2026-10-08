@@ -15,8 +15,15 @@ var turn_speed := 0.0
 var dash_start_tick := 0
 var dash_end_tick := 0
 var dash_speed := 0.0
-## The dash goes backward, away from where the ability faces (Vault).
+## The dash goes backward, away from where the ability faces.
 var dash_backward := false
+## The dash goes the way the movement input points as the ability starts;
+## backward (away from the facing) with no input (Vault).
+var dash_from_input := false
+## I-frames: hits can't land in ability ticks [iframe_start_tick, iframe_end_tick).
+## Equal = none.
+var iframe_start_tick := 0
+var iframe_end_tick := 0
 ## Peak height of a leap, meters. Cosmetic only.
 var leap_height := 0.0
 ## Parry: during the hit windows, a hit from within parry_arc (full width,
@@ -29,6 +36,10 @@ var internal := false
 
 func is_parry() -> bool:
 	return parry_arc > 0.0
+
+
+func has_iframes(tick: int) -> bool:
+	return tick >= iframe_start_tick and tick < iframe_end_tick
 
 
 func is_dashing(tick: int) -> bool:
@@ -49,8 +60,12 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 		a.dash_end_tick = maxi(a.dash_start_tick + 1,
 				roundi(Tuning.get_value(file, section, "dash_end") * tps))
 		a.dash_speed = dash_distance / ((a.dash_end_tick - a.dash_start_tick) / tps)
-		a.dash_backward = Tuning.get_optional(file, section, "dash_direction", "forward") == "back"
+		var direction: String = Tuning.get_optional(file, section, "dash_direction", "forward")
+		a.dash_backward = direction == "back"
+		a.dash_from_input = direction == "input"
 	a.leap_height = Tuning.get_optional(file, section, "leap_height", 0.0)
+	a.iframe_start_tick = roundi(float(Tuning.get_optional(file, section, "iframe_start", 0.0)) * tps)
+	a.iframe_end_tick = roundi(float(Tuning.get_optional(file, section, "iframe_end", 0.0)) * tps)
 	a.parry_arc = deg_to_rad(Tuning.get_optional(file, section, "parry_arc", 0.0))
 	a.counter = Tuning.get_optional(file, section, "counter", "")
 	a.internal = Tuning.get_optional(file, section, "internal", false)

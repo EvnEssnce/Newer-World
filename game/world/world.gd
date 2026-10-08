@@ -274,16 +274,19 @@ func _on_peer_left(peer_id: int) -> void:
 
 
 ## Server: a player's hitbox (attack or ability) is live this step. It can hit
-## other players and enemies, each at most once per hit window, and at most
-## attack.max_targets in total (then the attack skips to its recovery, e.g.
-## Shield Charge stops at the first target).
+## other players and enemies, each at most once per hit window. An attack with
+## max_targets skips to its recovery once it has hit that many (Shield Charge
+## stops at its first contact), but everything its hitbox touches on the step it
+## reaches the limit is still hit, so a charge into a group hits the whole group.
 func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
 	var damage_scale := (attacker.damage_multiplier(attack)
 			* attacker.state.statuses.damage_dealt_multiplier(attacker.params.statuses))
 	var connected := 0
+	# Checked once, before this step's hits (see above).
+	var limit_reached := _target_limit_reached(attacker, attack)
 	for target: Player in _players.get_children():
-		if target == attacker or _target_limit_reached(attacker, attack):
+		if target == attacker or limit_reached:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
 				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale)
@@ -293,11 +296,11 @@ func _on_attack_stepped(attacker: Player) -> void:
 			connected += 1
 		if result == HIT_DAMAGED:
 			_give_hit_statuses(attacker.peer_id, attack,
-					attacker.state.take_on_hit_statuses(attacker.params), target)
+					attacker.on_hit_statuses_for_window(), target)
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
 			continue
-		if _target_limit_reached(attacker, attack):
+		if limit_reached:
 			break
 		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
@@ -310,7 +313,7 @@ func _on_attack_stepped(attacker: Player) -> void:
 		connected += 1
 		if not _damage_enemy(enemy, damage, attack.stagger_ticks, attacker.peer_id, HIT_DAMAGED):
 			_give_hit_statuses(attacker.peer_id, attack,
-					attacker.state.take_on_hit_statuses(attacker.params), enemy)
+					attacker.on_hit_statuses_for_window(), enemy)
 			_force_enemy(attacker.global_position, attacker.state.yaw, attack, enemy, was_staggered)
 	if connected > 0:
 		_on_player_attack_connected(attacker, attack, connected)

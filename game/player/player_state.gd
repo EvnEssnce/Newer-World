@@ -53,6 +53,8 @@ var stamina := 0.0
 var stamina_regen_wait := 0
 ## Ticks since the current dodge started, or -1 when not dodging.
 var dodge_tick := -1
+## Ticks left after a roll ends before another dodge can start ([dodge] cooldown).
+var dodge_cooldown := 0
 ## World-space XZ direction of the current dodge, normalized.
 var dodge_dir := Vector2.ZERO
 ## Ticks a dodge press stays queued while a dodge isn't possible.
@@ -144,10 +146,13 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 		if cooldowns[i] > 0:
 			cooldowns[i] -= 1
 	status_damage = statuses.tick(params.statuses)
+	if dodge_cooldown > 0:
+		dodge_cooldown -= 1
 	if dodge_tick >= 0:
 		dodge_tick += 1
 		if dodge_tick >= params.dodge_ticks:
 			dodge_tick = -1
+			dodge_cooldown = params.dodge_cooldown_ticks
 	if swap_tick >= 0:
 		swap_tick += 1
 		if swap_tick >= params.swap_ticks:
@@ -165,7 +170,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	# Presses while staggered stay buffered and fire when the stagger ends.
 	_handle_dodge_input(move, buttons, on_floor, params)
 	_handle_swap_input(buttons, params)
-	_handle_attack_input(buttons, aim_yaw, params)
+	_handle_attack_input(move, buttons, aim_yaw, params)
 	# Attacking and dodging take priority; holding block resumes the guard after.
 	blocking = ((buttons & BUTTON_BLOCK) != 0 and can_act() and dodge_tick < 0
 			and attack_tick < 0 and swap_tick < 0)
@@ -443,7 +448,8 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 ## on the floor or with an air dodge left, not rooted, and not mid-attack
 ## (except during recovery, which the dodge cancels).
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
-	return (can_act() and can_move(params) and dodge_tick < 0 and swap_tick < 0
+	return (can_act() and can_move(params) and dodge_tick < 0 and dodge_cooldown == 0
+			and swap_tick < 0
 			and stamina >= params.dodge_stamina_cost
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
@@ -454,7 +460,11 @@ func is_dodging() -> bool:
 
 
 func is_invulnerable(params: PlayerParams) -> bool:
-	return dodge_tick >= params.iframe_start_tick and dodge_tick < params.iframe_end_tick
+	if dodge_tick >= params.iframe_start_tick and dodge_tick < params.iframe_end_tick:
+		return true
+	# Abilities with i-frames (Vault).
+	var a := current_ability(params) if attack_type == ATTACK_ABILITY else null
+	return a != null and a.has_iframes(attack_tick)
 
 
 ## 0..1 through the current dodge, or -1 when not dodging.
@@ -559,7 +569,7 @@ func cooldown_left(index: int) -> int:
 	return cooldowns[equipped * WeaponParams.MAX_ABILITIES + index]
 
 
-func _handle_attack_input(buttons: int, aim_yaw: float, params: PlayerParams) -> void:
+func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: PlayerParams) -> void:
 	var w := weapon(params)
 	var requested := ATTACK_NONE
 	if buttons & BUTTON_ATTACK:
@@ -592,7 +602,7 @@ func _handle_attack_input(buttons: int, aim_yaw: float, params: PlayerParams) ->
 			queued_attack = ATTACK_NONE  # empty slot
 			return
 		if can_attack() and cooldown_left(index) == 0:
-			_start_ability(index, aim_yaw, params)
+			_start_ability(index, aim_yaw, params, move)
 			queued_attack = ATTACK_NONE
 			return
 	elif can_attack():
@@ -607,15 +617,19 @@ func _handle_attack_input(buttons: int, aim_yaw: float, params: PlayerParams) ->
 		queued_attack = ATTACK_NONE
 
 
-func _start_ability(index: int, aim_yaw: float, params: PlayerParams) -> void:
+## move: this step's movement input (world XZ), for dashes that follow it.
+func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Vector2.ZERO) -> void:
 	attack_type = ATTACK_ABILITY
 	ability = index
 	attack_tick = 0
 	attack_serial += 1
 	yaw = aim_yaw
 	var started := weapon(params).ability(index)
-	# A backward dash (Vault) moves away from where the ability faces.
+	# A backward dash moves away from where the ability faces; an input dash
+	# (Vault) goes the way you're moving, or backward with no input.
 	ability_dir = -forward(yaw) if started.dash_backward else forward(yaw)
+	if started.dash_from_input:
+		ability_dir = move.normalized() if move.length() > 0.1 else -forward(yaw)
 	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
 	_apply_self_status(started, params)
 
@@ -650,7 +664,7 @@ func to_array() -> Array:
 			stagger_ticks, dead, server_events, attack_hold, blocking, on_floor,
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
 			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
-			statuses.to_packed(), force.velocity, force.ticks, force.launch]
+			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -686,6 +700,7 @@ static func from_array(data: Array) -> PlayerState:
 	s.force.velocity = data[28]
 	s.force.ticks = data[29]
 	s.force.launch = data[30]
+	s.dodge_cooldown = data[31]
 	return s
 
 
@@ -698,6 +713,7 @@ func matches(other: PlayerState) -> bool:
 	return (absf(stamina - other.stamina) < 0.001
 			and stamina_regen_wait == other.stamina_regen_wait
 			and dodge_tick == other.dodge_tick
+			and dodge_cooldown == other.dodge_cooldown
 			and dodge_buffer == other.dodge_buffer
 			and air_dodges_used == other.air_dodges_used
 			and attack_type == other.attack_type

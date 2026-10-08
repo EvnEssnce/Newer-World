@@ -216,11 +216,12 @@ func test_to_array_round_trip_keeps_statuses() -> void:
 	assert_false(copy.matches(state), "a stack difference is a mismatch")
 
 
-## Statuses are index 27, followed by forced movement (28-30).
+## Statuses are index 27, followed by forced movement (28-30) and the dodge
+## cooldown (31).
 func test_statuses_are_at_index_27_in_to_array() -> void:
 	state.apply_status(params, slow)
 	var data := state.to_array()
-	assert_eq(data.size(), 31)
+	assert_eq(data.size(), 32)
 	assert_eq(data[27], state.statuses.to_packed())
 	assert_true(PlayerState.from_array(data).matches(state))
 

@@ -11,6 +11,42 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (16): Wave 2 playtest feedback
+
+Developer playtest: Opening Strike, Bloodlust and Hamstring work well; Hamstring's slow
+is clearly visible.
+
+Done:
+- **Dodge cooldown:** a new `[dodge] cooldown` (0.2 s) after a roll before the next one.
+  A press during it is buffered. It's synced state (`to_array()` index 31).
+- **Shield Charge hits a group:** it still stops at its first contact, but now hits
+  everything its hitbox touches at that moment (all staggered, ready for Rising Cut).
+  Hitbox width 1.4 → 2.2 m so two targets side by side both get hit.
+- **Bloodlust bug fixed:** it used one charge per *target* hit, so a swing through the
+  two Husks at the camp used 2 charges, and each Husk ended with 2 bleed stacks. Now
+  it's one charge per swing (per hit window), and every target that swing hits bleeds.
+  4 swings = 4 stacks.
+- **Spear:**
+  - **Vault** goes the way you're moving (backward with no input) and has i-frames
+    during its dash (0.05–0.4 s). New ability keys `dash_direction="input"`,
+    `iframe_start`, `iframe_end`.
+  - **Heavy:** same hitbox width as the light (0.8 m). The thrust animation now pushes
+    the tip to the end of the hitbox, so the heavy (3.2 m) visibly reaches 0.4 m
+    further than the light (2.8 m). This applies to every Spear thrust.
+- Fixed a broken `weapon_spear.cfg` from the last session: a PowerShell edit had
+  rewritten it in the wrong encoding, so Godot couldn't parse it. Restored from git.
+- Tests: 287. Smoke: default 3 of 4 passed (the fail was the known guard flake),
+  `-Party` 3 of 3.
+
+Needs a hand playtest:
+- Vault in each direction, and taking a Husk swing mid-vault (it should show
+  "Evaded").
+- Shield Charge into both Husks, then Rising Cut.
+- Bloodlust on one Husk: it should reach "Bleed x4".
+- The Spear heavy thrust's reach; the new dodge rhythm.
+
+Next: Wave 2's second pair (feather projectiles; Ember, Wing slots and Rebirth).
+
 ### 2026-10-08 (15): Forced movement, Rising Cut and the Spear (class build Wave 2B)
 
 Built by a parallel agent, merged into main on top of Wave 2A. The merge had 11
