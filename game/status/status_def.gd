@@ -33,6 +33,8 @@ var damage_dealt := 0.0
 ## Per stack: damage dealt every tick_interval_ticks (0 = no damage over time).
 var damage_per_interval := 0.0
 var tick_interval_ticks := 0
+## Per stack: health healed every tick_interval_ticks (0 = no healing over time).
+var heal_per_interval := 0.0
 ## The owner's damaging hits apply this status (id) with on_hit_stacks stacks.
 var on_hit_status := ""
 var on_hit_stacks := 0
@@ -46,6 +48,10 @@ func is_debuff() -> bool:
 
 func deals_damage_over_time() -> bool:
 	return damage_per_interval > 0.0 and tick_interval_ticks > 0
+
+
+func heals_over_time() -> bool:
+	return heal_per_interval > 0.0 and tick_interval_ticks > 0
 
 
 static func from_tuning(file: String, status_id: String, tps: float) -> StatusDef:
@@ -64,9 +70,11 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.damage_taken = Tuning.get_optional(file, section, "damage_taken", 0.0)
 	s.damage_dealt = Tuning.get_optional(file, section, "damage_dealt", 0.0)
 	var per_second: float = Tuning.get_optional(file, section, "damage_per_second", 0.0)
-	if per_second > 0.0:
+	var heal_per_second: float = Tuning.get_optional(file, section, "heal_per_second", 0.0)
+	if per_second > 0.0 or heal_per_second > 0.0:
 		s.tick_interval_ticks = maxi(1, roundi(Tuning.get_value(file, section, "tick_interval") * tps))
 		s.damage_per_interval = per_second * s.tick_interval_ticks / tps
+		s.heal_per_interval = heal_per_second * s.tick_interval_ticks / tps
 	s.on_hit_status = Tuning.get_optional(file, section, "on_hit_status", "")
 	s.on_hit_stacks = Tuning.get_optional(file, section, "on_hit_stacks", 1)
 	s.consume_on_hit = Tuning.get_optional(file, section, "consume_on_hit", false)

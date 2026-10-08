@@ -9,12 +9,14 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	&"move_right": [KEY_D, KEY_RIGHT],
 	&"jump": [KEY_SPACE],
 	&"dodge": [KEY_SHIFT],
-	# Weapon abilities in slots 1-3, and swapping between the two equipped weapons.
-	# Z and C are reserved for the two Wing abilities, and 1-9 for consumables and
-	# the like: don't bind them to anything else.
+	# Weapon abilities in slots 1-3, the two Wing abilities, and swapping between
+	# the two equipped weapons. 1-9 are reserved for consumables and the like:
+	# don't bind them to anything else.
 	&"ability_1": [KEY_Q],
 	&"ability_2": [KEY_E],
 	&"ability_3": [KEY_R],
+	&"wing_1": [KEY_Z],
+	&"wing_2": [KEY_C],
 	&"swap_weapon": [KEY_X],
 	&"toggle_mastery": [KEY_K],
 	&"toggle_hitboxes": [KEY_F3],

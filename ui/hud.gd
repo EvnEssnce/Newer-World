@@ -1,9 +1,16 @@
 class_name Hud
 extends CanvasLayer
-## In-game overlay: health and stamina bars, ability bar, current weapon,
-## connection stats and controls. The ability bar is built in code.
+## In-game overlay: health, stamina and Ember bars (Ember with a Rebirth marker
+## and line), ability bar, Wing slots, current weapon, connection stats and
+## controls. The ability bar, Wing slots and Ember bar are built in code.
 
 const SLOT_KEYS := ["Q", "E", "R"]
+const WING_KEYS := ["Z", "C"]
+## Wing slots' border, and the Ember bar's fill and Rebirth marker.
+const WING_BORDER := Color(1.0, 0.5, 0.15, 0.95)
+const EMBER_FILL := Color(1.0, 0.5, 0.12)
+const EMBER_MARKER := Color(1.0, 1.0, 1.0, 0.95)
+const UNAFFORDABLE_COLOR := Color(0.9, 0.35, 0.3)
 const SLOT_SIZE := Vector2(116, 58)
 const SLOT_COLOR := Color(0.08, 0.09, 0.12, 0.8)
 const SLOT_BORDER := Color(0.85, 0.7, 0.35, 0.9)
@@ -24,10 +31,21 @@ var _slot_names: Array[Label] = []
 var _slot_overlays: Array[ColorRect] = []
 var _slot_timers: Array[Label] = []
 var _status_row: HBoxContainer
+# Wings and Ember (built in code)
+var _wing_panels: Array[Panel] = []
+var _wing_names: Array[Label] = []
+var _wing_overlays: Array[ColorRect] = []
+var _wing_timers: Array[Label] = []
+var _wing_costs: Array[Label] = []
+var _ember_bar: ProgressBar
+var _ember_marker: ColorRect
+var _ember_label: Label
 
 
 func _ready() -> void:
 	_build_ability_bar()
+	_build_wing_bar()
+	_build_ember_bar()
 	_build_status_row()
 
 
@@ -75,6 +93,38 @@ func set_ability(slot: int, ability_name: String, cooldown_fraction: float,
 	overlay.anchor_top = 1.0 - clampf(cooldown_fraction, 0.0, 1.0)
 	_slot_timers[slot].visible = cooldown_fraction > 0.0
 	_slot_timers[slot].text = "%.1f" % seconds_left if seconds_left < 10.0 else str(ceili(seconds_left))
+
+
+## One Wing slot (0 = Z, 1 = C): name ("" = empty), cooldown left as a fraction
+## and in seconds, Ember cost, and whether there's enough Ember for it.
+func set_wing(slot: int, ability_name: String, cooldown_fraction: float, seconds_left: float,
+		cost: float, affordable: bool) -> void:
+	_wing_names[slot].text = ability_name if not ability_name.is_empty() else "(empty)"
+	_wing_names[slot].modulate.a = 1.0 if not ability_name.is_empty() else 0.45
+	var ready := not ability_name.is_empty() and cooldown_fraction <= 0.0 and affordable
+	var style := _wing_panels[slot].get_theme_stylebox("panel") as StyleBoxFlat
+	style.border_color = WING_BORDER if ready else EMPTY_BORDER
+	_wing_overlays[slot].visible = cooldown_fraction > 0.0
+	_wing_overlays[slot].anchor_top = 1.0 - clampf(cooldown_fraction, 0.0, 1.0)
+	_wing_timers[slot].visible = cooldown_fraction > 0.0
+	_wing_timers[slot].text = "%.1f" % seconds_left if seconds_left < 10.0 else str(ceili(seconds_left))
+	_wing_costs[slot].visible = not ability_name.is_empty()
+	_wing_costs[slot].text = "%d" % roundi(cost)
+	_wing_costs[slot].add_theme_color_override("font_color",
+			EMBER_FILL if affordable else UNAFFORDABLE_COLOR)
+
+
+## The Ember bar: value out of cap, with a marker at the Rebirth threshold, and
+## the Rebirth line (e.g. "Rebirth ready", "Rebirth in 4:32"). rebirth_ready
+## brightens the marker.
+func set_ember(value: float, cap: float, threshold: float, rebirth_text: String,
+		rebirth_ready: bool) -> void:
+	_ember_bar.max_value = maxf(cap, 1.0)
+	_ember_bar.value = value
+	_ember_marker.anchor_left = clampf(threshold / maxf(cap, 1.0), 0.0, 1.0)
+	_ember_marker.anchor_right = _ember_marker.anchor_left
+	_ember_marker.color = EMBER_MARKER if rebirth_ready else Color(EMBER_MARKER, 0.4)
+	_ember_label.text = "Ember %d   %s" % [floori(value), rebirth_text]
 
 
 ## The local player's statuses, one chip each: [name, stacks, seconds left,
@@ -159,6 +209,93 @@ func _build_ability_bar() -> void:
 
 
 func _build_slot(slot: int) -> Panel:
+	var parts := _make_slot(SLOT_KEYS[slot], SLOT_BORDER)
+	_slot_panels.append(parts[0])
+	_slot_names.append(parts[1])
+	_slot_overlays.append(parts[2])
+	_slot_timers.append(parts[3])
+	return parts[0]
+
+
+## Two Wing slots (Z, C) to the right of the ability bar, each with its Ember
+## cost in the top-right corner.
+func _build_wing_bar() -> void:
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 8)
+	bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	var left := (SLOT_SIZE.x * 3 + 16) / 2.0 + 28.0
+	bar.offset_left = left
+	bar.offset_right = left + SLOT_SIZE.x * 2 + 8
+	bar.offset_top = -96.0 - SLOT_SIZE.y
+	bar.offset_bottom = -96.0
+	add_child(bar)
+	for slot in WING_KEYS.size():
+		var parts := _make_slot(WING_KEYS[slot], WING_BORDER)
+		var panel: Panel = parts[0]
+		var cost := Label.new()
+		cost.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		cost.offset_left = -40.0
+		cost.offset_right = -6.0
+		cost.offset_top = 1.0
+		cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		cost.add_theme_font_size_override("font_size", 13)
+		cost.add_theme_color_override("font_outline_color", Color.BLACK)
+		cost.add_theme_constant_override("outline_size", 3)
+		panel.add_child(cost)
+		bar.add_child(panel)
+		_wing_panels.append(panel)
+		_wing_names.append(parts[1])
+		_wing_overlays.append(parts[2])
+		_wing_timers.append(parts[3])
+		_wing_costs.append(cost)
+
+
+## The Ember bar under the stamina bar, with a marker at the Rebirth threshold
+## and a label (Ember, Rebirth state) to its right.
+func _build_ember_bar() -> void:
+	_ember_bar = ProgressBar.new()
+	_ember_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_ember_bar.offset_left = -150.0
+	_ember_bar.offset_right = 150.0
+	_ember_bar.offset_top = -47.0
+	_ember_bar.offset_bottom = -39.0
+	_ember_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_ember_bar.show_percentage = false
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color(0.0, 0.0, 0.0, 0.5)
+	background.set_corner_radius_all(3)
+	_ember_bar.add_theme_stylebox_override("background", background)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = EMBER_FILL
+	fill.set_corner_radius_all(3)
+	_ember_bar.add_theme_stylebox_override("fill", fill)
+	add_child(_ember_bar)
+	_ember_marker = ColorRect.new()
+	_ember_marker.color = EMBER_MARKER
+	_ember_marker.anchor_top = 0.0
+	_ember_marker.anchor_bottom = 1.0
+	_ember_marker.offset_left = -1.0
+	_ember_marker.offset_right = 1.0
+	_ember_marker.offset_top = -3.0
+	_ember_marker.offset_bottom = 3.0
+	_ember_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ember_bar.add_child(_ember_marker)
+	_ember_label = Label.new()
+	_ember_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_ember_label.offset_left = 158.0
+	_ember_label.offset_right = 520.0
+	_ember_label.offset_top = -52.0
+	_ember_label.offset_bottom = -34.0
+	_ember_label.add_theme_font_size_override("font_size", 13)
+	_ember_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.45))
+	_ember_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_ember_label.add_theme_constant_override("outline_size", 4)
+	_ember_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	add_child(_ember_label)
+
+
+## One slot panel: [panel, name label, cooldown overlay, timer label].
+func _make_slot(key_text: String, key_color: Color) -> Array:
 	var panel := Panel.new()
 	panel.custom_minimum_size = SLOT_SIZE
 	var style := StyleBoxFlat.new()
@@ -196,14 +333,9 @@ func _build_slot(slot: int) -> Panel:
 	panel.add_child(timer)
 
 	var key := Label.new()
-	key.text = SLOT_KEYS[slot]
+	key.text = key_text
 	key.position = Vector2(6, 1)
-	key.add_theme_color_override("font_color", SLOT_BORDER)
+	key.add_theme_color_override("font_color", key_color)
 	key.add_theme_font_size_override("font_size", 13)
 	panel.add_child(key)
-
-	_slot_panels.append(panel)
-	_slot_names.append(ability_name)
-	_slot_overlays.append(overlay)
-	_slot_timers.append(timer)
-	return panel
+	return [panel, ability_name, overlay, timer]

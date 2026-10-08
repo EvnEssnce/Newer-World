@@ -42,22 +42,28 @@ game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
   world/world.gd     Server sim loop, snapshots, hit resolution; client input sending,
                      prediction, interpolation, hit display; test bot.
-  world/build_service.gd  World/Builds node: class/weapon/mastery requests (RPCs), validation.
-  player/player.gd   One player; server/local/remote roles (see below), health, visuals.
+  world/build_service.gd  World/Builds node: class/weapon/mastery/Wing requests (RPCs), validation.
+  player/player.gd   One player; server/local/remote roles (see below), health, visuals
+                     (incl. placeholder wings and the Rebirth fire).
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
   player/player_state.gd     Stamina, dodge, attacks, abilities, cooldowns, weapon swap,
-                             stagger, death, facing. Pure logic, unit tested.
-  player/player_params.gd    Player tuning converted to ticks/radians, every weapon, loaded once.
+                             stagger, death, facing, Wing abilities, Ember, Rebirth.
+                             Pure logic, unit tested.
+  player/player_params.gd    Player tuning converted to ticks/radians, every weapon and
+                             Wing set, Ember/Rebirth, loaded once.
   combat/attack_params.gd    One attack's tuning (phases, hit windows, damage, hitbox). Players and enemies.
-  combat/ability_params.gd   An ability: AttackParams + cooldown, dash, parry/counter.
+  combat/ability_params.gd   An ability: AttackParams + cooldown, dash, parry/counter, ember_cost.
   combat/weapon_params.gd    One weapon: light/heavy attacks, ability pool (data/weapon_<id>.cfg).
+  combat/wing_params.gd      A class's Wing ability pool (data/wings_<class>.cfg).
   combat/melee_hitbox.gd     Box/radial hitbox vs capsule test, frontal arc. Pure math, unit tested.
   combat/force_params.gd     An attack's forced movement (force_* keys): knockback/pull/push, launch.
   combat/forced_motion.gd    A push/launch in progress (players: in PlayerState; enemies). Unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
   build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
-  build/mastery_tree.gd      A weapon's mastery tree and its rules. Pure logic, unit tested.
-  build/character_build.gd   Class + equipped weapons + per-weapon tree allocation and slots.
+  build/mastery_tree.gd      A weapon's mastery tree (or a class's Wing tree) and its rules.
+                             Pure logic, unit tested.
+  build/character_build.gd   Class + equipped weapons + per-weapon tree allocation and slots
+                             + Wing tree allocation and Z/C slots.
   enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
   enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
@@ -70,13 +76,15 @@ game/
   status/status_defs.gd      Every status, by index (what the network sends); validate().
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
                              cleanse, on-hit (Bloodlust). Pure logic, unit tested.
-ui/                  connect_menu (client start screen), hud (health/stamina bars, ability bar,
-                     weapon line, status row, debug info), mastery_panel (K: equipped weapons, tree, respec, slots),
+ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars, ability
+                     bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
+                     mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
                      weapon_<id> (broadsword, spear, dual_axes), class_<id> (fighter),
-                     mastery (shared tree rules), mastery_<weapon>, loot (rarities + loot
-                     tables), items, affixes, party, status_effects (.cfg).
+                     mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
+                     abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
+                     loot (rarities + loot tables), items, affixes, party, status_effects (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -93,8 +101,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
   `PlayerState.BUTTON_*` bits: jump (1), attack (4) and block (8) are sent while held;
-  dodge (2), swap (16) and abilities 1–3 (32/64/128, Q/E/R) only on the tick they're
-  pressed (the sim buffers them). Tap vs hold (light vs heavy) is decided inside the sim
+  dodge (2), swap (16), abilities 1–3 (32/64/128, Q/E/R) and Wings 1–2 (256/512, Z/C)
+  only on the tick they're pressed (the sim buffers them). Tap vs hold (light vs heavy) is decided inside the sim
   from the held attack bit. `aim_yaw` is the camera yaw; attacks, abilities and block
   face it. New actions get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
@@ -111,19 +119,21 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   velocity and state and replays unacknowledged inputs. "Corrections" on the HUD count
   only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
   event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn,
-  parry counter, ability stopped on hit, loadout change, a status applied/used
-  up/cleansed by the server, forced movement) isn't counted. `--verbose` logs
+  parry counter, ability stopped on hit, loadout or Wing slot change, a status
+  applied/used up/cleansed by the server, forced movement, Ember gained, Rebirth
+  started/finished) isn't counted. `--verbose` logs
   each unexpected one, and server-side input drops.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
   `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
-  slots)` (a whole tree allocation + Q/E/R ability ids: a free respec) and
+  slots)` (a whole tree allocation + Q/E/R ability ids: a free respec),
+  `_request_wings(nodes, slots)` (the Wing tree allocation + Z/C ability ids) and
   `_request_weapons(weapons)`; server → client `_receive_build(build_dict, error)` after
   every request and on join. The server validates (class weapon list, mastery rules, not
   mid-attack/ability/swap) and puts what affects the sim (equipped weapon ids, slotted
-  ability indices) into `PlayerState.set_loadout`, a server event, so it reaches the
-  client through snapshots. Passive/upgrade nodes are server-only damage/stamina
-  modifiers, never sim state.
+  ability indices, Wing set and slots) into `PlayerState.set_loadout` / `set_wings`,
+  server events, so it reaches the client through snapshots. Passive/upgrade nodes are
+  server-only damage/stamina/damage-taken modifiers, never sim state.
 - **On-floor is synced state**: `PlayerMovement` reads `PlayerState.on_floor` (set after
   each `move_and_slide`), never `body.is_on_floor()` directly, so a restored state
   carries it. Server-side teleports (respawn) should still land exactly on the ground.
@@ -143,8 +153,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - **`PlayerState.to_array()` layout**: indices 0–26 as listed in `to_array()`; 27 =
   `StatusEffects.to_packed()` (`PackedInt32Array`, 4 ints per status: index into
   `StatusDefs`, stacks, ticks left, ticks elapsed); 28–30 = forced movement (see below);
-  31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`). Append
-  new fields at the end.
+  31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`);
+  32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
+  `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
+  rebirth_cooldown, rebirth_charges, Z slot, C slot, Wing cooldowns by pool index
+  without trailing zeros]`. Append new fields at the end. A player's snapshot entry is
+  about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
+  player already goes over it (Godot warns "above the MTU"); interest management /
+  delta compression will be needed before bigger tests.
   Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
   statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`: a dodge's window, or an ability's
@@ -208,8 +224,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
   branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
-  low_health_damage, block_stamina, none). Respecs are free any time except
-  mid-attack/ability/swap. K opens the panel.
+  low_health_damage, block_stamina, none; Wing trees add damage_taken, mantle_heal,
+  surge_stagger). Respecs are free any time except mid-attack/ability/swap. K opens the
+  panel. A tree file may set its own `[tree] points` (the Wing tree does).
 - **Forced movement** (the `FORCE` tag: knockback, pull, launch). Per attack, optional
   `force_direction` ("away" / "toward" / "forward"), `force_distance` (m),
   `force_height` (launch peak, m), `force_duration` (s), `force_needs_stagger` (only
@@ -234,9 +251,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `PlayerState.apply_stagger`: interrupts the target's attack/dodge, and it can't act
   until it ends (presses stay buffered).
 - **Death**: at 0 health the server calls `PlayerState.kill()`; dead players can't act,
-  can't be hit, and lie grey on the ground. After `[death] respawn_time` the server
+  can't be hit, and lie grey on the ground. Then a Rebirth if eligible (see "Ember,
+  Wings and Rebirth"); otherwise after `[death] respawn_time` the server
   `_respawn`s them at a random point on the spawn circle with full health and stamina
-  (`revive()`). The client shows a countdown banner from the `HIT_DEFEATED` event.
+  (`revive()`, Ember back to resting). The client shows a countdown banner from the
+  `HIT_DEFEATED` event.
 - No lag compensation yet: hits use targets' current server positions, while the
   attacker sees them `interpolation_delay` in the past.
 
@@ -245,7 +264,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
   from an ally; removed by a cleanse) or **buff**; `affects` = **sim** (changes
   movement/actions, predicted: slow, root, stun) or **damage** (server-only numbers:
-  bleed, exposed, damage_up, damage_reduction, bloodlust). Duration, max_stacks, then
+  bleed, exposed, damage_up, damage_reduction, bloodlust, pyre_heart's healing).
+  Duration, max_stacks, then
   only the keys for what it does. Reapplying adds stacks (capped) and resets the time to
   full (never shortens). `StatusDefs.validate()` checks the file (a unit test runs it).
 - **Players**: `PlayerState.statuses` (synced in `to_array()`), ticked down at the top of
@@ -273,12 +293,72 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `_apply_enemy_status_damage` apply it (× damage taken) after the tick's steps, through
   the normal death path (`_kill_player`, `_damage_enemy`), reported as
   `HIT_STATUS_DAMAGE` (or `HIT_DEFEATED`) with the status's source as attacker.
+  Healing over time (`heal_per_second`, Pyre Heart): `StatusEffects.heal_due` →
+  `PlayerState.status_heal` → `Player.status_heal_pending` → `World._heal_player`.
+- **Healing**: every heal goes through `World._heal_player(target, amount, healer_id)`:
+  capped at max health, gives the healer Ember (`per_heal`), reported as `HIT_HEALED`
+  (green "+N"). Use it for future ally heals too.
 - **UI**: HUD status row (local player, predicted: name, stacks, seconds; green edge =
   buff, red = debuff); a status line under remote players' and Husks' health.
 - Fighter status abilities: Broadsword **Opening Strike** (Exposed), Dual Axes
   **Bloodlust** (self-buff: next 4 hits bleed) and **Hamstring** (Slow, default axes R
-  slot). Root, stun, damage_up and damage_reduction exist for later abilities (nothing
-  applies them yet).
+  slot). The Fighter Wings apply damage_reduction (Ember Mantle), damage_up (Wingbeat
+  Surge) and pyre_heart. Root and stun exist for later abilities (nothing applies them
+  yet).
+
+## Ember, Wings and Rebirth
+
+- **Ember** (`data/ember.cfg [ember]`, every class): `PlayerState.ember`, 0..cap
+  (`ember_cap(params)` is the one place that reads the cap, for later upgrades). It's
+  sim state because it decides whether a predicted Wing ability can start. **Gains are
+  server events** (`gain_ember`): `World._ember_from_damage` gives the target
+  `per_damage_taken` and the attacking player `per_damage_dealt` for every hit and
+  damage-over-time tick (players and Husks; before a fatal hit kills, so it counts
+  toward a Rebirth), `_heal_player` gives the healer `per_heal`. **Spending** (a Wing
+  ability's `ember_cost`) and **settling** happen in `step()`, so they're predicted.
+- **In combat**: `PlayerState.combat_ticks` (synced) is set to `combat_time` by any
+  damage gain (dealt or taken, even a fully blocked hit; healing doesn't count) and
+  counted down in `step()`. At 0, Ember moves toward `resting` (50) by
+  `settle_per_second`, refilling or draining. Frozen while dead. Spawn and respawn
+  start at resting.
+- **Wing slots** (Z / C, `BUTTON_WING_1/2`): `PlayerState.wing_set` (class id; pool =
+  `PlayerParams.wing_set(id)`, from `data/wings_<class>.cfg`, same ability format as
+  weapon files + `ember_cost`), `wing_slots` (pool indices), `wing_cooldowns` (per pool
+  index). A Wing ability is `attack_type == ATTACK_WING`, `ability` = pool index, on the
+  same attack timeline as weapon abilities (dashes, i-frames, statuses, force, hit
+  windows, `is_using_ability()`/`current_ability()` cover both; `is_using_wing()` tells
+  them apart). It needs its cooldown at 0 and `can_afford` (Ember ≥ cost); an
+  unaffordable press stays buffered for `[abilities] buffer`. Weapon swaps don't touch
+  Wings (a queued Wing press survives a swap). Weapon abilities could cost Ember too
+  (`ember_cost`, 0 for all so far; the Mage will use it).
+- **Wing tree** (`data/mastery_wings_<class>.cfg`, `MasteryTree.for_wings`, 2 slots,
+  `[tree] points` = 12 for now): Fighter branches Bulwark and Fury. Same rules and free
+  respecs; K panel "Wings" tab. Its passives apply to every attack
+  (`CharacterBuild.damage_multiplier`); a Wing ability gets only the Wing tree's.
+  Capstones (server, `World`): **Mantle of Renewal** (`mantle_heal`: while Ember
+  Mantle's Warded is on, heal half the damage it prevented, `_mantle_heal`) and
+  **Crushing Wingbeat** (`surge_stagger`: while Wingbeat Surge's Empowered is on, hits
+  stagger ≥ 0.3 s, `_with_surge_stagger`).
+- **Fighter Wings** (`data/wings_fighter.cfg`): Ember Mantle (25 Ember, Warded −40% 4 s),
+  Wingbeat Surge (25, Empowered +20% 6 s), Pyre Heart (30, heals 200 over 5 s), Diving
+  Strike (20, 5 m leap + 2.5 m radial slam, height cosmetic). Defaults: Z Ember Mantle,
+  C Wingbeat Surge.
+- **Rebirth** (`[rebirth]`, every class, server-decided): in `_kill_player`,
+  `PlayerState.start_rebirth` runs if `can_rebirth` (Ember ≥ `rebirth_ember_needed()`
+  and `rebirth_cooldown` 0, or an extra charge). It spends `cost` Ember, sets
+  `rebirth_left` (ticks, counted down in `step()`) and starts the cooldown (which only
+  counts down once they've risen). When `rebirth_left` reaches 0, `World._rebirth`
+  raises them where they fell with `health_fraction` of max health (`finish_rebirth`:
+  like `revive` but keeps the Ember left). Otherwise the normal respawn runs unchanged.
+  All of it is synced state (index 34), so the HUD banner and cooldown come from the
+  predicted state. **Paladin hooks**: `rebirth_ember_needed()` (threshold modifiers),
+  `rebirth_charges` + `grant_rebirth_charge()` (extra Rebirths that ignore the
+  cooldown), `reduce_rebirth_cooldown()`.
+- **UI**: Ember bar under stamina with a white marker at the Rebirth threshold and a
+  line ("Ember 63   Rebirth ready" / "Rebirth in 4:32" / "Rebirth needs 50 Ember");
+  Wing slots right of Q/E/R (cost in the corner, red when unaffordable); "Rebirth /
+  Rising from the ashes in N" banner; placeholder orange wings during Wing abilities and
+  Rebirth, and a fire column rising under a rebirthing body (also seen by others).
 
 ## Enemies
 
@@ -308,12 +388,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 ## Controls
 
 WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
-click = block, Q/E/R abilities, X swap weapon, K mastery panel (K or Esc closes it),
-T/Y/N/L/Delete party (see below), F3 hitboxes, Esc frees the mouse. Panels that need
-the mouse join the `modal_ui` group: while one is visible, clicks and wheel scrolls
-don't recapture the mouse. Z and C are reserved for the two Wing
-abilities, 1–9 for later, F for pickup and I for inventory (milestone 2): don't bind
-them to anything else.
+click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery panel (K
+or Esc closes it), T/Y/N/L/Delete party (see below), F3 hitboxes, Esc frees the mouse.
+Panels that need the mouse join the `modal_ui` group: while one is visible, clicks and
+wheel scrolls don't recapture the mouse. 1–9 are reserved for later, F for pickup and I
+for inventory (milestone 2): don't bind them to anything else.
 
 ## Loot (milestone 2; rolls only so far)
 
@@ -359,8 +438,8 @@ them to anything else.
   nameplates in `Player.PARTY_NAME_COLOR`.
 - Keys: **T** invite the player nearest the crosshair (within `invite_range`), **Y** join,
   **N** decline, **L** leave, **Delete** kick the party member nearest the crosshair
-  (leader). Q, E, R, X, K, Z, C and 1–9 are reserved for abilities, weapon swap, the tree
-  panel and Wing abilities.
+  (leader). Q, E, R, X, K, Z, C and 1–9 are taken or reserved (abilities, weapon swap,
+  the tree panel, Wing abilities, later).
 
 ## Running
 
@@ -375,8 +454,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs or forced moves on each other, Husk fights still happen
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs or forced moves on each other, Husk fights (and Ember, Wings, a Rebirth) still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
@@ -394,13 +473,19 @@ Spear, Dual Axes, Broadsword; `BuildService.bot_weapons_for_cycle`); see
 `World._bot_input`. On joining it slots its status abilities first
 (`BuildService.bot_slot_status_abilities`); it uses Bloodlust as soon as its target is
 within 2 m on its own turn or in the ability phase, then a hitting ability; the ability
-phase's first press prefers a knockback ability, then a self-buff, then a status ability),
+phase's first press prefers a knockback ability, then a self-buff, then a status ability.
+Wings (`World._bot_wing_input`): Wingbeat Surge as its attack turn starts, Ember Mantle
+(or Pyre Heart when below 80% health) as its block turn starts, Diving Strike when the
+target is 3–7 m away; while a Rebirth is ready it only spends Ember above the 50
+threshold. At 7.6 s it also respecs its Wing slots: default on even cycles, Diving
+Strike / Pyre Heart in Z on odd ones, `BuildService.bot_respec_wings`),
 `--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
-accepts any invite; it doesn't attack or use abilities until it's in a party, then
+accepts any invite; it doesn't attack or use abilities (Wings included) until it's in a party, then
 still swings at its ally when no Husk is near, which the server ignores; see
 `PartySystem._bot_step`), `--verbose` (log positions every 2 s, server logs hits and
 refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
-`--mastery-panel` (open the K panel at start, for screenshot checks),
+`--mastery-panel` (open the K panel at start, for screenshot checks; `--mastery-panel=wings`
+opens it on the Wings tab),
 `--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
 `SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),
 `--screenshot-dir=PATH` (save the game window every 0.25 s, for checking visuals; a
@@ -411,7 +496,8 @@ give the server and every client the same overrides; only keys that exist in the
 can be overridden, strings need no quotes). The smoke test uses `--tune` for low health
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
-checks don't depend on bot luck.
+checks don't depend on bot luck, and a 1 s Rebirth (`ember/rebirth/duration`) so a
+reborn bot is back in the fight quickly.
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.

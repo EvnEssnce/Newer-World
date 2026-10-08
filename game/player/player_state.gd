@@ -2,7 +2,9 @@ class_name PlayerState
 extends RefCounted
 ## A player's simulated state besides position and velocity: stamina, dodge,
 ## attacks, abilities and their cooldowns, weapon loadout and swap, block,
-## stagger, death, facing, statuses. step() advances it one tick from one input.
+## stagger, death, facing, statuses, Wing abilities, Ember and Rebirth. step()
+## advances it one tick from one input (tests/test_ember_wings.gd covers the
+## last three).
 ## No physics here, so it can be unit tested (tests/test_player_state.gd,
 ## tests/test_attacks.gd, tests/test_block.gd, tests/test_death_stagger.gd,
 ## tests/test_abilities.gd, tests/test_weapon_swap.gd, tests/test_status_sim.gd).
@@ -12,11 +14,14 @@ extends RefCounted
 ##
 ## Blocked hits, stagger, death, respawn, parries (start_counter), an ability
 ## stopping on hit (end_active_window), loadout changes (set_loadout), statuses the
-## server applies or removes (apply_status, take_on_hit_statuses, cleanse) and forced
-## movement (start_force) are applied by the server outside step() (the client can't
-## predict them). Each one bumps server_events, so the client knows the resulting
-## correction was expected. A self-buff from the player's own attack or ability
-## (self_status) starts inside step(), so it's predicted.
+## server applies or removes (apply_status, take_on_hit_statuses, cleanse), forced
+## movement (start_force), Wing loadout changes (set_wings), Ember gains
+## (gain_ember) and Rebirth (start_rebirth, finish_rebirth) are applied by the
+## server outside step() (the client can't predict them). Each one bumps
+## server_events, so the client knows the resulting correction was expected. A
+## self-buff from the player's own attack or ability (self_status), spending Ember
+## on a Wing ability and Ember settling out of combat happen inside step(), so
+## they're predicted.
 
 ## Jump, attack and block are set on every tick they're held; dodge, swap and
 ## the ability buttons only on the tick they're pressed. Tap attack = light (on
@@ -30,18 +35,25 @@ const BUTTON_SWAP := 16
 const BUTTON_ABILITY_1 := 32
 const BUTTON_ABILITY_2 := 64
 const BUTTON_ABILITY_3 := 128
+## Wing slots 1-2 (Z / C) are BUTTON_WING_1 << slot. Sent on press, buffered.
+const BUTTON_WING_1 := 256
+const BUTTON_WING_2 := 512
 const ALL_BUTTONS := (BUTTON_JUMP | BUTTON_DODGE | BUTTON_ATTACK | BUTTON_BLOCK | BUTTON_SWAP
-		| BUTTON_ABILITY_1 | BUTTON_ABILITY_2 | BUTTON_ABILITY_3)
+		| BUTTON_ABILITY_1 | BUTTON_ABILITY_2 | BUTTON_ABILITY_3 | BUTTON_WING_1 | BUTTON_WING_2)
 
 const ATTACK_NONE := 0
 const ATTACK_LIGHT := 1
 const ATTACK_HEAVY := 2
 ## An ability from the equipped weapon's pool (see `ability`).
 const ATTACK_ABILITY := 3
+## A Wing ability: `ability` indexes the class's Wing pool (wings()).
+const ATTACK_WING := 4
 
 ## Equipped weapons, and ability slots per weapon.
 const WEAPON_SLOTS := 2
 const ABILITY_SLOTS := 3
+## Wing ability slots (the same whichever weapon is out).
+const WING_SLOTS := 2
 
 ## attack_hold values besides a tick count.
 const HOLD_RELEASED := -1
@@ -73,7 +85,8 @@ var attack_hold := HOLD_RELEASED
 ## An attack waiting to start (pressed mid-attack or mid-roll), and ticks it stays queued.
 var queued_attack := ATTACK_NONE
 var queued_attack_ticks := 0
-## The ability slot (0-2) of a queued ATTACK_ABILITY.
+## The ability slot (0-2) of a queued ATTACK_ABILITY, or the Wing slot (0-1)
+## of a queued ATTACK_WING.
 var queued_ability_slot := -1
 ## Guarding this tick: block held, and not attacking, dodging, swapping or staggered.
 var blocking := false
@@ -124,9 +137,42 @@ var statuses := StatusEffects.new()
 ## Output of the last step(), not state (so not in to_array): damage over time
 ## (bleed) due that tick. The server applies it; clients ignore it.
 var status_damage := 0.0
+## Output of the last step(), not state: healing over time (Pyre Heart) due
+## that tick. The server applies it; clients ignore it.
+var status_heal := 0.0
 # Forced movement (knockback, pull, launch). Started by the server
 # (start_force); PlayerMovement moves the body by it.
 var force := ForcedMotion.new()
+
+# Wings (set by the server with set_wings, from the character's build)
+## The class whose Wing abilities these are (PlayerParams.wings key); "" = none.
+var wing_set := ""
+## Per Wing slot (Z, C): an index into the Wing pool, or -1 for an empty slot.
+var wing_slots := PackedInt32Array()
+## Ticks left on each Wing ability's cooldown, by pool index.
+var wing_cooldowns := PackedInt32Array()
+
+# Ember (the phoenix resource). Spending (Wing abilities) and settling toward
+# the resting level happen in step(), so they're predicted; gains (damage dealt,
+# damage taken, healing) are server events (gain_ember).
+var ember := 0.0
+## "In combat": ticks left since the server last reported this player dealing
+## or taking damage (gain_ember with in_combat). Counted down in step(); Ember
+## only settles toward its resting level once it reaches 0. Synced, so the
+## client predicts the settling exactly.
+var combat_ticks := 0
+
+# Rebirth (server-decided; see can_rebirth)
+## Ticks left in a Rebirth in progress (dead, rising where they fell), counted
+## down in step(); 0 = done, waiting for the server to raise them; -1 = not
+## rebirthing.
+var rebirth_left := -1
+## Ticks before the next Rebirth. Counts down in step() once the Rebirth that
+## started it is over.
+var rebirth_cooldown := 0
+## Extra Rebirths that ignore the cooldown (still need the Ember). Nothing
+## grants them yet: the Paladin's Phoenix Blessing will (grant_rebirth_charge).
+var rebirth_charges := 0
 
 
 func _init() -> void:
@@ -134,6 +180,10 @@ func _init() -> void:
 	ability_slots.fill(-1)
 	cooldowns.resize(WEAPON_SLOTS * WeaponParams.MAX_ABILITIES)
 	cooldowns.fill(0)
+	wing_slots.resize(WING_SLOTS)
+	wing_slots.fill(-1)
+	wing_cooldowns.resize(WeaponParams.MAX_ABILITIES)
+	wing_cooldowns.fill(0)
 
 
 ## Advances one tick. move is the world-space XZ input (length <= 1); aim_yaw is
@@ -145,7 +195,12 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	for i in cooldowns.size():
 		if cooldowns[i] > 0:
 			cooldowns[i] -= 1
+	for i in wing_cooldowns.size():
+		if wing_cooldowns[i] > 0:
+			wing_cooldowns[i] -= 1
+	_step_ember_and_rebirth(params)
 	status_damage = statuses.tick(params.statuses)
+	status_heal = statuses.heal_due
 	if dodge_cooldown > 0:
 		dodge_cooldown -= 1
 	if dodge_tick >= 0:
@@ -259,11 +314,16 @@ func kill() -> void:
 	server_events += 1
 
 
+## Server: back from the dead (a respawn): full stamina, Ember back at its
+## resting level, out of combat. finish_rebirth keeps the Ember instead.
 func revive(params: PlayerParams) -> void:
 	dead = false
 	stamina = params.max_stamina
 	stamina_regen_wait = 0
 	statuses.clear()
+	ember = params.ember_resting
+	combat_ticks = 0
+	rebirth_left = -1
 	server_events += 1
 
 
@@ -271,7 +331,7 @@ func revive(params: PlayerParams) -> void:
 ## whoever was parried). Returns false if there's nothing to counter with.
 func start_counter(params: PlayerParams, face_yaw: float) -> bool:
 	var parry := current_ability(params)
-	if parry == null:
+	if parry == null or attack_type != ATTACK_ABILITY:
 		return false
 	var index := weapon(params).ability_index(parry.counter)
 	if index < 0:
@@ -407,6 +467,165 @@ func set_loadout(new_weapons: PackedStringArray, new_slots: PackedInt32Array) ->
 	server_events += 1
 
 
+# --- Wings ---
+
+## Server: sets the Wing abilities: the class's pool (set_id, a PlayerParams.wings
+## key) and new_slots (pool indices for Z and C, -1 = empty). Cooldowns stay
+## (they're per pool index), so a respec can't reset them. Nothing happens (no
+## server event) if that's already the Wing loadout.
+func set_wings(set_id: String, new_slots: PackedInt32Array) -> void:
+	var padded := new_slots.slice(0, WING_SLOTS)
+	while padded.size() < WING_SLOTS:
+		padded.append(-1)
+	if set_id == wing_set and padded == wing_slots:
+		return
+	if set_id != wing_set:
+		wing_cooldowns.fill(0)
+	wing_set = set_id
+	wing_slots.fill(-1)
+	for i in mini(new_slots.size(), WING_SLOTS):
+		wing_slots[i] = new_slots[i]
+	if queued_attack == ATTACK_WING:
+		queued_attack = ATTACK_NONE
+	server_events += 1
+
+
+func wings(params: PlayerParams) -> WingParams:
+	return params.wing_set(wing_set)
+
+
+## The Wing-pool index in Wing slot `slot` (0 = Z, 1 = C), or -1.
+func wing_slot_ability(slot: int) -> int:
+	return wing_slots[slot] if slot >= 0 and slot < wing_slots.size() else -1
+
+
+## Ticks left on Wing ability `index` (pool index).
+func wing_cooldown_left(index: int) -> int:
+	return wing_cooldowns[index] if index >= 0 and index < wing_cooldowns.size() else 0
+
+
+## Enough Ember for an ability's ember_cost.
+func can_afford(started: AbilityParams) -> bool:
+	return started != null and ember >= started.ember_cost
+
+
+# --- Ember ---
+
+## The most Ember this player can hold. The one place that reads the cap, so
+## progression upgrades only change this.
+func ember_cap(params: PlayerParams) -> float:
+	return params.ember_cap
+
+
+func in_combat() -> bool:
+	return combat_ticks > 0
+
+
+## Server: adds Ember (damage dealt or taken, healing), capped. in_combat: it
+## came from dealing or taking damage, so the player is in combat for
+## ember_combat_ticks (no settling). A server event. Ignored while dead.
+func gain_ember(params: PlayerParams, amount: float, in_combat_now: bool = true) -> void:
+	if dead or (amount <= 0.0 and not in_combat_now):
+		return
+	ember = clampf(ember + maxf(0.0, amount), 0.0, ember_cap(params))
+	if in_combat_now:
+		combat_ticks = params.ember_combat_ticks
+	server_events += 1
+
+
+## Inside step(): the combat timer, settling toward the resting level out of
+## combat, and the Rebirth countdown and cooldown. Ember doesn't change while
+## dead.
+func _step_ember_and_rebirth(params: PlayerParams) -> void:
+	if combat_ticks > 0:
+		combat_ticks -= 1
+	elif not dead:
+		ember = move_toward(ember, params.ember_resting, params.ember_settle_per_tick)
+	if rebirth_left > 0:
+		rebirth_left -= 1
+	elif rebirth_cooldown > 0 and not is_rebirthing():
+		rebirth_cooldown -= 1
+
+
+# --- Rebirth ---
+
+## Ember needed to Rebirth. The one place for modifiers (the Paladin's "allies
+## near you need 10 less Ember").
+func rebirth_ember_needed(params: PlayerParams) -> float:
+	return params.rebirth_threshold
+
+
+## True if dying now would start a Rebirth: enough Ember, and Rebirth off
+## cooldown or an extra charge (rebirth_charges) to use.
+func can_rebirth(params: PlayerParams) -> bool:
+	return (ember >= rebirth_ember_needed(params)
+			and (rebirth_cooldown == 0 or rebirth_charges > 0))
+
+
+func is_rebirthing() -> bool:
+	return dead and rebirth_left >= 0
+
+
+## 0..1 through a Rebirth in progress, or -1.
+func rebirth_progress(params: PlayerParams) -> float:
+	if not is_rebirthing():
+		return -1.0
+	return 1.0 - rebirth_left / float(maxi(1, params.rebirth_ticks))
+
+
+## Server, right after kill(): starts a Rebirth if can_rebirth. Spends the
+## Ember; on cooldown it uses an extra charge instead (the cooldown is left
+## alone), otherwise it starts the cooldown, which only counts down once the
+## player has risen. Returns false (normal respawn) if not eligible.
+func start_rebirth(params: PlayerParams) -> bool:
+	if not dead or is_rebirthing() or not can_rebirth(params):
+		return false
+	if rebirth_cooldown > 0:
+		rebirth_charges -= 1
+	else:
+		rebirth_cooldown = params.rebirth_cooldown_ticks
+	ember = maxf(0.0, ember - params.rebirth_cost)
+	rebirth_left = params.rebirth_ticks
+	server_events += 1
+	return true
+
+
+## True once a Rebirth's countdown has run out: the server raises the player.
+func rebirth_done() -> bool:
+	return is_rebirthing() and rebirth_left == 0
+
+
+## Server: rises from a Rebirth (where they fell; the server sets the health,
+## rebirth_health). Like revive, but keeps the Ember left after the cost.
+func finish_rebirth(params: PlayerParams) -> void:
+	var kept := ember
+	revive(params)
+	ember = kept
+
+
+## Health on rising from a Rebirth.
+static func rebirth_health(params: PlayerParams) -> float:
+	return params.max_health * params.rebirth_health_fraction
+
+
+## Server hook (the Paladin's Phoenix Blessing): extra Rebirths that ignore the
+## cooldown.
+func grant_rebirth_charge(count: int = 1) -> void:
+	if count <= 0:
+		return
+	rebirth_charges += count
+	server_events += 1
+
+
+## Server hook (the Paladin's Cleansing Flame): takes ticks off the Rebirth
+## cooldown.
+func reduce_rebirth_cooldown(ticks: int) -> void:
+	if ticks <= 0 or rebirth_cooldown == 0:
+		return
+	rebirth_cooldown = maxi(0, rebirth_cooldown - ticks)
+	server_events += 1
+
+
 # --- Weapons ---
 
 ## The equipped weapon's id ("" with no loadout).
@@ -438,8 +657,9 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 	swap_buffer = 0
 	equipped = 1 - equipped
 	swap_tick = 0
-	# A queued press was meant for the other weapon.
-	queued_attack = ATTACK_NONE
+	# A queued press was meant for the other weapon (Wing presses aren't).
+	if queued_attack != ATTACK_WING:
+		queued_attack = ATTACK_NONE
 
 
 # --- Dodge ---
@@ -463,7 +683,7 @@ func is_invulnerable(params: PlayerParams) -> bool:
 	if dodge_tick >= params.iframe_start_tick and dodge_tick < params.iframe_end_tick:
 		return true
 	# Abilities with i-frames (Vault).
-	var a := current_ability(params) if attack_type == ATTACK_ABILITY else null
+	var a := current_ability(params)
 	return a != null and a.has_iframes(attack_tick)
 
 
@@ -507,15 +727,22 @@ func is_attacking() -> bool:
 	return attack_tick >= 0
 
 
+## True during weapon abilities and Wing abilities.
 func is_using_ability() -> bool:
-	return attack_tick >= 0 and attack_type == ATTACK_ABILITY
+	return attack_tick >= 0 and (attack_type == ATTACK_ABILITY or attack_type == ATTACK_WING)
 
 
-## The params of attack_type (and `ability`) with the equipped weapon, whether
-## or not it's running. Null for ATTACK_NONE.
+func is_using_wing() -> bool:
+	return attack_tick >= 0 and attack_type == ATTACK_WING
+
+
+## The params of attack_type (and `ability`) with the equipped weapon (or the
+## Wing pool), whether or not it's running. Null for ATTACK_NONE.
 func attack_params(params: PlayerParams) -> AttackParams:
 	if attack_type == ATTACK_ABILITY:
 		return weapon(params).ability(ability)
+	if attack_type == ATTACK_WING:
+		return wings(params).ability(ability)
 	return weapon(params).attack(attack_type)
 
 
@@ -524,9 +751,9 @@ func current_attack(params: PlayerParams) -> AttackParams:
 	return attack_params(params) if attack_tick >= 0 else null
 
 
-## The current ability's params, or null when not using one.
+## The current weapon or Wing ability's params, or null when not using one.
 func current_ability(params: PlayerParams) -> AbilityParams:
-	return weapon(params).ability(ability) if is_using_ability() else null
+	return attack_params(params) as AbilityParams if is_using_ability() else null
 
 
 ## True while the current attack's hitbox is live.
@@ -593,6 +820,11 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 			queued_attack = ATTACK_ABILITY
 			queued_ability_slot = slot
 			queued_attack_ticks = params.ability_buffer_ticks + 1
+	for slot in WING_SLOTS:
+		if buttons & (BUTTON_WING_1 << slot):
+			queued_attack = ATTACK_WING
+			queued_ability_slot = slot
+			queued_attack_ticks = params.ability_buffer_ticks + 1
 	if queued_attack == ATTACK_NONE:
 		return
 	queued_attack_ticks -= 1
@@ -601,8 +833,20 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 		if w.ability(index) == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if can_attack() and cooldown_left(index) == 0:
+		if can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index)):
 			_start_ability(index, aim_yaw, params, move)
+			queued_attack = ATTACK_NONE
+			return
+	elif queued_attack == ATTACK_WING:
+		# Not enough Ember (or on cooldown): stays buffered, so Ember the server
+		# grants within the buffer still lets it start.
+		var wing_index := wing_slot_ability(queued_ability_slot)
+		var wing := wings(params).ability(wing_index)
+		if wing == null:
+			queued_attack = ATTACK_NONE  # empty slot
+			return
+		if can_attack() and wing_cooldowns[wing_index] == 0 and can_afford(wing):
+			_start_ability(wing_index, aim_yaw, params, move, true)
 			queued_attack = ATTACK_NONE
 			return
 	elif can_attack():
@@ -618,13 +862,16 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 
 
 ## move: this step's movement input (world XZ), for dashes that follow it.
-func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Vector2.ZERO) -> void:
-	attack_type = ATTACK_ABILITY
+## wing: index is into the Wing pool (a Wing ability) instead of the weapon's.
+## Starts its cooldown and spends its Ember cost.
+func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Vector2.ZERO,
+		wing := false) -> void:
+	attack_type = ATTACK_WING if wing else ATTACK_ABILITY
 	ability = index
 	attack_tick = 0
 	attack_serial += 1
 	yaw = aim_yaw
-	var started := weapon(params).ability(index)
+	var started := attack_params(params) as AbilityParams
 	# A backward dash moves away from where the ability faces; an input dash
 	# (Vault) goes the way you're moving, or backward with no input.
 	ability_dir = -forward(yaw) if started.dash_backward else forward(yaw)
@@ -632,7 +879,11 @@ func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Ve
 		ability_dir = move.normalized() if move.length() > 0.1 else -forward(yaw)
 		# Face the way it goes (its turn_speed 0 keeps it there for the vault).
 		yaw = yaw_for_direction(ability_dir)
-	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
+	if wing:
+		wing_cooldowns[index] = started.cooldown_ticks
+	else:
+		cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
+	ember = maxf(0.0, ember - started.ember_cost)
 	_apply_self_status(started, params)
 
 
@@ -666,7 +917,8 @@ func to_array() -> Array:
 			stagger_ticks, dead, server_events, attack_hold, blocking, on_floor,
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
 			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
-			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown]
+			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown,
+			ember, wing_set, _pack_ember_wings()]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -703,7 +955,38 @@ static func from_array(data: Array) -> PlayerState:
 	s.force.ticks = data[29]
 	s.force.launch = data[30]
 	s.dodge_cooldown = data[31]
+	s.ember = data[32]
+	s.wing_set = data[33]
+	s._unpack_ember_wings(data[34])
 	return s
+
+
+## to_array() index 34, one PackedInt32Array to keep snapshots small:
+## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
+## C slot, then Wing cooldowns by pool index, without trailing zeros].
+const PACKED_WING_HEADER := 6
+
+
+func _pack_ember_wings() -> PackedInt32Array:
+	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
+			wing_slots[0], wing_slots[1]])
+	var last := wing_cooldowns.size() - 1
+	while last >= 0 and wing_cooldowns[last] == 0:
+		last -= 1
+	packed.append_array(wing_cooldowns.slice(0, last + 1))
+	return packed
+
+
+func _unpack_ember_wings(packed: PackedInt32Array) -> void:
+	combat_ticks = packed[0]
+	rebirth_left = packed[1]
+	rebirth_cooldown = packed[2]
+	rebirth_charges = packed[3]
+	wing_slots[0] = packed[4]
+	wing_slots[1] = packed[5]
+	wing_cooldowns.fill(0)
+	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
+		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
 
 
 func copy() -> PlayerState:
@@ -738,4 +1021,12 @@ func matches(other: PlayerState) -> bool:
 			and queued_ability_slot == other.queued_ability_slot
 			and attack_serial == other.attack_serial
 			and statuses.to_packed() == other.statuses.to_packed()
-			and force.matches(other.force))
+			and force.matches(other.force)
+			and absf(ember - other.ember) < 0.001
+			and combat_ticks == other.combat_ticks
+			and wing_set == other.wing_set
+			and wing_slots == other.wing_slots
+			and wing_cooldowns == other.wing_cooldowns
+			and rebirth_left == other.rebirth_left
+			and rebirth_cooldown == other.rebirth_cooldown
+			and rebirth_charges == other.rebirth_charges)

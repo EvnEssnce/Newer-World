@@ -1,7 +1,8 @@
 class_name MasteryTree
 extends RefCounted
 ## One weapon's mastery tree (data/mastery_<weapon>.cfg, rules in
-## data/mastery.cfg) and its rules. Pure logic, unit tested
+## data/mastery.cfg), or a class's Wing tree (data/mastery_wings_<class>.cfg,
+## for_wings: 2 slots, its own point budget), and its rules. Pure logic, unit tested
 ## (tests/test_mastery_tree.gd). An allocation is a list of node ids.
 ##
 ## Rules: two branches; a node of tier T needs tier_requirements[T - 1] points
@@ -30,19 +31,25 @@ class MasteryNode:
 	var cost := 1
 	## Active nodes: the ability it unlocks.
 	var ability := ""
-	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina" or "none".
+	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina",
+	## "none", or (Wing trees) "damage_taken", "mantle_heal", "surge_stagger".
 	var effect := "none"
 	## "damage": "light", "heavy", "abilities", "all" or one ability id.
+	## "mantle_heal" / "surge_stagger": the Wing ability whose self-buff it needs.
 	var applies_to := ""
 	var amount := 0.0
 	## "low_health_damage": applies below this fraction of max health.
 	var threshold := 0.0
 
 
+## The weapon id, or "wings_<class>" for a class's Wing tree.
 var weapon_id := ""
 var branches := PackedStringArray()
 var branch_names := PackedStringArray()
 var points := 0
+## Ability slots an allocation fills: 3 (Q / E / R) for a weapon, 2 (Z / C)
+## for Wings.
+var slot_count := PlayerState.ABILITY_SLOTS
 ## Points needed in a branch (on lower tiers) to open each tier, from tier 1.
 var tier_requirements := PackedInt32Array()
 ## Node id -> MasteryNode.
@@ -65,11 +72,27 @@ static func for_weapon(weapon: String) -> MasteryTree:
 	return _cache[weapon]
 
 
+## A class's Wing tree (data/mastery_wings_<class>.cfg, 2 slots), loaded once;
+## null if it has none.
+static func for_wings(class_id: String) -> MasteryTree:
+	var key := "wings_" + class_id
+	if not _cache.has(key):
+		if not Tuning.has_file("mastery_" + key):
+			return null
+		var t := from_tuning(key)
+		t.slot_count = PlayerState.WING_SLOTS
+		_cache[key] = t
+	return _cache[key]
+
+
+## A tree file may set its own [tree] points (the Wing tree does); otherwise
+## data/mastery.cfg's.
 static func from_tuning(weapon: String) -> MasteryTree:
 	var file := "mastery_" + weapon
 	var t := MasteryTree.new()
 	t.weapon_id = weapon
-	t.points = Tuning.get_value("mastery", "rules", "points")
+	t.points = Tuning.get_optional(file, "tree", "points",
+			Tuning.get_value("mastery", "rules", "points"))
 	t.tier_requirements = PackedInt32Array(Tuning.get_value("mastery", "rules", "tier_requirements"))
 	t.branches = PackedStringArray(Tuning.get_value(file, "tree", "branches"))
 	t.branch_names = PackedStringArray(Tuning.get_value(file, "tree", "branch_names"))
@@ -206,8 +229,8 @@ func unlocked_abilities(allocated: PackedStringArray) -> PackedStringArray:
 
 ## "" if each slot (ability ids, "" = empty) holds a different unlocked ability.
 func validate_slots(allocated: PackedStringArray, slots: PackedStringArray) -> String:
-	if slots.size() != PlayerState.ABILITY_SLOTS:
-		return "Expected %d ability slots." % PlayerState.ABILITY_SLOTS
+	if slots.size() != slot_count:
+		return "Expected %d ability slots." % slot_count
 	var unlocked := unlocked_abilities(allocated)
 	var seen := {}
 	for ability in slots:
@@ -245,9 +268,31 @@ func damage_multiplier(allocated: PackedStringArray, attack_kind: String, abilit
 
 ## Server-side multiplier on the stamina a blocked hit costs.
 func block_stamina_multiplier(allocated: PackedStringArray) -> float:
-	var bonus := 0.0
+	return maxf(0.0, 1.0 + effect_amount(allocated, "block_stamina"))
+
+
+## Server-side multiplier on damage taken ("damage_taken" nodes: Wing tree).
+func damage_taken_multiplier(allocated: PackedStringArray) -> float:
+	return maxf(0.0, 1.0 + effect_amount(allocated, "damage_taken"))
+
+
+## The sum of `amount` over allocated passive/upgrade nodes with this effect
+## (and, if applies_to isn't "", that applies_to).
+func effect_amount(allocated: PackedStringArray, effect: String, applies_to: String = "") -> float:
+	var total := 0.0
 	for id in allocated:
 		var n := get_node(id)
-		if n and n.kind != KIND_ACTIVE and n.effect == "block_stamina":
-			bonus += n.amount
-	return maxf(0.0, 1.0 + bonus)
+		if (n and n.kind != KIND_ACTIVE and n.effect == effect
+				and (applies_to.is_empty() or n.applies_to == applies_to)):
+			total += n.amount
+	return total
+
+
+## The first allocated passive/upgrade node with this effect, or null (Wing
+## capstones: mantle_heal, surge_stagger).
+func effect_node(allocated: PackedStringArray, effect: String) -> MasteryNode:
+	for id in allocated:
+		var n := get_node(id)
+		if n and n.kind != KIND_ACTIVE and n.effect == effect:
+			return n
+	return null

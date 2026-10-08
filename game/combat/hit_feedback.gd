@@ -28,6 +28,11 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 			label.text = "-%d" % damage
 			label.font_size = 40
 			label.modulate = Color(0.85, 0.15, 0.25)
+		World.HIT_HEALED:
+			# Healing (Pyre Heart): green, smaller, no flash.
+			label.text = "+%d" % damage
+			label.font_size = 40
+			label.modulate = Color(0.45, 1.0, 0.45)
 		World.HIT_DEFEATED:
 			label.text = "-%d  Defeated!" % damage
 			label.modulate = Color(1.0, 0.3, 0.2)

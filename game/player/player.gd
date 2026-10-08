@@ -83,6 +83,16 @@ const SPEAR_SWEEP_WOUND := Vector3(-0.45, -1.3, 0.0)
 const SPEAR_SWEEP_STRUCK := Vector3(-0.45, 1.3, 0.0)
 ## Vault: the tip planted on the ground in front.
 const SPEAR_PLANTED := Vector3(-0.9, 0.0, -0.2)
+## Phoenix placeholder look: wing color, the Rebirth's fire, and the body's
+## glow as it rises. Wings show during Wing abilities and Rebirth.
+const WING_COLOR := Color(1.0, 0.5, 0.12, 0.85)
+const REBIRTH_FIRE_COLOR := Color(1.0, 0.45, 0.08, 0.55)
+const REBIRTH_GLOW_COLOR := Color(1.0, 0.6, 0.2)
+## Meters the Rebirth's fire column reaches at its peak.
+const REBIRTH_FIRE_HEIGHT := 2.6
+## Wing angle (radians, up from horizontal) folded and fully spread.
+const WING_FOLDED := -0.9
+const WING_SPREAD := 0.5
 
 ## Shows attack hitboxes on all players. Toggled with F3.
 static var show_hitboxes := false
@@ -122,6 +132,8 @@ var respawn_at_tick := -1
 ## Damage over time (bleed) from this tick's sim steps, not yet applied to
 ## health. World applies it after processing inputs.
 var status_damage_pending := 0.0
+## Healing over time (Pyre Heart) from this tick's sim steps, not yet applied.
+var status_heal_pending := 0.0
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -150,6 +162,11 @@ var _status_text := ""
 var _hitbox_material: StandardMaterial3D
 var _box_mesh: BoxMesh
 var _radial_mesh: CylinderMesh
+## Placeholder phoenix visuals, built in code (client): two wing pivots and
+## the Rebirth's fire column.
+var _wing_pivots: Array[Node3D] = []
+var _rebirth_fire: MeshInstance3D
+var _rebirth_mesh: CylinderMesh
 
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
@@ -165,6 +182,7 @@ var _radial_mesh: CylinderMesh
 
 func _ready() -> void:
 	state.stamina = params.max_stamina
+	state.ember = params.ember_resting
 	health = params.max_health
 	if multiplayer.is_server():
 		_name_label.visible = false
@@ -179,6 +197,7 @@ func _ready() -> void:
 	_hitbox_debug.material_override = _hitbox_material
 	_box_mesh = _hitbox_debug.mesh as BoxMesh
 	_radial_mesh = CylinderMesh.new()
+	_build_phoenix_visuals()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -209,6 +228,7 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> voi
 		weapon_swapped.emit(self)
 	if server:
 		status_damage_pending += state.status_damage
+		status_heal_pending += state.status_heal
 	var window := state.attack_window(params)
 	if server and window >= 0:
 		var key := Vector2i(state.attack_serial, window)
@@ -276,12 +296,19 @@ func damage_multiplier(attack: AttackParams) -> float:
 	if attack is AbilityParams:
 		kind = "ability"
 		ability_id = (attack as AbilityParams).id
-	return build.damage_multiplier(state.weapon_id(), kind, ability_id, health / params.max_health)
+	# A Wing ability only gets the Wing tree's modifiers.
+	var weapon_id := "" if state.is_using_wing() else state.weapon_id()
+	return build.damage_multiplier(weapon_id, kind, ability_id, health / params.max_health)
 
 
 ## Server: the mastery modifier on the stamina this player's blocked hits cost.
 func block_stamina_multiplier() -> float:
 	return build.block_stamina_multiplier(state.weapon_id()) if build else 1.0
+
+
+## Server: the Wing tree's modifier on damage this player takes.
+func damage_taken_multiplier() -> float:
+	return build.damage_taken_multiplier() if build else 1.0
 
 
 # --- Local client ---
@@ -508,8 +535,10 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_model.rotation.y = yaw + spin
 	_model.position.y = lift
 	if view.dead:
-		_roll_pivot.rotation.x = -PI / 2.0  # face down on the ground
-		_roll_pivot.position.y = BODY_RADIUS
+		# Face down on the ground; a Rebirth stands the body back up at the end.
+		var rise := _rebirth_rise(view)
+		_roll_pivot.rotation.x = -PI / 2.0 * (1.0 - rise)
+		_roll_pivot.position.y = lerpf(BODY_RADIUS, BODY_HEIGHT / 2.0, rise)
 	else:
 		_roll_pivot.position.y = BODY_HEIGHT / 2.0
 		if dodge_progress >= 0.0:
@@ -545,9 +574,12 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
 
 	_show_hitbox(attack, attack_tick)
+	_show_phoenix(view, attack, attack_tick)
 
 	if view.dead:
-		_material.albedo_color = DEAD_COLOR
+		var progress := view.rebirth_progress(params)
+		_material.albedo_color = (DEAD_COLOR.lerp(REBIRTH_GLOW_COLOR, progress) if progress >= 0.0
+				else DEAD_COLOR)
 	elif Time.get_ticks_msec() < _hit_flash_until:
 		_material.albedo_color = HIT_COLOR
 	elif view.is_invulnerable(params):
@@ -683,5 +715,80 @@ static func _frenzy_pitches(attack: AttackParams, tick: float, chop: float) -> V
 		pitch = lerpf(AXE_STRUCK, AXE_WOUND,
 				(into - attack.active_ticks) / maxf(interval - attack.active_ticks, 1.0))
 	return Vector2(pitch, AXE_WOUND) if index % 2 == 0 else Vector2(AXE_WOUND, pitch)
+
+
+# --- Phoenix visuals (Wing abilities, Rebirth; placeholder, client) ---
+
+func _build_phoenix_visuals() -> void:
+	var wing_material := StandardMaterial3D.new()
+	wing_material.albedo_color = WING_COLOR
+	wing_material.emission_enabled = true
+	wing_material.emission = Color(WING_COLOR, 1.0)
+	wing_material.emission_energy_multiplier = 1.5
+	wing_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	for side in [-1.0, 1.0]:
+		var pivot := Node3D.new()
+		pivot.position = Vector3(0.15 * side, 0.45, 0.28)
+		pivot.visible = false
+		var mesh := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.95, 0.05, 0.45)
+		mesh.mesh = box
+		mesh.material_override = wing_material
+		mesh.position = Vector3(0.5 * side, 0.0, 0.1)
+		pivot.add_child(mesh)
+		_roll_pivot.add_child(pivot)
+		_wing_pivots.append(pivot)
+	var fire_material := StandardMaterial3D.new()
+	fire_material.albedo_color = REBIRTH_FIRE_COLOR
+	fire_material.emission_enabled = true
+	fire_material.emission = Color(REBIRTH_FIRE_COLOR, 1.0)
+	fire_material.emission_energy_multiplier = 2.0
+	fire_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fire_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fire_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_rebirth_mesh = CylinderMesh.new()
+	_rebirth_mesh.top_radius = 0.1
+	_rebirth_mesh.bottom_radius = 0.7
+	_rebirth_fire = MeshInstance3D.new()
+	_rebirth_fire.mesh = _rebirth_mesh
+	_rebirth_fire.material_override = fire_material
+	_rebirth_fire.visible = false
+	add_child(_rebirth_fire)
+
+
+## Wings spread during a Wing ability (out over the windup, folded back over the
+## recovery) and while rebirthing; a fire column rises under a rebirthing body.
+func _show_phoenix(view: PlayerState, attack: AttackParams, attack_tick: float) -> void:
+	if _wing_pivots.is_empty():
+		return
+	var rebirth := view.rebirth_progress(params)
+	var wing_angle := WING_FOLDED
+	var wings_out := false
+	if rebirth >= 0.0:
+		wings_out = true
+		wing_angle = lerpf(WING_FOLDED, WING_SPREAD, rebirth)
+	elif attack != null and view.attack_type == PlayerState.ATTACK_WING:
+		wings_out = true
+		wing_angle = _phase_pose(attack, attack_tick, Vector2(WING_FOLDED, 0.0),
+				Vector2(WING_SPREAD, 0.0), Vector2(WING_SPREAD, 0.0)).x
+	for i in _wing_pivots.size():
+		var side := -1.0 if i == 0 else 1.0
+		_wing_pivots[i].visible = wings_out
+		_wing_pivots[i].rotation = Vector3(0.0, -0.3 * side, wing_angle * side)
+	_rebirth_fire.visible = rebirth >= 0.0
+	if _rebirth_fire.visible:
+		# Grows up to its full height by halfway, flickering a little.
+		var height := REBIRTH_FIRE_HEIGHT * minf(1.0, rebirth * 2.0 + 0.1)
+		height *= 1.0 + 0.08 * sin(Time.get_ticks_msec() / 70.0)
+		_rebirth_mesh.height = height
+		_rebirth_fire.position = Vector3(0.0, height / 2.0, 0.0)
+
+
+## 0 while lying dead; during the last 30% of a Rebirth, 0..1 as the body
+## stands back up.
+func _rebirth_rise(view: PlayerState) -> float:
+	var progress := view.rebirth_progress(params)
+	return clampf((progress - 0.7) / 0.3, 0.0, 1.0) if progress >= 0.0 else 0.0
 
 

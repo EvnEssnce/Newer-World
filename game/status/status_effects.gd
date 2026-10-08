@@ -45,6 +45,10 @@ const PACKED_FIELDS := 4
 var entries: Array[Entry] = []
 ## Set by tick(): the source of the last status that dealt damage this tick.
 var last_damage_source := 0
+## Set by tick(): healing over time (Pyre Heart) due this tick, and the source
+## of the last status that healed.
+var heal_due := 0.0
+var last_heal_source := 0
 
 
 ## Adds `stacks` of a status (capped at max_stacks) and resets its time to
@@ -70,15 +74,22 @@ func apply(defs: StatusDefs, index: int, stacks: int = 1, duration_ticks: int = 
 
 ## Advances one tick. Returns the damage over time due this tick (before the
 ## owner's damage_taken multiplier); last_damage_source says who caused it.
+## Healing over time due this tick goes in heal_due (last_heal_source).
 func tick(defs: StatusDefs) -> float:
 	var damage := 0.0
+	heal_due = 0.0
 	for e in entries:
 		e.elapsed += 1
 		e.ticks_left -= 1
 		var def := defs.get_def(e.status)
-		if def and def.deals_damage_over_time() and e.elapsed % def.tick_interval_ticks == 0:
+		if def == null or def.tick_interval_ticks <= 0 or e.elapsed % def.tick_interval_ticks != 0:
+			continue
+		if def.deals_damage_over_time():
 			damage += def.damage_per_interval * e.stacks
 			last_damage_source = e.source
+		if def.heals_over_time():
+			heal_due += def.heal_per_interval * e.stacks
+			last_heal_source = e.source
 	_remove_where(func(e: Entry) -> bool: return e.ticks_left <= 0)
 	return damage
 

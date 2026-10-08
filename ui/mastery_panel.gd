@@ -1,9 +1,10 @@
 class_name MasteryPanel
 extends Control
 ## Weapon mastery panel, toggled with K (client only, built in code). Shows one
-## weapon's tree at a time: two branch columns of tiers, each node a button
-## (click to allocate, click again to refund it and whatever needed it). Active
-## nodes that are allocated get Q / E / R buttons to slot their ability.
+## weapon's tree at a time (or the class's Wing tree on the "Wings" tab): two
+## branch columns of tiers, each node a button (click to allocate, click again
+## to refund it and whatever needed it). Active nodes that are allocated get
+## Q / E / R buttons (Z / C on the Wings tab) to slot their ability.
 ##
 ## Every change sends the weapon's whole allocation and slots to the server
 ## (BuildService.request_mastery), which validates it; the panel redraws from
@@ -14,9 +15,11 @@ const ALLOCATED_COLOR := Color(0.55, 1.0, 0.6)
 const ERROR_COLOR := Color(1.0, 0.5, 0.45)
 const HINT_COLOR := Color(0.75, 0.75, 0.8)
 const TIER_NAMES := ["Tier 1", "Tier 2", "Tier 3", "Capstone"]
+## _weapon_id of the Wings tab (the class's Wing tree, slots Z / C).
+const WINGS := "@wings"
 
 var _builds: BuildService
-## The weapon whose tree is shown.
+## The weapon whose tree is shown, or WINGS.
 var _weapon_id := ""
 var _content: VBoxContainer
 
@@ -90,14 +93,14 @@ func _refresh() -> void:
 	if build == null:
 		_content.add_child(_label("Waiting for the server...", HINT_COLOR))
 		return
-	if not build.trees.has(_weapon_id):
+	if not build.trees.has(_weapon_id) and not (_weapon_id == WINGS and build.wing_tree):
 		_weapon_id = build.weapons[0] if not build.weapons.is_empty() else ""
-	var tree: MasteryTree = build.trees.get(_weapon_id)
+	var tree := _current_tree()
 	if tree == null:
 		_content.add_child(_label("No mastery tree.", HINT_COLOR))
 		return
-	var nodes := build.get_allocated(_weapon_id)
-	var slots := build.get_slots(_weapon_id)
+	var nodes := _current_nodes()
+	var slots := _current_slots()
 
 	_content.add_child(_header(build, tree, nodes))
 	_content.add_child(_weapon_row(build))
@@ -109,9 +112,10 @@ func _refresh() -> void:
 	_content.add_child(columns)
 	if not _builds.last_message.is_empty():
 		_content.add_child(_label(_builds.last_message, ERROR_COLOR, true))
-	_content.add_child(_label(
-			"Click a node to learn it, click it again to unlearn it. Pick each slot's ability above, or with the Q / E / R buttons under a learned ability. Respecs are free. K or Esc closes.",
-			HINT_COLOR, true))
+	var hint := "Click a node to learn it, click it again to unlearn it. Pick each slot's ability above, or with the %s buttons under a learned ability. Respecs are free. K or Esc closes." % " / ".join(_slot_keys())
+	if _weapon_id == WINGS:
+		hint = "Wing abilities cost Ember and stay on Z / C whichever weapon is out. Dying with 50 Ember or more brings you back (Rebirth). " + hint
+	_content.add_child(_label(hint, HINT_COLOR, true))
 
 
 func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray) -> Control:
@@ -130,13 +134,23 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 		tab.button_pressed = weapon_id == _weapon_id
 		tab.pressed.connect(_select_weapon.bind(weapon_id))
 		row.add_child(tab)
+	if build.wing_tree:
+		var wings_tab := Button.new()
+		wings_tab.text = "Wings"
+		wings_tab.tooltip_text = "Wing abilities (Z / C): the same whichever weapon is out."
+		wings_tab.toggle_mode = true
+		wings_tab.button_pressed = _weapon_id == WINGS
+		wings_tab.pressed.connect(_select_weapon.bind(WINGS))
+		row.add_child(wings_tab)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
 	row.add_child(_label("Points: %d / %d" % [tree.spent(nodes), tree.points], Color.WHITE))
 	var reset := Button.new()
 	reset.text = "Unlearn all"
-	reset.pressed.connect(_send.bind(PackedStringArray(), PackedStringArray(["", "", ""])))
+	var empty_slots := PackedStringArray()
+	empty_slots.resize(tree.slot_count)
+	reset.pressed.connect(_send.bind(PackedStringArray(), empty_slots))
 	row.add_child(reset)
 	var defaults := Button.new()
 	defaults.text = "Default"
@@ -176,11 +190,12 @@ func _slot_row(tree: MasteryTree, nodes: PackedStringArray, slots: PackedStringA
 	# Each slot picks from the learned abilities (or empty), so an emptied slot can
 	# always be filled again.
 	var unlocked := tree.unlocked_abilities(nodes)
+	var keys := _slot_keys()
 	for slot in slots.size():
-		row.add_child(_label("%s:" % Hud.SLOT_KEYS[slot], Color.WHITE))
+		row.add_child(_label("%s:" % keys[slot], Color.WHITE))
 		var picker := OptionButton.new()
 		picker.custom_minimum_size = Vector2(150, 0)
-		picker.tooltip_text = "Choose the ability on %s." % Hud.SLOT_KEYS[slot]
+		picker.tooltip_text = "Choose the ability on %s." % keys[slot]
 		picker.add_item("(empty)")
 		picker.set_item_metadata(0, "")
 		for ability in unlocked:
@@ -237,16 +252,23 @@ func _node_card(tree: MasteryTree, n: MasteryTree.MasteryNode, nodes: PackedStri
 	card.add_child(button)
 	if learned and n.kind == MasteryTree.KIND_ACTIVE:
 		var slot_row := HBoxContainer.new()
-		for slot in PlayerState.ABILITY_SLOTS:
+		var keys := _slot_keys()
+		for slot in tree.slot_count:
 			var slot_button := Button.new()
-			slot_button.text = Hud.SLOT_KEYS[slot]
+			slot_button.text = keys[slot]
 			slot_button.toggle_mode = true
 			slot_button.button_pressed = slots[slot] == n.ability
-			slot_button.tooltip_text = "Put %s in slot %s" % [n.display_name, Hud.SLOT_KEYS[slot]]
+			slot_button.tooltip_text = "Put %s in slot %s" % [n.display_name, keys[slot]]
 			slot_button.pressed.connect(_send_slot.bind(n.ability, slot))
 			slot_row.add_child(slot_button)
 		card.add_child(slot_row)
 	return card
+
+
+## Shows the Wings tab (once the build arrives).
+func show_wings() -> void:
+	_weapon_id = WINGS
+	_refresh()
 
 
 func _select_weapon(weapon_id: String) -> void:
@@ -257,11 +279,10 @@ func _select_weapon(weapon_id: String) -> void:
 
 ## Learns a node. A newly unlocked ability goes into the first empty slot.
 func _send_learn(id: String) -> void:
-	var build := _builds.local_build
-	var nodes := build.get_allocated(_weapon_id).duplicate()
+	var nodes := _current_nodes().duplicate()
 	nodes.append(id)
-	var slots := build.get_slots(_weapon_id).duplicate()
-	var n: MasteryTree.MasteryNode = build.trees[_weapon_id].get_node(id)
+	var slots := _current_slots().duplicate()
+	var n := _current_tree().get_node(id)
 	if n.kind == MasteryTree.KIND_ACTIVE and not (n.ability in slots):
 		var empty := slots.find("")
 		if empty >= 0:
@@ -271,37 +292,63 @@ func _send_learn(id: String) -> void:
 
 ## Unlearns a node and whatever needed it; empties slots that lose their ability.
 func _send_unlearn(id: String) -> void:
-	var build := _builds.local_build
-	var tree: MasteryTree = build.trees[_weapon_id]
-	_send(tree.remove(build.get_allocated(_weapon_id), id), build.get_slots(_weapon_id))
+	_send(_current_tree().remove(_current_nodes(), id), _current_slots())
 
 
 ## Slots an ability (taking it out of any other slot it was in), or empties the
 ## slot when ability is "".
 func _send_slot(ability: String, slot: int) -> void:
-	var build := _builds.local_build
-	var slots := build.get_slots(_weapon_id).duplicate()
+	var slots := _current_slots().duplicate()
 	for i in slots.size():
 		if not ability.is_empty() and slots[i] == ability:
 			slots[i] = ""
 	slots[slot] = ability
-	_send(build.get_allocated(_weapon_id), slots)
+	_send(_current_nodes(), slots)
 
 
+## Sends the shown tree's whole allocation and slots (weapon or Wings).
 func _send(nodes: PackedStringArray, slots: PackedStringArray) -> void:
-	var tree: MasteryTree = _builds.local_build.trees[_weapon_id]
-	var unlocked := tree.unlocked_abilities(nodes)
+	var unlocked := _current_tree().unlocked_abilities(nodes)
 	var kept := slots.duplicate()
 	for i in kept.size():
 		if not (kept[i] in unlocked):
 			kept[i] = ""
-	_builds.request_mastery(_weapon_id, nodes, kept)
+	if _weapon_id == WINGS:
+		_builds.request_wings(nodes, kept)
+	else:
+		_builds.request_mastery(_weapon_id, nodes, kept)
 
 
 func _ability_name(ability_id: String) -> String:
-	var weapon := PlayerParams.current().weapon(_weapon_id)
+	var params := PlayerParams.current()
+	if _weapon_id == WINGS:
+		var pool := params.wing_set(_builds.local_build.wing_set_id())
+		var wing := pool.ability(pool.ability_index(ability_id))
+		return wing.display_name if wing else ability_id
+	var weapon := params.weapon(_weapon_id)
 	var index := weapon.ability_index(ability_id)
 	return weapon.abilities[index].display_name if index >= 0 else ability_id
+
+
+# --- The shown tree (a weapon's, or the Wings tab's) ---
+
+func _current_tree() -> MasteryTree:
+	var build := _builds.local_build
+	return build.wing_tree if _weapon_id == WINGS else build.trees.get(_weapon_id)
+
+
+func _current_nodes() -> PackedStringArray:
+	var build := _builds.local_build
+	return build.wing_nodes if _weapon_id == WINGS else build.get_allocated(_weapon_id)
+
+
+func _current_slots() -> PackedStringArray:
+	var build := _builds.local_build
+	return build.wing_slots if _weapon_id == WINGS else build.get_slots(_weapon_id)
+
+
+func _slot_keys() -> Array:
+	return Hud.WING_KEYS if _weapon_id == WINGS else Hud.SLOT_KEYS
 
 
 ## wrap: only for labels that get a full row (in a VBox); in an HBox a wrapping
