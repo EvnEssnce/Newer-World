@@ -46,6 +46,7 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # in every run (Husk swings bleed the bots; Broadsword heavies push Husks).
     '--tune=enemy_husk/attack/applies_status=bleed',
     '--tune=weapon_broadsword/heavy/force_distance=0.4',
+    '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0')

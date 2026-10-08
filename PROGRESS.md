@@ -11,6 +11,43 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (18): Ember, Wings and Rebirth (class build Wave 2D)
+
+Built by an agent, merged into main with no conflicts.
+
+Done:
+- **Ember** (`data/ember.cfg`):
+  - A 0–100 meter (cap read in one place, for upgrades later), synced sim state.
+  - Fills from damage dealt (0.08/pt), taken (0.05/pt) and healing done (0.05/pt).
+  - After 6 s out of combat it settles to 50 at 4/s. Wing abilities spend it
+    (predicted).
+- **Wing slots on Z / C**, unchanged by weapon swaps. Wing tree (Bulwark / Fury, 12
+  points) in the K panel's new Wings tab.
+- **Fighter Wing abilities:**
+  - Ember Mantle (25 Ember, −40% damage taken for 4 s).
+  - Wingbeat Surge (25, +20% damage for 6 s).
+  - Pyre Heart (30, heals 200 over 5 s; green numbers).
+  - Diving Strike (20, 5 m leap, 2.5 m slam).
+  - Both capstones work: Mantle of Renewal heals half the damage Ember Mantle prevents;
+    Crushing Wingbeat makes Surge hits stagger.
+- **Rebirth** (automatic): die with ≥ 50 Ember and Rebirth ready → 5 s in place
+  (fire column, banner), back at 30% health, spends 50 Ember, then a 5 min cooldown
+  (shown on the HUD). Hooks are ready for the Paladin (extra charges, cooldown cuts).
+- **Healing exists now:** `World._heal_player` (also feeds Ember).
+- **Merge fix:** the smoke run gives Diving Strike a 0.5 m knockback (off in the real
+  data), so a Husk gets moved in nearly every run.
+- **Snapshots** are close to ENet's 1392-byte packet size: about 524 bytes per player.
+  A third player already goes over it, so interest management / delta compression is
+  needed before bigger tests.
+- Tests: 325. Smoke after merge: default 4 of 5 passed (fail: "no status applied to a
+  Husk", bot luck), `-Party` 2 of 2. Corrections 0.
+
+Needs a hand playtest (`run_local_test.ps1`):
+- **Z and C:** the four Wing abilities (feel, numbers, Diving Strike distance).
+- **The Ember bar:** fills in fights, settles back to 50; are the gain rates right?
+- **Rebirth:** die above 50 Ember → Rebirth in place; die below → normal respawn.
+- **K panel → Wings tab:** learning nodes, Z/C slots, capstones.
+
 ### 2026-10-08 (17): More playtest fixes
 
 Developer playtest: Shield Charge still hit only one Husk (the second usually stood a
