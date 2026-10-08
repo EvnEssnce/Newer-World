@@ -30,6 +30,8 @@ const SPAWN_RADIUS := 3.0
 const BOT_ATTACK_DISTANCE := 1.6
 ## The bot fights enemies within this many meters rather than other players.
 const BOT_ENEMY_RANGE := 15.0
+## Ability phase: the first press waits (briefly) until the target is this close.
+const BOT_ABILITY_REACH := 2.5
 
 # Server
 var _tick := 0
@@ -55,6 +57,14 @@ var _ability_uses := 0
 var _ability_hits := 0
 var _parries := 0
 var _swaps := 0
+## Forced movement started (see _force_player / _force_enemy): on players (by
+## anyone), on players by another player, on enemies, and launches among them.
+var _forced_players := 0
+var _forced_pvp := 0
+var _forced_enemies := 0
+var _launches := 0
+## Weapon id -> abilities started with it.
+var _ability_uses_by_weapon: Dictionary[String, int] = {}
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -79,6 +89,8 @@ var _respawn_at_msec := -1
 var _bot := false
 var _bot_last_phase := 0.0
 var _bot_swaps_before := 0
+var _bot_first_ability_pressed := false
+var _bot_next_weapon_msec := 0
 var _verbose := false
 var _log_timer := 0.0
 var _last_screenshot_slot := -1
@@ -263,12 +275,15 @@ func _on_attack_stepped(attacker: Player) -> void:
 			continue
 		attacker.attack_results[enemy.enemy_id] = true
 		var damage := attack.damage * damage_scale
+		var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
 		var killed := enemy.take_hit(damage, attack.stagger_ticks, attacker.peer_id)
 		_enemy_damaged += 1
 		connected += 1
 		if killed:
 			enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
 			_enemy_kills += 1
+		else:
+			_force_enemy(attacker.global_position, attacker.state.yaw, attack, enemy, was_staggered)
 		_send_hit(attacker.peer_id, enemy.enemy_id, damage,
 				HIT_DEFEATED if killed else HIT_DAMAGED)
 	if connected > 0:
@@ -277,6 +292,8 @@ func _on_attack_stepped(attacker: Player) -> void:
 
 func _on_ability_started(player: Player) -> void:
 	_ability_uses += 1
+	var weapon_id := player.state.weapon_id()
+	_ability_uses_by_weapon[weapon_id] = _ability_uses_by_weapon.get(weapon_id, 0) + 1
 	if _verbose:
 		print("[server] peer %d uses %s" % [player.peer_id,
 				player.state.current_ability(player.params).id])
@@ -339,6 +356,7 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	results[target.peer_id] = true
 	if _try_parry(attacker_id, attacker_pos, target):
 		return HIT_PARRIED
+	var was_staggered := target.state.is_staggered()
 	var damage := attack.damage * damage_scale
 	var result := HIT_DAMAGED
 	if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
@@ -359,6 +377,8 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		_deaths += 1
 	elif result == HIT_DAMAGED:
 		target.state.apply_stagger(attack.stagger_ticks)
+	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
+		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
 	_send_hit(attacker_id, target.peer_id, damage, result)
 	return result
@@ -383,6 +403,71 @@ func _try_parry(attacker_id: int, attacker_pos: Vector3, target: Player) -> bool
 	_parries += 1
 	_send_hit(attacker_id, target.peer_id, 0.0, HIT_PARRIED)
 	return true
+
+
+# --- Forced movement (the FORCE tag) ---
+
+## Server: a hit from `attack` landed on a player (damaged or guard broken, not
+## evaded, blocked, parried or fatal): starts its knockback / pull / launch, if
+## it has one. Allies never move each other (checked here too, though
+## _strike_player already skips them). An attack with force_needs_stagger only
+## moves a target that was staggered before this hit. PlayerState.start_force
+## refuses targets in i-frames, dead or immune. A server event, so the target's
+## client reconciles without counting a correction.
+func _force_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
+		attack: AttackParams, target: Player, was_staggered: bool) -> void:
+	var force := attack.force
+	if force == null or (force.needs_stagger and not was_staggered):
+		return
+	if are_allies(attacker_id, target.peer_id):
+		return
+	var p := target.params
+	var tps := float(Engine.physics_ticks_per_second)
+	var moved := target.state.start_force(p,
+			force.displacement(attacker_pos, attacker_yaw, target.global_position,
+					p.force_max_distance, p.force_pull_gap),
+			force.ticks(p.gravity, p.force_max_height, tps),
+			force.launch_speed(p.gravity, p.force_max_height), 1.0 / tps)
+	if not moved:
+		return
+	_forced_players += 1
+	if attacker_id > 0:
+		_forced_pvp += 1
+	if force.height > 0.0:
+		_launches += 1
+	if _verbose:
+		print("[server] %d moves %d (force)" % [attacker_id, target.peer_id])
+
+
+## Server: like _force_player, for a player's hit on an enemy (which survived).
+func _force_enemy(attacker_pos: Vector3, attacker_yaw: float, attack: AttackParams, enemy: Enemy,
+		was_staggered: bool) -> void:
+	var force := attack.force
+	if force == null or (force.needs_stagger and not was_staggered):
+		return
+	var p := PlayerParams.current()
+	var tps := float(Engine.physics_ticks_per_second)
+	var moved := enemy.start_force(
+			force.displacement(attacker_pos, attacker_yaw, enemy.global_position,
+					p.force_max_distance, p.force_pull_gap),
+			force.ticks(p.gravity, p.force_max_height, tps),
+			force.launch_speed(p.gravity, p.force_max_height), 1.0 / tps)
+	if not moved:
+		return
+	_forced_enemies += 1
+	if force.height > 0.0:
+		_launches += 1
+	if _verbose:
+		print("[server] enemy %d moved (force)" % enemy.enemy_id)
+
+
+func _print_force_summary() -> void:
+	var uses := PackedStringArray()
+	for weapon_id: String in _ability_uses_by_weapon:
+		uses.append("%s=%d" % [weapon_id, _ability_uses_by_weapon[weapon_id]])
+	print("SUMMARY force players=%d pvp=%d enemies=%d launches=%d" % [
+			_forced_players, _forced_pvp, _forced_enemies, _launches])
+	print("SUMMARY ability_uses_by_weapon %s" % " ".join(uses))
 
 
 func _spawn_enemies() -> void:
@@ -492,22 +577,33 @@ func _ability_and_swap_buttons() -> int:
 ## first, the other in the second. On its turn a bot holds for a heavy, then taps
 ## two lights; off its turn it holds block.
 ## 4–6 s: abilities, same target. Both bots hold block and each presses two
-## different ability slots, 1 s apart: the first bot at 4.0 and 5.0, the other
-## at 4.5 and 5.5.
+## different ability slots, about 1 s apart: the first bot at 4.0 and 5.0, the
+## other at 4.5 and 5.5 (each first press waits up to 0.3 s for the target to
+## be within BOT_ABILITY_REACH; a knockback ability goes first, see
+## _bot_ability_button).
 ## 6–8 s: walk in circles; swap weapons at 6.95 (after any ability; again at
 ## 7.2 if that press didn't swap), jump at
 ## 7.25, air dodge at 7.4, ground dodge at 7.95, and a free respec at 7.6
-## (BuildService.bot_respec).
+## of the next cycle's focus weapon (BuildService.bot_respec; odd cycles also
+## learn and slot new abilities, e.g. Rising Cut) and that cycle's weapons.
+## Weapons: the default loadout in the first cycle, then a focus weapon is out
+## for the fight and abilities, two cycles at a time, starting with the Spear
+## (BuildService.bot_weapons_for_cycle); X swaps to the other one for the
+## circling, and the 7.6 request puts the next focus out.
 ## Fighting comes first because players spawn close together.
 ## Returns [move, buttons, aim_yaw].
 func _bot_input() -> Array:
 	var t := Time.get_ticks_msec() / 1000.0
 	var phase := fmod(t, 8.0)
 	var cycle := floori(t / 8.0)
+	if phase < 3.5:
+		_bot_sync_weapons(cycle)
 	var crossed := func(at: float) -> bool: return _bot_last_phase < at and phase >= at
 	var move := Vector2.ZERO
 	var buttons := 0
 	var aim_yaw := 0.0
+	if phase < 4.0:
+		_bot_first_ability_pressed = false
 	if phase >= 6.0:
 		var circle_t := t + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(circle_t * 0.8), sin(circle_t * 0.8))
@@ -521,7 +617,10 @@ func _bot_input() -> Array:
 		if crossed.call(7.4) or crossed.call(7.95):
 			buttons |= PlayerState.BUTTON_DODGE
 		if crossed.call(7.6):
-			_builds.bot_respec(_local_player.state.weapon_id(), cycle)
+			var next := _builds.bot_weapons_for_cycle(cycle + 1)
+			if not next.is_empty():
+				_builds.bot_respec(next[0], cycle)
+				_builds.bot_request_weapons(next, _local_player.state.equipped)
 	else:
 		var other_player := _nearest_remote_player()
 		var target: Node3D = _nearest_enemy(BOT_ENEMY_RANGE)
@@ -538,10 +637,13 @@ func _bot_input() -> Array:
 			var turn_time := phase - turn_start
 			if phase >= 4.0:
 				# Abilities: guard up between them (an ability drops it, holding block
-				# brings it back), alternating with the other bot every 0.5 s.
+				# brings it back), alternating with the other bot every 0.5 s. The
+				# first waits up to 0.3 s for the target to be within reach.
 				buttons |= PlayerState.BUTTON_BLOCK
 				var offset := 0.0 if first_turn else 0.5
-				if crossed.call(4.0 + offset):
+				if (not _bot_first_ability_pressed and phase >= 4.0 + offset
+						and (flat.length() <= BOT_ABILITY_REACH or phase >= 4.3 + offset)):
+					_bot_first_ability_pressed = true
 					buttons |= _bot_ability_button(cycle * 2)
 				elif crossed.call(5.0 + offset):
 					buttons |= _bot_ability_button(cycle * 2 + 1)
@@ -558,16 +660,45 @@ func _bot_input() -> Array:
 
 
 ## One of the equipped weapon's filled ability slots, rotating with `turn`
-## (offset by peer id so two bots differ).
+## (offset by peer id so two bots differ). The farthest-knockback ability (one
+## whose force doesn't need a staggered target, e.g. Low Sweep) is always the first
+## press of a cycle (even turns); the second uses it again only if it's off
+## cooldown (the smoke test shortens Low Sweep's), else skips it, so forced
+## movement gets exercised every time that weapon is out.
 func _bot_ability_button(turn: int) -> int:
 	var filled: Array[int] = []
+	var force_slot := -1
+	var farthest := 0.0
+	var weapon := _local_player.state.weapon(_local_player.params)
 	for slot in PlayerState.ABILITY_SLOTS:
-		if _local_player.state.slot_ability(slot) >= 0:
-			filled.append(slot)
+		var index := _local_player.state.slot_ability(slot)
+		if index < 0:
+			continue
+		filled.append(slot)
+		var force := weapon.ability(index).force
+		if force != null and not force.needs_stagger and force.distance > farthest:
+			farthest = force.distance
+			force_slot = slot
+	if force_slot >= 0:
+		if turn % 2 == 0 or _local_player.state.cooldown_left(
+				_local_player.state.slot_ability(force_slot)) == 0:
+			return PlayerState.BUTTON_ABILITY_1 << force_slot
+		filled.erase(force_slot)
 	if filled.is_empty():
 		return 0
 	var slot := filled[(turn + multiplayer.get_unique_id()) % filled.size()]
 	return PlayerState.BUTTON_ABILITY_1 << slot
+
+
+## Bot: makes sure this cycle's weapons are equipped with the focus weapon out
+## (right after joining, or if the 7.6 s request was refused). At most one
+## request every 0.5 s, and never mid-attack or mid-swap.
+func _bot_sync_weapons(cycle: int) -> void:
+	var now := Time.get_ticks_msec()
+	if now < _bot_next_weapon_msec or not _local_player.state.can_change_loadout():
+		return
+	if _builds.bot_request_weapons(_builds.bot_weapons_for_cycle(cycle), _local_player.state.equipped):
+		_bot_next_weapon_msec = now + 500
 
 
 func _nearest_enemy(max_distance: float) -> Enemy:
@@ -762,6 +893,7 @@ func print_summary() -> void:
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored])
 		print("SUMMARY abilities uses=%d ability_hits=%d parries=%d swaps=%d builds=%d builds_refused=%d" % [
 				_ability_uses, _ability_hits, _parries, _swaps, _builds.accepted, _builds.rejected])
+		_print_force_summary()
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [

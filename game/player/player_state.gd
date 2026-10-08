@@ -11,10 +11,10 @@ extends RefCounted
 ## reconciles, so everything that affects the simulation must live here.
 ##
 ## Blocked hits, stagger, death, respawn, parries (start_counter), an ability
-## stopping on hit (end_active_window) and loadout changes (set_loadout) are
-## applied by the server outside step() (the client can't predict them). Each
-## one bumps server_events, so the client knows the resulting correction was
-## expected.
+## stopping on hit (end_active_window), loadout changes (set_loadout) and forced
+## movement (start_force) are applied by the server outside step() (the client
+## can't predict them). Each one bumps server_events, so the client knows the
+## resulting correction was expected.
 
 ## Jump, attack and block are set on every tick they're held; dodge, swap and
 ## the ability buttons only on the tick they're pressed. Tap attack = light (on
@@ -109,8 +109,13 @@ var swap_buffer := 0
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
 var ability := -1
-## World-space XZ direction of the ability's dash (its facing when it started).
+## World-space XZ direction of the ability's dash (its facing when it started,
+## or the opposite for a backward dash like Vault).
 var ability_dir := Vector2.ZERO
+
+# Forced movement (knockback, pull, launch). Started by the server
+# (start_force); PlayerMovement moves the body by it.
+var force := ForcedMotion.new()
 
 
 func _init() -> void:
@@ -172,9 +177,10 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 			yaw = rotate_toward(yaw, yaw_for_direction(move), params.turn_speed * delta)
 
 
-## False while staggered or dead: no moving, dodging, attacking or jumping.
+## False while staggered, being moved (forced movement) or dead: no moving,
+## dodging, attacking or jumping.
 func can_act() -> bool:
-	return not dead and stagger_ticks == 0
+	return not dead and stagger_ticks == 0 and not force.is_active()
 
 
 func is_staggered() -> bool:
@@ -223,6 +229,7 @@ func kill() -> void:
 	swap_tick = -1
 	swap_buffer = 0
 	stagger_ticks = 0
+	force.stop()
 	server_events += 1
 
 
@@ -260,6 +267,39 @@ func end_active_window(params: PlayerParams) -> void:
 		return
 	attack_tick = attack.recovery_start_tick()
 	server_events += 1
+
+
+# --- Forced movement (the FORCE tag) ---
+
+## Being pushed, pulled or launched: can't act until it ends.
+func is_forced() -> bool:
+	return force.is_active()
+
+
+## Can't be pushed, pulled or launched. The one place forced movement asks, so
+## future effects (the Juggernaut's Brace, Steadfast, Unbowed) only change this.
+## Nothing grants it yet.
+func is_force_immune() -> bool:
+	return false
+
+
+## Server: moves this player `displacement` meters (world XZ) over `ticks`
+## steps of `delta` seconds, launching it at launch_speed m/s (0 = no launch).
+## Like a stagger it interrupts the current attack, ability, dodge, swap and
+## guard, and the player can't act until it ends (presses made meanwhile stay
+## buffered). Refused (false) while dead, in i-frames, or immune.
+func start_force(params: PlayerParams, displacement: Vector2, ticks: int, launch_speed: float,
+		delta: float) -> bool:
+	if dead or ticks <= 0 or is_invulnerable(params) or is_force_immune():
+		return false
+	_end_attack()
+	queued_attack = ATTACK_NONE
+	dodge_tick = -1
+	swap_tick = -1
+	blocking = false
+	force.start(displacement, ticks, launch_speed, delta)
+	server_events += 1
+	return true
 
 
 ## Loadout changes (weapons, slotted abilities) can't happen mid-attack,
@@ -502,8 +542,10 @@ func _start_ability(index: int, aim_yaw: float, params: PlayerParams) -> void:
 	attack_tick = 0
 	attack_serial += 1
 	yaw = aim_yaw
-	ability_dir = forward(yaw)
-	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = weapon(params).ability(index).cooldown_ticks
+	var started := weapon(params).ability(index)
+	# A backward dash (Vault) moves away from where the ability faces.
+	ability_dir = -forward(yaw) if started.dash_backward else forward(yaw)
+	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
 
 
 func _attack_turn_speed(params: PlayerParams) -> float:
@@ -535,7 +577,8 @@ func to_array() -> Array:
 			air_dodges_used, attack_type, attack_tick, queued_attack, queued_attack_ticks,
 			stagger_ticks, dead, server_events, attack_hold, blocking, on_floor,
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
-			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial]
+			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
+			force.velocity, force.ticks, force.launch]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -567,6 +610,9 @@ static func from_array(data: Array) -> PlayerState:
 	s.ability_dir = data[24]
 	s.queued_ability_slot = data[25]
 	s.attack_serial = data[26]
+	s.force.velocity = data[27]
+	s.force.ticks = data[28]
+	s.force.launch = data[29]
 	return s
 
 
@@ -599,4 +645,5 @@ func matches(other: PlayerState) -> bool:
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot
-			and attack_serial == other.attack_serial)
+			and attack_serial == other.attack_serial
+			and force.matches(other.force))

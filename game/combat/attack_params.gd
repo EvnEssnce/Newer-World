@@ -36,6 +36,8 @@ var hitbox_width := 0.0
 var hitbox_height := 0.0
 ## Stops (skips to recovery) after hitting this many targets. 0 = no limit.
 var max_targets := 0
+## Knockback / pull / launch on hit (force_* keys), or null for none.
+var force: ForceParams = null
 
 
 ## First tick of recovery: after the last hit window.
@@ -82,6 +84,7 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_width = Tuning.get_value(file, section, "width")
 	hitbox_height = Tuning.get_value(file, section, "height")
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
+	force = ForceParams.from_tuning(file, section, tps)
 
 
 static func shape_from_name(shape_name: String) -> int:

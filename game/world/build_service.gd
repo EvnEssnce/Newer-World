@@ -118,22 +118,87 @@ func request_weapons(weapons: PackedStringArray) -> void:
 	_request_weapons.rpc_id(1, weapons)
 
 
-## Test bot: a free respec of the weapon it has out. Alternates between its
-## tree's default allocation and that minus the last passive node, so the
-## smoke test exercises the server's validation and the loadout server event.
+## Test bot: a free respec of a weapon. Even cycles: the tree's default
+## allocation and slots minus the last passive node whose removal keeps every
+## learned ability (a tier gate could otherwise take an ability with it); odd
+## cycles: the defaults plus every new active the rules allow. So the smoke
+## test exercises the server's validation and the loadout server event.
 func bot_respec(weapon_id: String, cycle: int) -> void:
 	if local_build == null or not local_build.trees.has(weapon_id):
 		return
 	var tree: MasteryTree = local_build.trees[weapon_id]
 	var nodes := tree.default_nodes.duplicate()
+	var slots := tree.default_slots.duplicate()
 	if cycle % 2 == 0:
+		var abilities := tree.unlocked_abilities(nodes)
 		for i in range(nodes.size() - 1, -1, -1):
-			if tree.get_node(nodes[i]).kind == MasteryTree.KIND_PASSIVE:
-				nodes = tree.remove(nodes, nodes[i])
+			if tree.get_node(nodes[i]).kind != MasteryTree.KIND_PASSIVE:
+				continue
+			var fewer := tree.remove(nodes, nodes[i])
+			if tree.unlocked_abilities(fewer) == abilities:
+				nodes = fewer
 				break
-	var slots := local_build.get_slots(weapon_id).duplicate()
+	else:
+		var learned := _bot_learn_new_actives(tree, nodes, slots)
+		nodes = learned[0]
+		slots = learned[1]
 	var unlocked := tree.unlocked_abilities(nodes)
 	for i in slots.size():
 		if not (slots[i] in unlocked):
 			slots[i] = ""
 	request_mastery(weapon_id, nodes, slots)
+
+
+## Test bot: `nodes` plus every active node the rules allow that isn't learned
+## yet, and `slots` with each new ability put in from Q onward, so the bot also
+## uses abilities that aren't in a tree's default build (Rising Cut). Returns
+## [nodes, slots].
+static func _bot_learn_new_actives(tree: MasteryTree, nodes: PackedStringArray,
+		slots: PackedStringArray) -> Array:
+	var next_slot := 0
+	for id in tree.node_order:
+		var n := tree.get_node(id)
+		if n.kind != MasteryTree.KIND_ACTIVE or id in nodes or not tree.can_add(nodes, id):
+			continue
+		nodes.append(id)
+		if next_slot < slots.size() and not (n.ability in slots):
+			slots[next_slot] = n.ability
+			next_slot += 1
+	return [nodes, slots]
+
+
+## Test bot: its [focus, other] weapons for a bot cycle. The first cycle uses
+## the class's default loadout (the fight the older smoke checks were tuned
+## on); after that the focus weapon (out for the fight and abilities) changes
+## every two cycles, going through the class's weapons starting with the first
+## one the default loadout lacks (the Fighter's Spear), so every weapon gets
+## its turn. Empty without a build.
+func bot_weapons_for_cycle(cycle: int) -> PackedStringArray:
+	if local_build == null:
+		return PackedStringArray()
+	if cycle <= 0:
+		return local_build.class_def.default_loadout.duplicate()
+	var all := local_build.class_def.weapons
+	var start := 0
+	for i in all.size():
+		if not (all[i] in local_build.class_def.default_loadout):
+			start = i
+			break
+	@warning_ignore("integer_division")
+	var focus := start + (cycle - 1) / 2
+	return PackedStringArray([all[focus % all.size()], all[(focus + 1) % all.size()]])
+
+
+## Test bot: asks for `weapons` ([focus, other]) with the focus weapon in weapon
+## slot `equipped` (the one that's out), unless that's already the loadout.
+## Returns true if a request was sent.
+func bot_request_weapons(weapons: PackedStringArray, equipped: int) -> bool:
+	if local_build == null or weapons.size() < PlayerState.WEAPON_SLOTS:
+		return false
+	var wanted := PackedStringArray(["", ""])
+	wanted[equipped] = weapons[0]
+	wanted[1 - equipped] = weapons[1]
+	if wanted == local_build.weapons:
+		return false
+	request_weapons(wanted)
+	return true

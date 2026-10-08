@@ -42,6 +42,8 @@ var brain := EnemyBrain.new()
 var respawn_at_tick := -1
 ## Players the current swing has already been resolved against (see Player).
 var attack_results: Dictionary[int, bool] = {}
+## A knockback, pull or launch in progress (start_force).
+var force := ForcedMotion.new()
 var _rng := RandomNumberGenerator.new()
 var _gravity := 0.0
 
@@ -89,6 +91,7 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	velocity.x = desired.x
 	velocity.z = desired.y
 	velocity.y = 0.0 if is_on_floor() else velocity.y - _gravity * delta
+	_apply_force_step()
 	move_and_slide()
 	if brain.arrived_home:
 		health = params.max_health
@@ -102,6 +105,7 @@ func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
 	if health <= 0.0:
 		dead = true
 		velocity = Vector3.ZERO
+		force.stop()
 		return true
 	brain.aggro(attacker_id)
 	brain.stagger(roundi(stagger_ticks * params.stagger_multiplier))
@@ -113,9 +117,43 @@ func respawn() -> void:
 	health = params.max_health
 	global_position = home
 	velocity = Vector3.ZERO
+	force.stop()
 	brain = EnemyBrain.new()
 	brain.wander_point = home
 	respawn_at_tick = -1
+
+
+# --- Forced movement (server) ---
+
+## Can't be pushed, pulled or launched. Nothing grants it yet (a hook for
+## heavy enemies and bosses, like PlayerState.is_force_immune).
+func is_force_immune() -> bool:
+	return false
+
+
+## Moves this enemy `displacement` meters (world XZ) over `ticks` steps of
+## `delta` seconds, launching it at launch_speed m/s (0 = none). Its brain is
+## staggered for as long, so steering and swings pause (a swing is interrupted).
+## Refused (false) while dead or immune.
+func start_force(displacement: Vector2, ticks: int, launch_speed: float, delta: float) -> bool:
+	if dead or ticks <= 0 or is_force_immune():
+		return false
+	force.start(displacement, ticks, launch_speed, delta)
+	brain.stagger(ticks)
+	return true
+
+
+## Overrides this step's horizontal velocity (and the vertical one on a
+## launch's first step) while being moved.
+func _apply_force_step() -> void:
+	if not force.is_active():
+		return
+	var push := force.step_velocity()
+	velocity.x = push.x
+	velocity.z = push.y
+	var launch := force.take_launch()
+	if launch > 0.0:
+		velocity.y = launch
 
 
 func get_snapshot() -> Array:

@@ -64,6 +64,22 @@ const WEAPON_LOWERED := -1.7
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)
 ## Whirlwind Edge: radians the body winds back before spinning one full turn.
 const SPIN_WINDBACK := 0.6
+## Rising Cut: sword low at the side, then swept up high.
+const RISING_WOUND := Vector2(-1.5, 0.4)
+const RISING_STRUCK := Vector2(1.7, 0.0)
+## Spear pivot pose: x = pitch (up), y = sweep (left), z = meters pulled back
+## (negative = thrust forward).
+const SPEAR_REST := Vector3(0.0, 0.0, 0.0)
+const SPEAR_IDLE := Vector3(0.25, 0.0, 0.0)
+const SPEAR_LIGHT_WOUND := Vector3(0.1, 0.0, 0.35)
+const SPEAR_LIGHT_STRUCK := Vector3(0.0, 0.0, -0.6)
+const SPEAR_HEAVY_WOUND := Vector3(0.2, 0.0, 0.6)
+const SPEAR_HEAVY_STRUCK := Vector3(-0.05, 0.0, -0.9)
+## Low Sweep: low, swept from the right across to the left.
+const SPEAR_SWEEP_WOUND := Vector3(-0.45, -1.3, 0.0)
+const SPEAR_SWEEP_STRUCK := Vector3(-0.45, 1.3, 0.0)
+## Vault: the tip planted on the ground in front.
+const SPEAR_PLANTED := Vector3(-0.9, 0.0, -0.2)
 
 ## Shows attack hitboxes on all players. Toggled with F3.
 static var show_hitboxes := false
@@ -130,6 +146,8 @@ var _radial_mesh: CylinderMesh
 @onready var _shield_pivot: Node3D = $Model/RollPivot/ShieldPivot
 @onready var _axe_right_pivot: Node3D = $Model/RollPivot/AxeRightPivot
 @onready var _axe_left_pivot: Node3D = $Model/RollPivot/AxeLeftPivot
+@onready var _spear_pivot: Node3D = $Model/RollPivot/SpearPivot
+@onready var _spear_rest_position: Vector3 = _spear_pivot.position
 @onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
 @onready var _name_label: Label3D = $NameLabel
 
@@ -460,16 +478,19 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_roll_pivot.position.y = BODY_HEIGHT / 2.0
 		if dodge_progress >= 0.0:
 			_roll_pivot.rotation.x = -TAU * dodge_progress  # a full forward somersault
-		elif view.is_staggered():
+		elif view.is_staggered() or view.is_forced():
 			_roll_pivot.rotation.x = STAGGER_TILT
 		else:
 			_roll_pivot.rotation.x = 0.0
 
-	var axes := view.weapon(params).model == "dual_axes"
-	_sword_pivot.visible = not axes
-	_shield_pivot.visible = not axes
+	var model := view.weapon(params).model
+	var axes := model == "dual_axes"
+	var spear := model == "spear"
+	_sword_pivot.visible = not axes and not spear
+	_shield_pivot.visible = not axes and not spear
 	_axe_right_pivot.visible = axes
 	_axe_left_pivot.visible = axes
+	_spear_pivot.visible = spear
 	var shield_up := view.blocking or ability_id in ["shield_charge", "riposte"]
 	_shield_pivot.position = SHIELD_RAISED if shield_up else SHIELD_REST
 	_shield_pivot.rotation.y = 0.0 if shield_up else SHIELD_REST_YAW
@@ -479,6 +500,10 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		var pitches := _axe_pitches(attack, view.attack_type, ability_id, attack_tick)
 		_axe_right_pivot.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
 		_axe_left_pivot.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
+	elif spear:
+		var spear_pose := _spear_pose(attack, view.attack_type, ability_id, attack_tick)
+		_spear_pivot.rotation = Vector3(lerpf(spear_pose.x, WEAPON_LOWERED, lowered), spear_pose.y, 0.0)
+		_spear_pivot.position = _spear_rest_position + Vector3(0.0, 0.0, spear_pose.z)
 	else:
 		var pose := _sword_pose(attack, view.attack_type, ability_id, attack_tick)
 		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
@@ -551,9 +576,39 @@ static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 			return SWORD_IDLE
 		"riposte":
 			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
+		"rising_cut":
+			return _phase_pose(attack, tick, SWORD_IDLE, RISING_WOUND, RISING_STRUCK)
 	if attack_type == PlayerState.ATTACK_HEAVY:
 		return _phase_pose(attack, tick, SWORD_IDLE, HEAVY_WOUND, HEAVY_STRUCK)
 	return _phase_pose(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
+
+
+## Spear pivot pose (see SPEAR_IDLE): thrusts for light, heavy and Lunge, a low
+## sweep for Low Sweep, planted for Vault.
+static func _spear_pose(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float) -> Vector3:
+	if attack == null:
+		return SPEAR_IDLE
+	match ability_id:
+		"low_sweep":
+			return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_SWEEP_WOUND, SPEAR_SWEEP_STRUCK)
+		"vault":
+			return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_PLANTED, SPEAR_PLANTED)
+	if attack_type == PlayerState.ATTACK_LIGHT:
+		return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_LIGHT_WOUND, SPEAR_LIGHT_STRUCK)
+	return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_HEAVY_WOUND, SPEAR_HEAVY_STRUCK)
+
+
+## _phase_pose for a Vector3 pose.
+static func _phase_pose3(attack: AttackParams, tick: float, rest: Vector3, wound: Vector3,
+		struck: Vector3) -> Vector3:
+	var windup := float(attack.windup_ticks)
+	var strike_end := float(attack.recovery_start_tick())
+	if tick < windup:
+		return rest.lerp(wound, tick / maxf(windup, 1.0))
+	if tick < strike_end:
+		return wound.lerp(struck, (tick - windup) / maxf(strike_end - windup, 1.0))
+	return struck.lerp(rest, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
 
 
 ## Axe pivot pitches (x = right axe, y = left axe). Light: the right axe chops;

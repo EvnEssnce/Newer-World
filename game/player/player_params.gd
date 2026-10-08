@@ -57,6 +57,12 @@ var block_regen_multiplier := 0.0
 var block_turn_speed := 0.0
 var guard_break_stagger_ticks := 0
 
+# Forced movement limits (any attack's force_*), meters. Also used for enemies.
+var force_max_distance := 0.0
+var force_max_height := 0.0
+## A pull stops this far from the puller (center to center).
+var force_pull_gap := 0.0
+
 static var _current: PlayerParams
 
 
@@ -110,7 +116,14 @@ static func from_tuning() -> PlayerParams:
 	p.block_turn_speed = deg_to_rad(Tuning.get_value("combat", "block", "turn_speed"))
 	p.guard_break_stagger_ticks = roundi(
 			Tuning.get_value("combat", "block", "guard_break_stagger") * tps)
+	_load_force_limits(p)
 	return p
+
+
+static func _load_force_limits(p: PlayerParams) -> void:
+	p.force_max_distance = Tuning.get_value("combat", "force", "max_distance")
+	p.force_max_height = Tuning.get_value("combat", "force", "max_height")
+	p.force_pull_gap = Tuning.get_value("combat", "force", "pull_gap")
 
 
 ## The weapon with this id, or default_weapon.
