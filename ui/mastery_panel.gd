@@ -109,7 +109,7 @@ func _refresh() -> void:
 	if not _builds.last_message.is_empty():
 		_content.add_child(_label(_builds.last_message, ERROR_COLOR, true))
 	_content.add_child(_label(
-			"Click a node to learn it, click it again to unlearn it. Respecs are free. K closes.",
+			"Click a node to learn it, click it again to unlearn it. Pick each slot's ability above, or with the Q / E / R buttons under a learned ability. Respecs are free. K or Esc closes.",
 			HINT_COLOR, true))
 
 
@@ -148,16 +148,26 @@ func _slot_row(tree: MasteryTree, nodes: PackedStringArray, slots: PackedStringA
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	row.add_child(_label("Ability slots:", Color.WHITE))
+	# Each slot picks from the learned abilities (or empty), so an emptied slot can
+	# always be filled again.
+	var unlocked := tree.unlocked_abilities(nodes)
 	for slot in slots.size():
-		var button := Button.new()
-		var ability := slots[slot]
-		button.text = "%s: %s" % [Hud.SLOT_KEYS[slot], _ability_name(ability) if ability else "(empty)"]
-		button.tooltip_text = "Click to empty this slot."
-		button.disabled = ability.is_empty()
-		var cleared := slots.duplicate()
-		cleared[slot] = ""
-		button.pressed.connect(_send.bind(nodes, cleared))
-		row.add_child(button)
+		row.add_child(_label("%s:" % Hud.SLOT_KEYS[slot], Color.WHITE))
+		var picker := OptionButton.new()
+		picker.custom_minimum_size = Vector2(150, 0)
+		picker.tooltip_text = "Choose the ability on %s." % Hud.SLOT_KEYS[slot]
+		picker.add_item("(empty)")
+		picker.set_item_metadata(0, "")
+		for ability in unlocked:
+			picker.add_item(_ability_name(ability))
+			picker.set_item_metadata(picker.item_count - 1, ability)
+			if ability == slots[slot]:
+				picker.select(picker.item_count - 1)
+		if slots[slot].is_empty():
+			picker.select(0)
+		picker.item_selected.connect(func(index: int) -> void:
+			_send_slot(picker.get_item_metadata(index), slot))
+		row.add_child(picker)
 	return row
 
 
@@ -220,11 +230,18 @@ func _select_weapon(weapon_id: String) -> void:
 	_refresh()
 
 
+## Learns a node. A newly unlocked ability goes into the first empty slot.
 func _send_learn(id: String) -> void:
 	var build := _builds.local_build
 	var nodes := build.get_allocated(_weapon_id).duplicate()
 	nodes.append(id)
-	_send(nodes, build.get_slots(_weapon_id))
+	var slots := build.get_slots(_weapon_id).duplicate()
+	var n: MasteryTree.MasteryNode = build.trees[_weapon_id].get_node(id)
+	if n.kind == MasteryTree.KIND_ACTIVE and not (n.ability in slots):
+		var empty := slots.find("")
+		if empty >= 0:
+			slots[empty] = n.ability
+	_send(nodes, slots)
 
 
 ## Unlearns a node and whatever needed it; empties slots that lose their ability.
@@ -234,12 +251,13 @@ func _send_unlearn(id: String) -> void:
 	_send(tree.remove(build.get_allocated(_weapon_id), id), build.get_slots(_weapon_id))
 
 
-## Slots an ability (taking it out of any other slot it was in).
+## Slots an ability (taking it out of any other slot it was in), or empties the
+## slot when ability is "".
 func _send_slot(ability: String, slot: int) -> void:
 	var build := _builds.local_build
 	var slots := build.get_slots(_weapon_id).duplicate()
 	for i in slots.size():
-		if slots[i] == ability:
+		if not ability.is_empty() and slots[i] == ability:
 			slots[i] = ""
 	slots[slot] = ability
 	_send(build.get_allocated(_weapon_id), slots)
