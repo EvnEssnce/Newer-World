@@ -20,6 +20,9 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 		World.HIT_GUARD_BROKEN:
 			label.text = "Guard broken!" if damage <= 0.0 else "Guard broken! -%d" % damage
 			label.modulate = Color(1.0, 0.55, 0.15)
+		World.HIT_PARRIED:
+			label.text = "Parried!"
+			label.modulate = Color(0.55, 0.85, 1.0)
 		World.HIT_DEFEATED:
 			label.text = "-%d  Defeated!" % damage
 			label.modulate = Color(1.0, 0.3, 0.2)

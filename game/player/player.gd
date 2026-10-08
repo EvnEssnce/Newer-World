@@ -16,6 +16,10 @@ extends CharacterBody3D
 
 ## Server only: emitted after each sim step in which an attack's hitbox is live.
 signal attack_stepped(player: Player)
+## Server only: emitted on the sim step an ability starts (not a parry counter).
+signal ability_started(player: Player)
+## Server only: emitted on the sim step a weapon swap starts.
+signal weapon_swapped(player: Player)
 
 const MAX_PENDING_INPUTS := 120
 const MAX_SNAPSHOTS := 30
@@ -45,6 +49,19 @@ const LIGHT_WOUND := Vector2(0.0, -1.4)
 const LIGHT_STRUCK := Vector2(0.0, 1.4)
 const HEAVY_WOUND := Vector2(1.7, 0.0)
 const HEAVY_STRUCK := Vector2(-1.3, 0.0)
+## Sword held out to the side for Whirlwind Edge, and across the body for Riposte.
+const SWORD_SPIN := Vector2(0.0, -PI / 2.0)
+const SWORD_PARRY := Vector2(0.3, 0.9)
+## Axe pivot pitch at rest, raised, and at the end of a chop.
+const AXE_IDLE := -0.9
+const AXE_WOUND := 1.6
+const AXE_STRUCK := -1.1
+## Weapon pitch at the start of a swap (lowered), raised back to idle over the swap.
+const WEAPON_LOWERED := -1.7
+## Body color during a parry window.
+const PARRY_COLOR := Color(0.55, 0.85, 1.0)
+## Whirlwind Edge: radians the body winds back before spinning one full turn.
+const SPIN_WINDBACK := 0.6
 
 ## Shows attack hitboxes on all players. Toggled with F3.
 static var show_hitboxes := false
@@ -60,13 +77,21 @@ var health := 0.0
 ## Counted once per real simulation step (not on replays); for the smoke test.
 var dodges := 0
 var air_dodges := 0
+## Light and heavy attacks started.
 var attacks := 0
+var abilities_used := 0
+var swaps := 0
 
 # Server
 var last_processed_seq := 0
-## Targets the current attack has already been resolved against:
+## The character's class, weapons and mastery (server only; see BuildService).
+var build: CharacterBuild
+## Targets the current hit window has already been resolved against:
 ## true = hit (can't be hit again), false = evaded so far (can still be hit).
+## Cleared when a new attack or a new hit window (e.g. each Frenzy chop) starts.
 var attack_results: Dictionary[int, bool] = {}
+## [attack_serial, window] that attack_results belongs to.
+var _results_key := Vector2i(-1, -1)
 ## Server tick at which a dead player respawns.
 var respawn_at_tick := -1
 var _input_queue: Array[Array] = []
@@ -74,6 +99,7 @@ var _last_queued_seq := 0
 
 # Local client
 var corrections := 0
+var _last_equipped := 0
 var _next_seq := 1
 var _pending_inputs: Array[Array] = []
 var _predictions: Dictionary[int, Array] = {}  # seq -> [position, PlayerState] after that input
@@ -93,11 +119,15 @@ var _material: StandardMaterial3D
 var _base_color := REMOTE_COLOR
 var _hit_flash_until := 0
 var _hitbox_material: StandardMaterial3D
+var _box_mesh: BoxMesh
+var _radial_mesh: CylinderMesh
 
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
 @onready var _sword_pivot: Node3D = $Model/RollPivot/SwordPivot
 @onready var _shield_pivot: Node3D = $Model/RollPivot/ShieldPivot
+@onready var _axe_right_pivot: Node3D = $Model/RollPivot/AxeRightPivot
+@onready var _axe_left_pivot: Node3D = $Model/RollPivot/AxeLeftPivot
 @onready var _hitbox_debug: MeshInstance3D = $Model/HitboxDebug
 @onready var _name_label: Label3D = $NameLabel
 
@@ -116,6 +146,8 @@ func _ready() -> void:
 	_hitbox_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_hitbox_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hitbox_debug.material_override = _hitbox_material
+	_box_mesh = _hitbox_debug.mesh as BoxMesh
+	_radial_mesh = CylinderMesh.new()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -133,10 +165,23 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> voi
 		dodges += 1
 		if not was_on_floor:
 			air_dodges += 1
+	var server := multiplayer.is_server()
 	if state.attack_tick == 0:
-		attacks += 1
-		attack_results.clear()
-	if multiplayer.is_server() and state.is_attack_active(params):
+		if state.is_using_ability():
+			abilities_used += 1
+			if server:
+				ability_started.emit(self)
+		else:
+			attacks += 1
+	if server and state.swap_tick == 0:
+		swaps += 1
+		weapon_swapped.emit(self)
+	var window := state.attack_window(params)
+	if server and window >= 0:
+		var key := Vector2i(state.attack_serial, window)
+		if key != _results_key:
+			_results_key = key
+			attack_results.clear()
 		attack_stepped.emit(self)
 
 
@@ -176,6 +221,24 @@ func get_snapshot() -> Array:
 	return [peer_id, global_position, velocity, last_processed_seq, state.to_array(), health]
 
 
+## Server: the damage modifier from this player's mastery passives and
+## upgrades for one of its attacks (or abilities).
+func damage_multiplier(attack: AttackParams) -> float:
+	if build == null or attack == null:
+		return 1.0
+	var kind := "heavy" if attack == state.weapon(params).heavy_attack else "light"
+	var ability_id := ""
+	if attack is AbilityParams:
+		kind = "ability"
+		ability_id = (attack as AbilityParams).id
+	return build.damage_multiplier(state.weapon_id(), kind, ability_id, health / params.max_health)
+
+
+## Server: the mastery modifier on the stamina this player's blocked hits cost.
+func block_stamina_multiplier() -> float:
+	return build.block_stamina_multiplier(state.weapon_id()) if build else 1.0
+
+
 # --- Local client ---
 
 ## Predicts one step from this tick's input and returns the inputs to send.
@@ -191,6 +254,11 @@ func client_predict(move_input: Vector2, buttons: int, aim_yaw: float, delta: fl
 	if _pending_inputs.size() > MAX_PENDING_INPUTS:
 		_predictions.erase(_pending_inputs.pop_front()[0])
 	_simulate(move, buttons, aim_yaw, delta)
+	# Counted here rather than in _simulate: a swap that only happens in a
+	# reconcile replay (the server let it through sooner) still counts.
+	if state.equipped != _last_equipped:
+		swaps += 1
+	_last_equipped = state.equipped
 	_predictions[input[0]] = [global_position, state.copy()]
 	return _pending_inputs.slice(-redundancy)
 
@@ -313,7 +381,7 @@ func interpolate(render_time: float) -> void:
 		yaw = lerp_angle(from_state.yaw, to_state.yaw, weight)
 		if from_state.is_dodging() and to_state.dodge_tick > from_state.dodge_tick:
 			dodge_progress = lerpf(dodge_progress, to_state.dodge_progress(params), weight)
-		if (from_state.is_attacking() and to_state.attack_type == from_state.attack_type
+		if (from_state.is_attacking() and to_state.attack_serial == from_state.attack_serial
 				and to_state.attack_tick > from_state.attack_tick):
 			attack_tick = lerpf(from_state.attack_tick, to_state.attack_tick, weight)
 	distance_seen += global_position.distance_to(new_pos)
@@ -345,12 +413,26 @@ func _update_label() -> void:
 	_name_label.text = "Player %d\n%s" % [peer_id % 10000, status]
 
 
-## Applies facing, roll, stagger/death pose, sword swing, hitbox and color.
-## Client only. view supplies the discrete state (attack type, dead, staggered,
-## i-frames); yaw, dodge_progress and attack_tick may be interpolated, and
-## attack_tick is -1 when not attacking.
+## Applies facing, roll, stagger/death pose, weapon model and swing, hitbox and
+## color. Client only, placeholder animation. view supplies the discrete state
+## (attack type, ability, weapon, dead, staggered, i-frames, parry); yaw,
+## dodge_progress and attack_tick may be interpolated, and attack_tick is -1
+## when not attacking.
 func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: float) -> void:
-	_model.rotation.y = yaw
+	var attack := view.attack_params(params) if attack_tick >= 0.0 else null
+	var ability := attack as AbilityParams
+	var ability_id := ability.id if ability else ""
+
+	var spin := 0.0
+	if ability_id == "whirlwind_edge":
+		spin = _spin_offset(ability, attack_tick)
+	var lift := 0.0
+	if ability and ability.leap_height > 0.0 and ability.dash_speed > 0.0:
+		var p := inverse_lerp(float(ability.dash_start_tick), float(ability.dash_end_tick), attack_tick)
+		if p >= 0.0 and p <= 1.0:
+			lift = 4.0 * ability.leap_height * p * (1.0 - p)
+	_model.rotation.y = yaw + spin
+	_model.position.y = lift
 	if view.dead:
 		_roll_pivot.rotation.x = -PI / 2.0  # face down on the ground
 		_roll_pivot.position.y = BODY_RADIUS
@@ -363,22 +445,25 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		else:
 			_roll_pivot.rotation.x = 0.0
 
-	_shield_pivot.position = SHIELD_RAISED if view.blocking else SHIELD_REST
-	_shield_pivot.rotation.y = 0.0 if view.blocking else SHIELD_REST_YAW
+	var axes := view.weapon(params).model == "dual_axes"
+	_sword_pivot.visible = not axes
+	_shield_pivot.visible = not axes
+	_axe_right_pivot.visible = axes
+	_axe_left_pivot.visible = axes
+	var shield_up := view.blocking or ability_id in ["shield_charge", "riposte"]
+	_shield_pivot.position = SHIELD_RAISED if shield_up else SHIELD_REST
+	_shield_pivot.rotation.y = 0.0 if shield_up else SHIELD_REST_YAW
+	# A swap starts with the (new) weapon lowered and raises it.
+	var lowered := 1.0 - view.swap_tick / float(params.swap_ticks) if view.is_swapping() else 0.0
+	if axes:
+		var pitches := _axe_pitches(attack, view.attack_type, ability_id, attack_tick)
+		_axe_right_pivot.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
+		_axe_left_pivot.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
+	else:
+		var pose := _sword_pose(attack, view.attack_type, ability_id, attack_tick)
+		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
 
-	var attack_type := view.attack_type
-	var attack := params.attack(attack_type) if attack_tick >= 0.0 else null
-	var pose := _sword_pose(attack, attack_type, attack_tick)
-	_sword_pivot.rotation = Vector3(pose.x, pose.y, 0.0)
-
-	_hitbox_debug.visible = show_hitboxes and attack != null
-	if _hitbox_debug.visible:
-		var box := _hitbox_debug.mesh as BoxMesh
-		box.size = Vector3(attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
-		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
-		var active := (attack_tick >= attack.windup_ticks
-				and attack_tick < attack.windup_ticks + attack.active_ticks)
-		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
+	_show_hitbox(attack, attack_tick)
 
 	if view.dead:
 		_material.albedo_color = DEAD_COLOR
@@ -386,20 +471,99 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_material.albedo_color = HIT_COLOR
 	elif view.is_invulnerable(params):
 		_material.albedo_color = INVULNERABLE_COLOR
+	elif view.is_parrying(params):
+		_material.albedo_color = PARRY_COLOR
 	else:
 		_material.albedo_color = _base_color
 
 
-## Sword pivot rotation: rest → wind up → strike through → back to rest.
-static func _sword_pose(attack: AttackParams, attack_type: int, tick: float) -> Vector2:
+func _show_hitbox(attack: AttackParams, attack_tick: float) -> void:
+	_hitbox_debug.visible = (show_hitboxes and attack != null
+			and attack.shape != AttackParams.SHAPE_NONE)
+	if not _hitbox_debug.visible:
+		return
+	if attack.shape == AttackParams.SHAPE_RADIAL:
+		_hitbox_debug.mesh = _radial_mesh
+		_radial_mesh.top_radius = attack.hitbox_range
+		_radial_mesh.bottom_radius = attack.hitbox_range
+		_radial_mesh.height = attack.hitbox_height
+		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, 0.0)
+	else:
+		_hitbox_debug.mesh = _box_mesh
+		_box_mesh.size = Vector3(attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
+		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
+	var active := attack.window_at(floori(attack_tick)) >= 0
+	_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
+
+
+## Whirlwind Edge: winds back during the windup, one full turn over the active
+## phase.
+static func _spin_offset(ability: AbilityParams, tick: float) -> float:
+	var windup := float(ability.windup_ticks)
+	if tick < windup:
+		return SPIN_WINDBACK * tick / maxf(windup, 1.0)
+	var spin_ticks := float(ability.recovery_start_tick() - ability.windup_ticks)
+	return SPIN_WINDBACK - (SPIN_WINDBACK + TAU) * minf(1.0, (tick - windup) / maxf(spin_ticks, 1.0))
+
+
+## Rest → wound (over the windup) → struck (over the hit windows) → rest (over
+## the recovery).
+static func _phase_pose(attack: AttackParams, tick: float, rest: Vector2, wound: Vector2,
+		struck: Vector2) -> Vector2:
+	var windup := float(attack.windup_ticks)
+	var strike_end := float(attack.recovery_start_tick())
+	if tick < windup:
+		return rest.lerp(wound, tick / maxf(windup, 1.0))
+	if tick < strike_end:
+		return wound.lerp(struck, (tick - windup) / maxf(strike_end - windup, 1.0))
+	return struck.lerp(rest, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
+
+
+## Sword pivot rotation (x = pitch, y = sweep).
+static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float) -> Vector2:
 	if attack == null:
 		return SWORD_IDLE
-	var wound := LIGHT_WOUND if attack_type == PlayerState.ATTACK_LIGHT else HEAVY_WOUND
-	var struck := LIGHT_STRUCK if attack_type == PlayerState.ATTACK_LIGHT else HEAVY_STRUCK
-	var windup := float(attack.windup_ticks)
-	var strike_end := windup + attack.active_ticks
-	if tick < windup:
-		return SWORD_IDLE.lerp(wound, tick / maxf(windup, 1.0))
-	if tick < strike_end:
-		return wound.lerp(struck, (tick - windup) / attack.active_ticks)
-	return struck.lerp(SWORD_IDLE, (tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
+	match ability_id:
+		"whirlwind_edge":
+			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_SPIN, SWORD_SPIN)
+		"shield_charge":
+			return SWORD_IDLE
+		"riposte":
+			return _phase_pose(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
+	if attack_type == PlayerState.ATTACK_HEAVY:
+		return _phase_pose(attack, tick, SWORD_IDLE, HEAVY_WOUND, HEAVY_STRUCK)
+	return _phase_pose(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
+
+
+## Axe pivot pitches (x = right axe, y = left axe). Light: the right axe chops;
+## heavy and Crashing Leap: both; Frenzy: they take turns.
+static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float) -> Vector2:
+	if attack == null:
+		return Vector2(AXE_IDLE, AXE_IDLE)
+	var rest := Vector2(AXE_IDLE, 0.0)
+	var chop := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_STRUCK, 0.0)).x
+	if ability_id == "frenzy":
+		return _frenzy_pitches(attack, tick, chop)
+	if attack_type == PlayerState.ATTACK_LIGHT:
+		return Vector2(chop, AXE_IDLE)
+	return Vector2(chop, chop)
+
+
+## Frenzy: each hit window is one axe chopping (right, left, right, left)
+## while the other is held up ready.
+static func _frenzy_pitches(attack: AttackParams, tick: float, chop: float) -> Vector2:
+	var since := tick - attack.windup_ticks
+	if since < 0.0 or tick >= attack.recovery_start_tick():
+		return Vector2(chop, chop)
+	var interval := float(attack.window_interval_ticks)
+	var index := floori(since / interval)
+	var into := since - index * interval
+	var pitch := lerpf(AXE_WOUND, AXE_STRUCK, minf(1.0, into / attack.active_ticks))
+	if into > attack.active_ticks:
+		pitch = lerpf(AXE_STRUCK, AXE_WOUND,
+				(into - attack.active_ticks) / maxf(interval - attack.active_ticks, 1.0))
+	return Vector2(pitch, AXE_WOUND) if index % 2 == 0 else Vector2(AXE_WOUND, pitch)
+
+

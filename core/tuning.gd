@@ -48,6 +48,35 @@ func _apply_override(override: String) -> void:
 	print("Tuning: %s/%s/%s = %s (launch override)" % [path[0], path[1], path[2], value])
 
 
+## A value that may be left out of its section, with the structural default to
+## use then (e.g. an ability's dash fields only exist on dashing abilities).
+func get_optional(file: String, section: String, key: String, default: Variant) -> Variant:
+	var cfg: ConfigFile = _files.get(file)
+	if cfg == null or not cfg.has_section_key(section, key):
+		return default
+	return cfg.get_value(section, key)
+
+
+func has_file(file: String) -> bool:
+	return _files.has(file)
+
+
+## Data file names (without ".cfg") that start with prefix, sorted.
+func files_with_prefix(prefix: String) -> PackedStringArray:
+	var names := PackedStringArray()
+	for file_name: String in _files:
+		if file_name.begins_with(prefix):
+			names.append(file_name)
+	names.sort()
+	return names
+
+
+## A file's sections in file order.
+func get_sections(file: String) -> PackedStringArray:
+	var cfg: ConfigFile = _files.get(file)
+	return cfg.get_sections() if cfg else PackedStringArray()
+
+
 func get_value(file: String, section: String, key: String) -> Variant:
 	var cfg: ConfigFile = _files.get(file)
 	if cfg == null:

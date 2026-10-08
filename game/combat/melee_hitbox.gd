@@ -1,20 +1,27 @@
 class_name MeleeHitbox
-## Server-side melee hit test: the attack's box hitbox against a target's
-## upright capsule. Pure math (no physics queries), so it's deterministic and
-## unit tested (tests/test_melee_hitbox.gd).
+## Server-side melee hit test: the attack's hitbox against a target's upright
+## capsule. Pure math (no physics queries), so it's deterministic and unit tested
+## (tests/test_melee_hitbox.gd).
 ##
-## The box starts at the attacker's center and reaches hitbox_range forward
-## (forward is -Z rotated by yaw), hitbox_width wide, from the attacker's feet up
-## hitbox_height.
+## Box (SHAPE_BOX): starts at the attacker's center and reaches hitbox_range
+## forward (forward is -Z rotated by yaw), hitbox_width wide, from the attacker's
+## feet up hitbox_height. Radial (SHAPE_RADIAL): a cylinder of radius
+## hitbox_range around the attacker, hitbox_height tall, ignoring facing.
 
 
 static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 		target_pos: Vector3, target_radius: float, target_height: float) -> bool:
-	# Vertical: the capsule's [feet, top] must overlap the box's [feet, top].
+	if attack.shape == AttackParams.SHAPE_NONE:
+		return false
+	# Vertical: the capsule's [feet, top] must overlap the hitbox's [feet, top].
 	if target_pos.y > attacker_pos.y + attack.hitbox_height:
 		return false
 	if target_pos.y + target_height < attacker_pos.y:
 		return false
+	if attack.shape == AttackParams.SHAPE_RADIAL:
+		# A circle of radius hitbox_range around the attacker, all the way round.
+		var flat := Vector2(target_pos.x - attacker_pos.x, target_pos.z - attacker_pos.z)
+		return flat.length() <= attack.hitbox_range + target_radius
 	# Horizontal: rotate the target into the attacker's space (forward = -Z), then
 	# check the distance from the capsule's center to the box's rectangle.
 	var offset := target_pos - attacker_pos

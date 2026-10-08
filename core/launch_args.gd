@@ -5,7 +5,8 @@ class_name LaunchArgs
 ##   godot -- --connect --address=192.168.1.20:24565
 ##
 ## Flags: --server, --connect, --bot, --verbose, --hitboxes. Values: --port=,
-## --address=, --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning).
+## --address=, --class= (client: character class, default fighter),
+## --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning).
 
 
 static func has_flag(flag_name: String) -> bool:

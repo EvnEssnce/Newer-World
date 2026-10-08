@@ -19,6 +19,10 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	# normal, so an air dodge keeps its arc.
 	if state.is_dodging():
 		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
+	elif state.is_dashing(params):
+		# An ability dash (e.g. Shield Charge) works like a dodge: horizontal only.
+		var dash_speed := state.current_ability(params).dash_speed
+		horizontal = Vector3(state.ability_dir.x, 0.0, state.ability_dir.y) * dash_speed
 	else:
 		var speed := params.move_speed
 		var attack := state.current_attack(params)
