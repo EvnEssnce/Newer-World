@@ -216,11 +216,13 @@ func test_to_array_round_trip_keeps_statuses() -> void:
 	assert_false(copy.matches(state), "a stack difference is a mismatch")
 
 
-func test_statuses_are_last_in_to_array() -> void:
+## Statuses are index 27, followed by forced movement (28-30).
+func test_statuses_are_at_index_27_in_to_array() -> void:
 	state.apply_status(params, slow)
 	var data := state.to_array()
-	assert_eq(data.size(), 28)
+	assert_eq(data.size(), 31)
 	assert_eq(data[27], state.statuses.to_packed())
+	assert_true(PlayerState.from_array(data).matches(state))
 
 
 func test_prediction_replay_is_deterministic() -> void:

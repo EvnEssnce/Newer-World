@@ -58,6 +58,20 @@ func set_weapons(loadout: PackedStringArray) -> String:
 	return error
 
 
+## `current` (weapon ids, one per weapon slot) with weapon_id put in weapon
+## slot `slot`. Picking the weapon that's in the other slot swaps the two, so
+## the pair stays distinct. For the K panel's weapon pickers.
+static func loadout_with(current: PackedStringArray, slot: int, weapon_id: String) -> PackedStringArray:
+	var result := current.duplicate()
+	if slot < 0 or slot >= result.size():
+		return result
+	var other := result.find(weapon_id)
+	if other >= 0 and other != slot:
+		result[other] = result[slot]
+	result[slot] = weapon_id
+	return result
+
+
 ## Replaces a weapon's whole allocation and slots (a free respec). "" on
 ## success, else why not (nothing changes then).
 func set_mastery(weapon_id: String, nodes: PackedStringArray, new_slots: PackedStringArray) -> String:

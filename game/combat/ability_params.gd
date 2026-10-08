@@ -15,6 +15,8 @@ var turn_speed := 0.0
 var dash_start_tick := 0
 var dash_end_tick := 0
 var dash_speed := 0.0
+## The dash goes backward, away from where the ability faces (Vault).
+var dash_backward := false
 ## Peak height of a leap, meters. Cosmetic only.
 var leap_height := 0.0
 ## Parry: during the hit windows, a hit from within parry_arc (full width,
@@ -47,6 +49,7 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 		a.dash_end_tick = maxi(a.dash_start_tick + 1,
 				roundi(Tuning.get_value(file, section, "dash_end") * tps))
 		a.dash_speed = dash_distance / ((a.dash_end_tick - a.dash_start_tick) / tps)
+		a.dash_backward = Tuning.get_optional(file, section, "dash_direction", "forward") == "back"
 	a.leap_height = Tuning.get_optional(file, section, "leap_height", 0.0)
 	a.parry_arc = deg_to_rad(Tuning.get_optional(file, section, "parry_arc", 0.0))
 	a.counter = Tuning.get_optional(file, section, "counter", "")

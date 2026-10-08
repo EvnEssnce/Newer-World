@@ -11,6 +11,61 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (15): Forced movement, Rising Cut and the Spear (class build Wave 2B)
+
+Built by a parallel agent, merged into main on top of Wave 2A. The merge had 11
+conflicting files; both sides were kept everywhere. The synced state is now: statuses
+at index 27, forced movement at 28–30.
+
+Done:
+- **Forced movement:**
+  - Knockback, pull, push along facing and launch, on players (predicted, a server
+    event) and Husks (server-only).
+  - Being moved interrupts like a stagger.
+  - Never on allies, targets in i-frames, or blocked/evaded/parried/fatal hits.
+  - Walls stop it.
+  - `is_force_immune()` hook for the Juggernaut later. Limits in `combat.cfg` `[force]`.
+- **Rising Cut** (Broadsword, Keen Edge tier 2): staggers; a target that was already
+  staggered is launched 0.9 m up and pushed 0.8 m back. It chains from Shield Charge,
+  guard breaks or Riposte.
+- **Spear** (third Fighter weapon), Lancer and Impaler trees:
+  - Reach: light 2.8 m, heavy 3.2 m.
+  - Lunge: 4.5 m dash + thrust.
+  - Low Sweep: wide, 3 m knockback + 0.5 s stagger.
+  - Vault: 5 m backward dash.
+  - Skewer, Javelin Cast and Perforate come later.
+- **K panel:** "Equipped weapons" pickers to choose which two of the three you carry.
+- **Merge fixes:**
+  - The bot now rotates its focus weapon every cycle (default → Spear → Dual Axes →
+    Broadsword). Before, the Dual Axes never came out and the status checks always
+    failed.
+  - The smoke test runs 32 s (four cycles).
+  - `--tune` now takes strings without quotes.
+  - New keys that are off in the real data and on in the smoke run: Husk
+    `applies_status` (bleed) and Broadsword heavy `force_distance`.
+- Unit tests now wait for a real physics frame. This fixed the occasional unknown
+  unit-test failure (a dash test used a varying frame delta).
+- Tests: 283. Smoke after merge: default 5 of 6 passed (the fail was "no Husk was moved
+  by force"), `-Party` 3 of 3.
+
+Needs a hand playtest (`run_local_test.ps1`):
+- **K panel:** equip the Spear with the weapon pickers, then swap with X.
+- **Spear:**
+  - Reach.
+  - Lunge distance.
+  - Low Sweep knockback on Husks.
+  - Vault backward.
+- **Rising Cut:** use it after a Shield Charge stagger; the target should pop up.
+- **Getting knocked back:** add `--tune=enemy_husk/attack/force_distance=2` to the
+  server and client. Walls should stop you, nothing should rubber-band, and corrections
+  should stay 0.
+- **Tuning:** Low Sweep distance and duration, Rising Cut height, `[force]` limits.
+
+Known gaps:
+- Vault has no i-frames.
+- Blocked hits never push.
+- Bodies pass through each other when knocked back.
+
 ### 2026-10-08 (14): Status effects (class build Wave 2A)
 
 Built by a parallel agent, merged into main. Wave 2B (forced movement + Spear) is still
@@ -350,12 +405,11 @@ Later / unscheduled:
   `--verbose` to get the details if it shows up in play. Seen again on 2026-10-08: one
   ~9 cm position mismatch with an identical `PlayerState`, so it's in the physics step,
   not the sim state.
-- A unit test fails about 1 run in 10, only when the machine is busy (right after an
-  import, a stress test, or while another agent runs Godot). Not caught in 14 quiet
-  runs, so probably a timing-sensitive physics test. If `run_tests.ps1` shows a
-  `FAIL` line, note the test name.
-- Smoke "no hit landed on a guard" still fails about 1 run in 10: the bot-vs-bot guard
-  check depends on wall-clock bot phases lining up.
+- The occasional unit-test failure under load was `test_abilities` dash tests using a
+  varying frame delta; fixed in Wave 2B (the runner waits for a physics frame). If a
+  unit test still fails now and then, note its name.
+- Smoke checks that depend on the bots' fights going a certain way still fail about 1
+  run in 10: "no hit landed on a guard" and "no Husk was moved by force".
 - When 9 bots quit at once, the server had one ~100 ms tick (disconnect handling).
   Harmless now; look at it if mass disconnects matter later.
 

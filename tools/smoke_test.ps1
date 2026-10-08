@@ -2,16 +2,18 @@
 # for a few seconds: each client must see the other move, dodge, attack, use an
 # ability and swap weapons; the server must resolve hits, a death and a respawn, a
 # guarded hit, ability hits and a build change, and Husks and bots must hit each
-# other; no unexpected prediction corrections.
+# other; players and Husks must be moved by force (knockback) and the Spear's
+# abilities used; no unexpected prediction corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party]
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
 # deaths and blocks between the bots, the server must report a party formed,
 # 0 bot-on-bot hits and at least one bot swing ignored because they're allies
 # (both clients in a party of 2), while Husk fights still happen.
 # Exits 0 on pass, 1 on fail. Logs go to build\smoke\.
-# 24 s = three of the bot's 8 s cycles (see World._bot_input): two cycles left
-# too little room for the luck-dependent checks (statuses, guard hits).
-param([int]$Port = 24599, [int]$Seconds = 24, [switch]$Party)
+# 32 s = four of the bot's 8 s cycles (see World._bot_input): the default loadout
+# (Broadsword out), then the Spear, the Dual Axes and the Broadsword as the focus
+# weapon, so each weapon's abilities (knockback, statuses, bleed) get a turn.
+param([int]$Port = 24599, [int]$Seconds = 32, [switch]$Party)
 . "$PSScriptRoot\find_godot.ps1"
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
@@ -31,7 +33,19 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=300',
     '--tune=enemy_husk/stats/respawn_time=2',
     # Bloodlust lasts the whole run, so any later hit proves bleed works.
-    '--tune=status_effects/status_bloodlust/duration=30')
+    '--tune=status_effects/status_bloodlust/duration=30',
+    # Husk swings knock players back a little (off in the real data), so forced
+    # movement on predicted players happens in every run, party or not. Kept
+    # short: a 1.5 m shove moved the bots out of their fights often enough to
+    # fail the guard check.
+    '--tune=enemy_husk/attack/force_distance=0.4',
+    # Low Sweep ready again by the bot's second ability press, which then uses it
+    # again (see World._bot_ability_button): more chances to knock a Husk back.
+    '--tune=weapon_spear/ability_low_sweep/cooldown=0.6',
+    # Bot fights are luck: these give the bleed and Husk-knockback checks a source
+    # in every run (Husk swings bleed the bots; Broadsword heavies push Husks).
+    '--tune=enemy_husk/attack/applies_status=bleed',
+    '--tune=weapon_broadsword/heavy/force_distance=0.4')
 
 $botFlags = @('--bot', '--verbose')
 if ($Party) { $botFlags += '--bot-party' }
@@ -42,9 +56,14 @@ $clients = @(
     (Start-Godot 'client1' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)),
     (Start-Godot 'client2' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune))
 )
-$clients | ForEach-Object { $_.WaitForExit() }
+# A script that fails to parse leaves the game running without --quit-after, so
+# don't wait forever: anything still running well past its time is stopped.
+$clients | ForEach-Object {
+    # /T: the console exe runs the game as a child process.
+    if (-not $_.WaitForExit(($Seconds + 30) * 1000)) { taskkill /T /F /PID $_.Id | Out-Null }
+}
 # The server quits on its own shortly after the clients, printing its summary.
-if (-not $server.WaitForExit(10000)) { Stop-Process -Id $server.Id -Force }
+if (-not $server.WaitForExit(10000)) { taskkill /T /F /PID $server.Id | Out-Null }
 
 $failed = $false
 # The bots fight (Husks when near, else each other) for the first 4 s of every 8 (then use abilities for 2 s);
@@ -129,6 +148,31 @@ if (-not $statusSummary) {
     $failed = $true
 } else {
     Write-Host "PASS statuses: $($statusSummary.Line)" -ForegroundColor Green
+}
+# Forced movement (Husk knockback on the bots, the bots' Low Sweep on Husks) and
+# the Spear: the bots equip it after the first cycle and use its abilities. In a party, no bot may move the other.
+$forceSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY force players=(\d+) pvp=(\d+) enemies=(\d+) launches=(\d+)'
+$spearSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon .*spear=(\d+)'
+if (-not $forceSummary) {
+    Write-Host "FAIL force: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$forceSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL force: no player was moved by force ($($forceSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$forceSummary.Matches[0].Groups[3].Value -lt 1) {
+    Write-Host "FAIL force: no Husk was moved by force ($($forceSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ($Party -and [int]$forceSummary.Matches[0].Groups[2].Value -ne 0) {
+    Write-Host "FAIL force: party members moved each other ($($forceSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS force: $($forceSummary.Line)" -ForegroundColor Green
+}
+if (-not $spearSummary -or [int]$spearSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL spear: no Spear ability used ($((Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon').Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS spear: $($spearSummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'

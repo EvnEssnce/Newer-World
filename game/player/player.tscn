@@ -47,6 +47,31 @@ roughness = 0.4
 material = SubResource("StandardMaterial3D_axe_head")
 size = Vector3(0.04, 0.3, 0.2)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spear_shaft"]
+albedo_color = Color(0.5, 0.36, 0.2, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_spear_shaft"]
+material = SubResource("StandardMaterial3D_spear_shaft")
+size = Vector3(0.05, 0.05, 2.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spear_head"]
+albedo_color = Color(0.85, 0.87, 0.9, 1)
+metallic = 0.7
+roughness = 0.3
+
+[sub_resource type="BoxMesh" id="BoxMesh_spear_head"]
+material = SubResource("StandardMaterial3D_spear_head")
+size = Vector3(0.14, 0.025, 0.36)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spear_band"]
+albedo_color = Color(0.75, 0.12, 0.1, 1)
+roughness = 0.7
+
+[sub_resource type="BoxMesh" id="BoxMesh_spear_band"]
+material = SubResource("StandardMaterial3D_spear_band")
+size = Vector3(0.1, 0.1, 0.12)
+
 [sub_resource type="BoxMesh" id="BoxMesh_hitbox"]
 resource_local_to_scene = true
 
@@ -107,6 +132,22 @@ mesh = SubResource("BoxMesh_axe_handle")
 [node name="Head" type="MeshInstance3D" parent="Model/RollPivot/AxeLeftPivot"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, -0.52)
 mesh = SubResource("BoxMesh_axe_head")
+
+[node name="SpearPivot" type="Node3D" parent="Model/RollPivot"]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.35, 0.05, 0)
+
+[node name="Shaft" type="MeshInstance3D" parent="Model/RollPivot/SpearPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.5)
+mesh = SubResource("BoxMesh_spear_shaft")
+
+[node name="Head" type="MeshInstance3D" parent="Model/RollPivot/SpearPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.86)
+mesh = SubResource("BoxMesh_spear_head")
+
+[node name="Band" type="MeshInstance3D" parent="Model/RollPivot/SpearPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.6)
+mesh = SubResource("BoxMesh_spear_band")
 
 [node name="HitboxDebug" type="MeshInstance3D" parent="Model"]
 visible = false

@@ -36,6 +36,8 @@ var hitbox_width := 0.0
 var hitbox_height := 0.0
 ## Stops (skips to recovery) after hitting this many targets. 0 = no limit.
 var max_targets := 0
+## Knockback / pull / launch on hit (force_* keys), or null for none.
+var force: ForceParams = null
 
 # Statuses (data/status_effects.cfg ids; "" = none)
 ## Applied to whoever this damages (server), with status_stacks stacks, for
@@ -94,6 +96,7 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_height = Tuning.get_value(file, section, "height")
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
 	_load_statuses(file, section, tps)
+	force = ForceParams.from_tuning(file, section, tps)
 
 
 ## The optional status keys (see data/status_effects.cfg).

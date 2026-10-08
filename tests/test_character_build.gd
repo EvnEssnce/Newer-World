@@ -143,3 +143,43 @@ func test_swapping_weapon_order_follows_through_to_state() -> void:
 	build.apply_to_state(state, params)
 	assert_eq(state.weapons, PackedStringArray(["axes", "sword"]))
 	assert_eq(state.ability_slots, PackedInt32Array([-1, 0, -1, 1, 2, -1]))
+
+
+# --- Choosing two of three class weapons (K panel) ---
+
+func _three_weapon_class() -> void:
+	class_def.weapons = PackedStringArray(["sword", "spear", "axes"])
+	var spear_tree := _tree(["lunge"])
+	spear_tree.default_nodes = PackedStringArray(["lunge_node"])
+	spear_tree.default_slots = PackedStringArray(["lunge", "", ""])
+	trees["spear"] = spear_tree
+	params.weapons["spear"] = _weapon("spear", ["lunge"])
+
+
+func test_any_two_distinct_class_weapons_can_be_equipped() -> void:
+	_three_weapon_class()
+	for pair: Array in [["sword", "spear"], ["spear", "axes"], ["axes", "sword"], ["spear", "sword"]]:
+		assert_eq(class_def.validate_loadout(PackedStringArray(pair)), "", str(pair))
+	assert_true(class_def.validate_loadout(PackedStringArray(["spear", "spear"])) != "", "twice")
+	assert_true(class_def.validate_loadout(PackedStringArray(["spear", "bow"])) != "", "other class")
+
+
+func test_equipping_the_third_weapon_reaches_state() -> void:
+	_three_weapon_class()
+	var build := _build()
+	var state := PlayerState.new()
+	build.apply_to_state(state, params)
+	assert_eq(build.set_weapons(PackedStringArray(["sword", "spear"])), "")
+	build.apply_to_state(state, params)
+	assert_eq(state.weapons, PackedStringArray(["sword", "spear"]))
+	assert_eq(state.ability_slots, PackedInt32Array([1, 2, -1, 0, -1, -1]), "spear's Lunge on Q")
+
+
+func test_loadout_with_replaces_or_swaps() -> void:
+	var current := PackedStringArray(["sword", "axes"])
+	assert_eq(CharacterBuild.loadout_with(current, 1, "spear"), PackedStringArray(["sword", "spear"]))
+	assert_eq(CharacterBuild.loadout_with(current, 0, "spear"), PackedStringArray(["spear", "axes"]))
+	assert_eq(CharacterBuild.loadout_with(current, 0, "axes"), PackedStringArray(["axes", "sword"]),
+			"picking the other slot's weapon swaps them")
+	assert_eq(CharacterBuild.loadout_with(current, 0, "sword"), current, "no change")
+	assert_eq(current, PackedStringArray(["sword", "axes"]), "input untouched")

@@ -43,7 +43,8 @@ func _apply_override(override: String) -> void:
 	var current: Variant = get_value(path[0], path[1], path[2])
 	if current == null:
 		return
-	var value: Variant = type_convert(str_to_var(raw), typeof(current))
+	# Strings are taken as written (no quotes needed on the command line).
+	var value: Variant = raw if current is String else type_convert(str_to_var(raw), typeof(current))
 	_files[path[0]].set_value(path[1], path[2], value)
 	print("Tuning: %s/%s/%s = %s (launch override)" % [path[0], path[1], path[2], value])
 

@@ -19,9 +19,15 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		buttons &= ~PlayerState.BUTTON_JUMP
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
+	# Forced movement (knockback, pull) overrides everything horizontal; a
+	# launch sets the vertical speed once, below. Starting it interrupts dodges
+	# and dashes, so it never competes with them.
+	if state.is_forced():
+		var push := state.force.step_velocity()
+		horizontal = Vector3(push.x, 0.0, push.y)
 	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as
 	# normal, so an air dodge keeps its arc.
-	if state.is_dodging():
+	elif state.is_dodging():
 		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
 	elif rooted:
 		horizontal = horizontal.move_toward(Vector3.ZERO, params.ground_deceleration * delta)
@@ -45,7 +51,10 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 
 	var vertical := body.velocity.y
 	var can_jump := not state.is_dodging() and not state.is_attacking()
-	if on_floor and buttons & PlayerState.BUTTON_JUMP and can_jump:
+	var launch := state.force.take_launch()
+	if launch > 0.0:
+		vertical = launch
+	elif on_floor and buttons & PlayerState.BUTTON_JUMP and can_jump:
 		vertical = params.jump_velocity
 	elif not on_floor:
 		vertical -= params.gravity * delta

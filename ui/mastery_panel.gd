@@ -100,6 +100,7 @@ func _refresh() -> void:
 	var slots := build.get_slots(_weapon_id)
 
 	_content.add_child(_header(build, tree, nodes))
+	_content.add_child(_weapon_row(build))
 	_content.add_child(_slot_row(tree, nodes, slots))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 16)
@@ -141,6 +142,30 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 	defaults.text = "Default"
 	defaults.pressed.connect(_send.bind(tree.default_nodes, tree.default_slots))
 	row.add_child(defaults)
+	return row
+
+
+## The two equipped weapons, each picked from the class's weapon list. Picking
+## the weapon already in the other slot swaps them. The server validates it
+## (and refuses mid-attack, mid-ability or mid-swap).
+func _weapon_row(build: CharacterBuild) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_label("Equipped weapons:", Color.WHITE))
+	for slot in build.weapons.size():
+		row.add_child(_label("%d:" % (slot + 1), Color.WHITE))
+		var picker := OptionButton.new()
+		picker.custom_minimum_size = Vector2(150, 0)
+		picker.tooltip_text = "Choose weapon %d (X swaps between the two)." % (slot + 1)
+		for weapon_id in build.class_def.weapons:
+			picker.add_item(PlayerParams.current().weapon(weapon_id).display_name)
+			picker.set_item_metadata(picker.item_count - 1, weapon_id)
+			if weapon_id == build.weapons[slot]:
+				picker.select(picker.item_count - 1)
+		picker.item_selected.connect(func(index: int) -> void:
+			_builds.request_weapons(CharacterBuild.loadout_with(
+					_builds.local_build.weapons, slot, picker.get_item_metadata(index))))
+		row.add_child(picker)
 	return row
 
 

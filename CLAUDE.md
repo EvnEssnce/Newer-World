@@ -52,6 +52,8 @@ game/
   combat/ability_params.gd   An ability: AttackParams + cooldown, dash, parry/counter.
   combat/weapon_params.gd    One weapon: light/heavy attacks, ability pool (data/weapon_<id>.cfg).
   combat/melee_hitbox.gd     Box/radial hitbox vs capsule test, frontal arc. Pure math, unit tested.
+  combat/force_params.gd     An attack's forced movement (force_* keys): knockback/pull/push, launch.
+  combat/forced_motion.gd    A push/launch in progress (players: in PlayerState; enemies). Unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
   build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
   build/mastery_tree.gd      A weapon's mastery tree and its rules. Pure logic, unit tested.
@@ -69,10 +71,10 @@ game/
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
                              cleanse, on-hit (Bloodlust). Pure logic, unit tested.
 ui/                  connect_menu (client start screen), hud (health/stamina bars, ability bar,
-                     weapon line, status row, debug info), mastery_panel (K: tree, respec, slots),
+                     weapon line, status row, debug info), mastery_panel (K: equipped weapons, tree, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
-                     weapon_<id> (broadsword, dual_axes), class_<id> (fighter),
+                     weapon_<id> (broadsword, spear, dual_axes), class_<id> (fighter),
                      mastery (shared tree rules), mastery_<weapon>, loot (rarities + loot
                      tables), items, affixes, party, status_effects (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
@@ -110,7 +112,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
   event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn,
   parry counter, ability stopped on hit, loadout change, a status applied/used
-  up/cleansed by the server) isn't counted. `--verbose` logs
+  up/cleansed by the server, forced movement) isn't counted. `--verbose` logs
   each unexpected one, and server-side input drops.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
@@ -145,6 +147,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`. Clients flash the body white while
   it's true.
+- **Forced movement** is sim state too: `PlayerState.force` (a `ForcedMotion`: horizontal
+  velocity, ticks left, pending launch speed) is the last three entries of `to_array()`
+  (27 velocity, 28 ticks, 29 launch). The server starts it (`start_force`, a server
+  event); `PlayerMovement` applies it on both sides, so the client replays it exactly.
 
 ## Combat model
 
@@ -175,7 +181,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `block_stamina_multiplier` come from the one that's out. X swaps (`[swap]` in
   combat.cfg): not mid-attack/ability/roll (buffered), and while `swap_tick` runs you
   can move but not attack, block, dodge or use abilities. The new weapon is out from
-  the first swap tick.
+  the first swap tick. The Fighter has three (Broadsword, Spear, Dual Axes); the K
+  panel's "Equipped weapons" pickers choose the two (`BuildService._request_weapons`;
+  picking the other slot's weapon swaps them, `CharacterBuild.loadout_with`).
 - **Abilities** (`[ability_<id>]` in the weapon file, pool order = `[weapon]
   abilities`): Q/E/R use the equipped weapon's slots (`ability_slots`, pool indices).
   `attack_type == ATTACK_ABILITY` and `ability` = pool index, so abilities share the
@@ -184,7 +192,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   for both weapons (`cooldowns`, per weapon slot × pool index). Variants:
   `windows`/`window_interval` (Frenzy: a target can be hit once per window),
   `shape="radial"` (Whirlwind Edge, Crashing Leap slam), dash (`dash_distance`, moved in
-  `PlayerMovement` like a dodge: Shield Charge, Crashing Leap), `max_targets` (the server
+  `PlayerMovement` like a dodge: Shield Charge, Crashing Leap, Lunge;
+  `dash_direction="back"` dashes away from the facing: Vault), `max_targets` (the server
   calls `end_active_window` once reached: Shield Charge stops at the first target), and
   parry (`parry_arc` + `counter`: Riposte). **Parry**: a hit on a player in a parry
   window from within the arc in front is negated (`HIT_PARRIED`) and the server calls
@@ -195,6 +204,23 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
   low_health_damage, block_stamina, none). Respecs are free any time except
   mid-attack/ability/swap. K opens the panel.
+- **Forced movement** (the `FORCE` tag: knockback, pull, launch). Per attack, optional
+  `force_direction` ("away" / "toward" / "forward"), `force_distance` (m),
+  `force_height` (launch peak, m), `force_duration` (s), `force_needs_stagger` (only
+  moves a target already staggered: Rising Cut) in the weapon or enemy file; shared
+  limits in `[force]` of combat.cfg (max distance/height, pull gap). `ForceParams`
+  computes the displacement, launch speed and ticks (at least the launch's airtime).
+  Server only decides it: `World._force_player` / `_force_enemy`, after a hit that
+  damaged or guard-broke (not evaded, blocked, parried or fatal), never between allies
+  (`are_allies`). `PlayerState.start_force` refuses i-frames, death and
+  `is_force_immune()` (the one immunity hook, false for now; Brace/Steadfast/Unbowed
+  will change it). **Choice:** being moved interrupts like a stagger (attack, ability,
+  dodge, swap, guard), and the target can't act until it ends; presses stay buffered.
+  `PlayerMovement` sets the horizontal velocity from it (linear ease-out, so the
+  distance is exact) and the launch speed on its first step; gravity and
+  `move_and_slide` (walls) do the rest, and on-floor stays synced state. Enemies:
+  `Enemy.start_force` (server) staggers the brain for the same ticks, so steering and
+  swings pause. Players show the stagger tilt while moved.
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
   snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
   results) for damage numbers, labels and the red flash.
@@ -267,6 +293,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
 - Abilities hit enemies through the same path (`max_targets` and modifiers apply); a
   Husk swing into a Riposte is parried like a player's.
+- Forced movement works on enemies too (server only, `Enemy.start_force`, same
+  `force_*` params; `Enemy.is_force_immune()` is the hook). An enemy's own attack can
+  have `force_*` keys: the Husk's `force_distance` is 0 (off); the smoke test turns it
+  on (0.4 m: a longer shove pushed the bots out of their fights and broke the guard
+  check) with `--tune` so predicted players get knocked back in most runs.
 
 ## Controls
 
@@ -338,8 +369,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 16 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk) and a bleed tick
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits and 0 debuffs on each other, Husk fights still happen
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs or forced moves on each other, Husk fights still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
@@ -349,12 +380,15 @@ don't collide.
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
 `--class=ID` (client: character class, default `fighter`; unknown = default),
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
-Husk within 15 m, else the nearest player), then both use abilities (guard up between), then circle
-with weapon swap/jump/air dodge/ground dodge and a free respec; see `World._bot_input`.
-On joining it slots its status abilities first (`BuildService.bot_slot_status_abilities`);
-it uses Bloodlust as soon as its target is within 2 m on its own turn or in the
-ability phase, then a hitting ability; the ability phase's first press prefers a
-self-buff, then a status ability),
+Husk within 15 m, else the nearest player), then both use abilities (guard up between; a
+knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free
+respec (odd cycles also learn new abilities like Rising Cut) and the next cycle's weapons
+(the default loadout in the first cycle; then a different focus weapon each cycle:
+Spear, Dual Axes, Broadsword; `BuildService.bot_weapons_for_cycle`); see
+`World._bot_input`. On joining it slots its status abilities first
+(`BuildService.bot_slot_status_abilities`); it uses Bloodlust as soon as its target is
+within 2 m on its own turn or in the ability phase, then a hitting ability; the ability
+phase's first press prefers a knockback ability, then a self-buff, then a status ability),
 `--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
 accepts any invite; it doesn't attack or use abilities until it's in a party, then
 still swings at its ally when no Husk is near, which the server ignores; see
@@ -367,8 +401,11 @@ refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 relative path avoids trouble with the space in the project path),
 `--quit-after=SECONDS` (prints `SUMMARY` lines, used by the smoke test),
 `--tune=file/section/key=value` (repeatable; overrides a `data/` value for that run;
-give the server and every client the same overrides). The smoke test uses `--tune`
-for low health and a fast respawn so deaths happen within the run.
+give the server and every client the same overrides; only keys that exist in the file
+can be overridden, strings need no quotes). The smoke test uses `--tune` for low health
+and a fast respawn so deaths happen within the run, and to switch on effects that are off
+in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
+checks don't depend on bot luck.
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.
