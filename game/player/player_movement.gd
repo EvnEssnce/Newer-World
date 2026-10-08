@@ -11,20 +11,26 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	var on_floor := state.on_floor
 	state.step(move, buttons, aim_yaw, on_floor, params, delta)
 	if not state.can_act():
-		move = Vector2.ZERO  # staggered or dead: slide to a stop, can't jump
+		move = Vector2.ZERO  # staggered, stunned or dead: slide to a stop, can't jump
 		buttons = 0
+	var rooted := not state.can_move(params)
+	if rooted:
+		move = Vector2.ZERO  # rooted: stop, no jump or dash (attacks still work)
+		buttons &= ~PlayerState.BUTTON_JUMP
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as
 	# normal, so an air dodge keeps its arc.
 	if state.is_dodging():
 		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
+	elif rooted:
+		horizontal = horizontal.move_toward(Vector3.ZERO, params.ground_deceleration * delta)
 	elif state.is_dashing(params):
 		# An ability dash (e.g. Shield Charge) works like a dodge: horizontal only.
 		var dash_speed := state.current_ability(params).dash_speed
 		horizontal = Vector3(state.ability_dir.x, 0.0, state.ability_dir.y) * dash_speed
 	else:
-		var speed := params.move_speed
+		var speed := params.move_speed * state.status_move_multiplier(params)
 		var attack := state.current_attack(params)
 		if attack:
 			speed *= attack.move_multiplier

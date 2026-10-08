@@ -18,7 +18,10 @@ const HIT_BLOCKED := 3
 const HIT_GUARD_BROKEN := 4
 ## Negated by the target's parry (Riposte), which answers with a counter.
 const HIT_PARRIED := 5
-const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried"]
+## Damage over time from a status (bleed).
+const HIT_STATUS_DAMAGE := 6
+const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried",
+		"status damage"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
@@ -30,6 +33,8 @@ const SPAWN_RADIUS := 3.0
 const BOT_ATTACK_DISTANCE := 1.6
 ## The bot fights enemies within this many meters rather than other players.
 const BOT_ENEMY_RANGE := 15.0
+## The bot uses a self-buff (Bloodlust) once its target is this close.
+const BOT_BUFF_REACH := 2.0
 
 # Server
 var _tick := 0
@@ -55,6 +60,20 @@ var _ability_uses := 0
 var _ability_hits := 0
 var _parries := 0
 var _swaps := 0
+# Statuses (for the smoke test summary)
+## Statuses applied by the server (debuffs from hits, on-hit bleeds), and how
+## many of those landed on enemies.
+var _statuses_applied := 0
+var _statuses_on_enemies := 0
+## Abilities started that buff their user (applied inside the sim).
+var _self_buffs := 0
+## Damage-over-time ticks (bleed) that dealt damage, and their total damage.
+var _status_ticks := 0
+var _status_damage := 0.0
+## Debuffs between allies: refused by _give_status (should never even be tried,
+## since hits on allies are ignored), and applied (must stay 0).
+var _ally_statuses_refused := 0
+var _ally_statuses_applied := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -79,6 +98,10 @@ var _respawn_at_msec := -1
 var _bot := false
 var _bot_last_phase := 0.0
 var _bot_swaps_before := 0
+## The bot slots its status abilities once, when its first build arrives.
+var _bot_status_slots_sent := false
+## Time (s) of the hitting ability that follows a self-buff, or -1.
+var _bot_followup_at := -1.0
 var _verbose := false
 var _log_timer := 0.0
 var _last_screenshot_slot := -1
@@ -158,6 +181,7 @@ func _server_tick(delta: float) -> void:
 		if player.state.dead and _tick >= player.respawn_at_tick:
 			_respawn(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
+		_apply_player_status_damage(player)
 	var targets := {}
 	for player: Player in _players.get_children():
 		if not player.state.dead:
@@ -170,6 +194,7 @@ func _server_tick(delta: float) -> void:
 					print("[server] enemy %d respawned" % enemy.enemy_id)
 		else:
 			enemy.server_step(targets, delta)
+			_apply_enemy_status_damage(enemy)
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
 
@@ -242,7 +267,8 @@ func _on_peer_left(peer_id: int) -> void:
 ## Shield Charge stops at the first target).
 func _on_attack_stepped(attacker: Player) -> void:
 	var attack := attacker.state.current_attack(attacker.params)
-	var damage_scale := attacker.damage_multiplier(attack)
+	var damage_scale := (attacker.damage_multiplier(attack)
+			* attacker.state.statuses.damage_dealt_multiplier(attacker.params.statuses))
 	var connected := 0
 	for target: Player in _players.get_children():
 		if target == attacker or _target_limit_reached(attacker, attack):
@@ -253,6 +279,9 @@ func _on_attack_stepped(attacker: Player) -> void:
 			_pvp_hits += 1
 		if result >= 0 and result != HIT_EVADED:
 			connected += 1
+		if result == HIT_DAMAGED:
+			_give_hit_statuses(attacker.peer_id, attack,
+					attacker.state.take_on_hit_statuses(attacker.params), target)
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
 			continue
@@ -262,21 +291,21 @@ func _on_attack_stepped(attacker: Player) -> void:
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
 		attacker.attack_results[enemy.enemy_id] = true
-		var damage := attack.damage * damage_scale
-		var killed := enemy.take_hit(damage, attack.stagger_ticks, attacker.peer_id)
+		var damage := (attack.damage * damage_scale
+				* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 		_enemy_damaged += 1
 		connected += 1
-		if killed:
-			enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
-			_enemy_kills += 1
-		_send_hit(attacker.peer_id, enemy.enemy_id, damage,
-				HIT_DEFEATED if killed else HIT_DAMAGED)
+		if not _damage_enemy(enemy, damage, attack.stagger_ticks, attacker.peer_id, HIT_DAMAGED):
+			_give_hit_statuses(attacker.peer_id, attack,
+					attacker.state.take_on_hit_statuses(attacker.params), enemy)
 	if connected > 0:
 		_on_player_attack_connected(attacker, attack, connected)
 
 
 func _on_ability_started(player: Player) -> void:
 	_ability_uses += 1
+	if not player.state.current_ability(player.params).self_status.is_empty():
+		_self_buffs += 1
 	if _verbose:
 		print("[server] peer %d uses %s" % [player.peer_id,
 				player.state.current_ability(player.params).id])
@@ -303,11 +332,15 @@ func _target_limit_reached(attacker: Player, attack: AttackParams) -> bool:
 
 ## Server: an enemy's swing is live this tick.
 func _on_enemy_attack_stepped(enemy: Enemy) -> void:
+	var damage_scale := enemy.statuses.damage_dealt_multiplier(enemy.status_defs)
 	for target: Player in _players.get_children():
 		var result := _strike_player(enemy.enemy_id, enemy.global_position, enemy.brain.yaw,
-				enemy.params.attack, enemy.attack_results, target)
+				enemy.params.attack, enemy.attack_results, target, damage_scale)
 		if result >= 0 and result != HIT_EVADED:
 			_enemy_hits += 1
+		if result == HIT_DAMAGED:
+			_give_hit_statuses(enemy.enemy_id, enemy.params.attack,
+					enemy.statuses.take_on_hit_statuses(enemy.status_defs), target)
 
 
 ## Server: resolves one attack against one player, at most once per hit window
@@ -339,7 +372,8 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	results[target.peer_id] = true
 	if _try_parry(attacker_id, attacker_pos, target):
 		return HIT_PARRIED
-	var damage := attack.damage * damage_scale
+	var damage := (attack.damage * damage_scale
+			* target.state.statuses.damage_taken_multiplier(target.params.statuses))
 	var result := HIT_DAMAGED
 	if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
 			target.state.yaw, attacker_pos, target.params.block_arc):
@@ -354,14 +388,31 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	target.health = maxf(0.0, target.health - damage)
 	if target.health <= 0.0:
 		result = HIT_DEFEATED
-		target.state.kill()
-		target.respawn_at_tick = _tick + target.params.respawn_ticks
-		_deaths += 1
+		_kill_player(target)
 	elif result == HIT_DAMAGED:
 		target.state.apply_stagger(attack.stagger_ticks)
 	_hits += 1
 	_send_hit(attacker_id, target.peer_id, damage, result)
 	return result
+
+
+## Server: a player's health reached 0 (a hit or damage over time).
+func _kill_player(target: Player) -> void:
+	target.state.kill()
+	target.respawn_at_tick = _tick + target.params.respawn_ticks
+	_deaths += 1
+
+
+## Server: damages an enemy (a hit, or damage over time) and reports it with
+## alive_result, or HIT_DEFEATED if it died. Returns true if it died.
+func _damage_enemy(enemy: Enemy, damage: float, stagger_ticks: int, attacker_id: int,
+		alive_result: int) -> bool:
+	var killed := enemy.take_hit(damage, stagger_ticks, attacker_id)
+	if killed:
+		enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
+		_enemy_kills += 1
+	_send_hit(attacker_id, enemy.enemy_id, damage, HIT_DEFEATED if killed else alive_result)
+	return killed
 
 
 ## Server: if the target is in a parry window (Riposte) and the attacker is in
@@ -421,6 +472,84 @@ func _send_hit(attacker_id: int, target_id: int, damage: float, result: int) -> 
 		_receive_hit.rpc_id(peer_id, attacker_id, target_id, damage, result)
 
 
+# --- Statuses ---
+
+## Server: a hit damaged target (a Player or an Enemy). Applies the attack's
+## own status (applies_status) and the attacker's on-hit statuses (on_hit:
+## [index, stacks] each, from StatusEffects.take_on_hit_statuses, e.g.
+## Bloodlust's bleed).
+func _give_hit_statuses(source_id: int, attack: AttackParams, on_hit: Array[Vector2i],
+		target: Node3D) -> void:
+	var defs := StatusDefs.current()
+	if not attack.applies_status.is_empty():
+		_give_status(source_id, target, defs.index_of(attack.applies_status), attack.status_stacks,
+				attack.status_duration_ticks)
+	for status in on_hit:
+		_give_status(source_id, target, status.x, status.y, -1)
+
+
+## Server: applies one status from source_id to target (a Player or an Enemy).
+## Allies never debuff each other. A player's status is a server event.
+## Returns true if applied.
+func _give_status(source_id: int, target: Node3D, index: int, stacks: int,
+		duration_ticks: int) -> bool:
+	var def := StatusDefs.current().get_def(index)
+	if def == null:
+		return false
+	var player := target as Player
+	var enemy := target as Enemy
+	var target_id := player.peer_id if player else enemy.enemy_id
+	var between_allies := source_id != target_id and are_allies(source_id, target_id)
+	if def.is_debuff() and between_allies:
+		_ally_statuses_refused += 1
+		return false
+	var applied := false
+	if player:
+		applied = player.state.apply_status(player.params, index, stacks, duration_ticks, source_id)
+	else:
+		applied = enemy.apply_status(index, stacks, duration_ticks, source_id)
+	if not applied:
+		return false
+	_statuses_applied += 1
+	if enemy:
+		_statuses_on_enemies += 1
+	if def.is_debuff() and between_allies:
+		_ally_statuses_applied += 1
+	if _verbose:
+		print("[server] %d -> %d: status %s x%d" % [source_id, target_id, def.id, stacks])
+	return true
+
+
+## Server: damage over time (bleed) from a player's sim steps this tick.
+## Multiplied by its damage_taken statuses (Exposed); can kill.
+func _apply_player_status_damage(player: Player) -> void:
+	var raw := player.status_damage_pending
+	player.status_damage_pending = 0.0
+	if raw <= 0.0 or player.state.dead:
+		return
+	var damage := raw * player.state.statuses.damage_taken_multiplier(player.params.statuses)
+	player.health = maxf(0.0, player.health - damage)
+	_status_ticks += 1
+	_status_damage += damage
+	var result := HIT_STATUS_DAMAGE
+	if player.health <= 0.0:
+		result = HIT_DEFEATED
+		_kill_player(player)
+	_send_hit(player.state.statuses.last_damage_source, player.peer_id, damage, result)
+
+
+## Server: damage over time (bleed) from an enemy's server_step this tick.
+func _apply_enemy_status_damage(enemy: Enemy) -> void:
+	var raw := enemy.status_damage
+	enemy.status_damage = 0.0
+	if raw <= 0.0 or enemy.dead:
+		return
+	var damage := raw * enemy.statuses.damage_taken_multiplier(enemy.status_defs)
+	_status_ticks += 1
+	_status_damage += damage
+	_damage_enemy(enemy, damage, 0, enemy.statuses.last_damage_source, HIT_STATUS_DAMAGE)
+
+
 # --- Parties and allies ---
 
 ## The single answer to "are these two on the same side?". Ids are peer ids for
@@ -447,6 +576,10 @@ func _client_tick(delta: float) -> void:
 	var buttons := 0
 	var aim_yaw := _local_player.get_camera_yaw()
 	if _bot:
+		if (not _bot_status_slots_sent and _builds.local_build
+				and _local_player.state.can_change_loadout()):
+			_builds.bot_slot_status_abilities(_local_player.params)
+			_bot_status_slots_sent = true
 		var bot := _bot_input()
 		move = bot[0]
 		buttons = bot[1]
@@ -493,7 +626,9 @@ func _ability_and_swap_buttons() -> int:
 ## two lights; off its turn it holds block.
 ## 4–6 s: abilities, same target. Both bots hold block and each presses two
 ## different ability slots, 1 s apart: the first bot at 4.0 and 5.0, the other
-## at 4.5 and 5.5.
+## at 4.5 and 5.5 (see _bot_ability_button).
+## On its own turn and in the ability phase, a ready self-buff (Bloodlust) is
+## used once the target is within BOT_BUFF_REACH (_bot_self_buff_input).
 ## 6–8 s: walk in circles; swap weapons at 6.95 (after any ability; again at
 ## 7.2 if that press didn't swap), jump at
 ## 7.25, air dodge at 7.4, ground dodge at 7.95, and a free respec at 7.6
@@ -542,9 +677,9 @@ func _bot_input() -> Array:
 				buttons |= PlayerState.BUTTON_BLOCK
 				var offset := 0.0 if first_turn else 0.5
 				if crossed.call(4.0 + offset):
-					buttons |= _bot_ability_button(cycle * 2)
+					buttons |= _bot_ability_button(cycle * 2, true)
 				elif crossed.call(5.0 + offset):
-					buttons |= _bot_ability_button(cycle * 2 + 1)
+					buttons |= _bot_ability_button(cycle * 2 + 1, false)
 			elif turn_time < 0.0 or turn_time >= 2.0:
 				# Guard up for the whole off turn: other players are drawn ~0.1 s in
 				# the past, too late to react to a light attack's windup.
@@ -553,21 +688,69 @@ func _bot_input() -> Array:
 				buttons |= PlayerState.BUTTON_ATTACK  # held 0.3 s: heavy
 			elif crossed.call(turn_start + 1.35) or crossed.call(turn_start + 1.75):
 				buttons |= PlayerState.BUTTON_ATTACK  # one tick: light on release
+			if phase >= 4.0 or (turn_time >= 0.0 and turn_time < 2.0):
+				# Not on the off turn: that guard stays up.
+				buttons |= _bot_self_buff_input(flat.length(), t, cycle)
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 
 
-## One of the equipped weapon's filled ability slots, rotating with `turn`
-## (offset by peer id so two bots differ).
-func _bot_ability_button(turn: int) -> int:
+## One of the equipped weapon's filled ability slots. The first press of the
+## phase (`first`) prefers a ready self-buff (Bloodlust, so the second press's
+## hits carry it), else a ready ability that applies a status (Opening Strike).
+## Otherwise it rotates through the ready abilities without a self-buff with
+## `turn` (offset by peer id so two bots differ).
+func _bot_ability_button(turn: int, first: bool) -> int:
+	var state := _local_player.state
+	var weapon := state.weapon(_local_player.params)
 	var filled: Array[int] = []
+	var hitting: Array[int] = []
 	for slot in PlayerState.ABILITY_SLOTS:
-		if _local_player.state.slot_ability(slot) >= 0:
-			filled.append(slot)
+		var ability := weapon.ability(state.slot_ability(slot))
+		if ability == null:
+			continue
+		filled.append(slot)
+		if ability.self_status.is_empty() and state.cooldown_left(state.slot_ability(slot)) == 0:
+			hitting.append(slot)
 	if filled.is_empty():
 		return 0
-	var slot := filled[(turn + multiplayer.get_unique_id()) % filled.size()]
+	if first:
+		for key in ["self_status", "applies_status"]:
+			for slot in filled:
+				var index := state.slot_ability(slot)
+				if not str(weapon.ability(index).get(key)).is_empty() and state.cooldown_left(index) == 0:
+					return PlayerState.BUTTON_ABILITY_1 << slot
+	var pool := hitting if not hitting.is_empty() else filled
+	var slot := pool[(turn + multiplayer.get_unique_id()) % pool.size()]
 	return PlayerState.BUTTON_ABILITY_1 << slot
+
+
+## Bot, on its own fight turn and in the ability phase: a ready self-buff
+## (Bloodlust) is used as soon as the target is within BOT_BUFF_REACH, followed
+## 0.4 s later by a hitting ability, so the buffed hits land while the target
+## is close.
+func _bot_self_buff_input(distance: float, t: float, cycle: int) -> int:
+	if _bot_followup_at > 0.0 and t >= _bot_followup_at:
+		_bot_followup_at = -1.0
+		return _bot_ability_button(cycle * 2 + 1, false)
+	if distance > BOT_BUFF_REACH or _local_player.state.is_attacking():
+		return 0
+	var button := _bot_self_buff_button()
+	if button != 0:
+		_bot_followup_at = t + 0.4
+	return button
+
+
+## The slot of a ready ability with a self_status (Bloodlust), or 0.
+func _bot_self_buff_button() -> int:
+	var state := _local_player.state
+	var weapon := state.weapon(_local_player.params)
+	for slot in PlayerState.ABILITY_SLOTS:
+		var index := state.slot_ability(slot)
+		var ability := weapon.ability(index)
+		if ability and not ability.self_status.is_empty() and state.cooldown_left(index) == 0:
+			return PlayerState.BUTTON_ABILITY_1 << slot
+	return 0
 
 
 func _nearest_enemy(max_distance: float) -> Enemy:
@@ -637,6 +820,7 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 			_enemies.add_child(enemy)
 		enemy.push_snapshot(server_time, state[2], state[3], state[4], state[5], state[7])
 		enemy.set_health(state[6])
+		enemy.set_statuses(state[8])
 	for enemy: Enemy in _enemies.get_children():
 		if not seen.has(enemy.enemy_id):
 			_enemies.remove_child(enemy)
@@ -707,6 +891,7 @@ func _update_hud() -> void:
 			banner = "Defeated\nRespawning in %d" % seconds_left
 		_hud.set_banner(banner)
 		_update_loadout_hud()
+		_update_status_hud()
 
 
 ## The ability bar and weapon line, from the local player's predicted state.
@@ -727,6 +912,18 @@ func _update_loadout_hud() -> void:
 		var left := state.cooldown_left(state.slot_ability(slot))
 		_hud.set_ability(slot, ability.display_name,
 				left / float(maxi(1, ability.cooldown_ticks)), left / tps)
+
+
+## The status row, from the local player's predicted state.
+func _update_status_hud() -> void:
+	var defs := _local_player.params.statuses
+	var tps := float(Engine.physics_ticks_per_second)
+	var entries: Array = []
+	for e in _local_player.state.statuses.entries:
+		var def := defs.get_def(e.status)
+		if def:
+			entries.append([def.display_name, e.stacks, e.ticks_left / tps, def.is_debuff()])
+	_hud.set_statuses(entries)
 
 
 ## Debug: with --screenshot-dir=PATH, saves this game window's image every 0.25 s
@@ -762,6 +959,9 @@ func print_summary() -> void:
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored])
 		print("SUMMARY abilities uses=%d ability_hits=%d parries=%d swaps=%d builds=%d builds_refused=%d" % [
 				_ability_uses, _ability_hits, _parries, _swaps, _builds.accepted, _builds.rejected])
+		print("SUMMARY statuses applied=%d on_enemies=%d self_buffs=%d dot_ticks=%d dot_damage=%d ally_refused=%d ally_applied=%d" % [
+				_statuses_applied, _statuses_on_enemies, _self_buffs, _status_ticks,
+				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])
 		return
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [

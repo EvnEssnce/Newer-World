@@ -57,6 +57,11 @@ var block_regen_multiplier := 0.0
 var block_turn_speed := 0.0
 var guard_break_stagger_ticks := 0
 
+# Statuses
+## Every status effect (data/status_effects.cfg). PlayerState.statuses refers
+## to them by index.
+var statuses := StatusDefs.new()
+
 static var _current: PlayerParams
 
 
@@ -110,6 +115,7 @@ static func from_tuning() -> PlayerParams:
 	p.block_turn_speed = deg_to_rad(Tuning.get_value("combat", "block", "turn_speed"))
 	p.guard_break_stagger_ticks = roundi(
 			Tuning.get_value("combat", "block", "guard_break_stagger") * tps)
+	p.statuses = StatusDefs.current()
 	return p
 
 

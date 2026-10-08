@@ -2,19 +2,21 @@ class_name PlayerState
 extends RefCounted
 ## A player's simulated state besides position and velocity: stamina, dodge,
 ## attacks, abilities and their cooldowns, weapon loadout and swap, block,
-## stagger, death, facing. step() advances it one tick from one input. No
-## physics here, so it can be unit tested (tests/test_player_state.gd,
+## stagger, death, facing, statuses. step() advances it one tick from one input.
+## No physics here, so it can be unit tested (tests/test_player_state.gd,
 ## tests/test_attacks.gd, tests/test_block.gd, tests/test_death_stagger.gd,
-## tests/test_abilities.gd, tests/test_weapon_swap.gd).
+## tests/test_abilities.gd, tests/test_weapon_swap.gd, tests/test_status_sim.gd).
 ##
 ## The server sends this in every snapshot, and the client restores it when it
 ## reconciles, so everything that affects the simulation must live here.
 ##
 ## Blocked hits, stagger, death, respawn, parries (start_counter), an ability
-## stopping on hit (end_active_window) and loadout changes (set_loadout) are
-## applied by the server outside step() (the client can't predict them). Each
-## one bumps server_events, so the client knows the resulting correction was
-## expected.
+## stopping on hit (end_active_window), loadout changes (set_loadout) and
+## statuses the server applies or removes (apply_status, take_on_hit_statuses,
+## cleanse) are applied by the server outside step() (the client can't predict
+## them). Each one bumps server_events, so the client knows the resulting
+## correction was expected. A self-buff from the player's own attack or ability
+## (self_status) starts inside step(), so it's predicted.
 
 ## Jump, attack and block are set on every tick they're held; dodge, swap and
 ## the ability buttons only on the tick they're pressed. Tap attack = light (on
@@ -112,6 +114,14 @@ var ability := -1
 ## World-space XZ direction of the ability's dash (its facing when it started).
 var ability_dir := Vector2.ZERO
 
+# Statuses (indices into PlayerParams.statuses)
+## Buffs and debuffs, ticked down in step(). Slow and root change movement
+## (PlayerMovement), stun staggers; damage effects are the server's business.
+var statuses := StatusEffects.new()
+## Output of the last step(), not state (so not in to_array): damage over time
+## (bleed) due that tick. The server applies it; clients ignore it.
+var status_damage := 0.0
+
 
 func _init() -> void:
 	ability_slots.resize(WEAPON_SLOTS * ABILITY_SLOTS)
@@ -129,6 +139,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	for i in cooldowns.size():
 		if cooldowns[i] > 0:
 			cooldowns[i] -= 1
+	status_damage = statuses.tick(params.statuses)
 	if dodge_tick >= 0:
 		dodge_tick += 1
 		if dodge_tick >= params.dodge_ticks:
@@ -181,6 +192,16 @@ func is_staggered() -> bool:
 	return stagger_ticks > 0
 
 
+## False while rooted: no walking, dodging, jumping or dashing.
+func can_move(params: PlayerParams) -> bool:
+	return statuses.can_move(params.statuses)
+
+
+## Walking speed multiplier from slows (1.0 = none).
+func status_move_multiplier(params: PlayerParams) -> float:
+	return statuses.move_multiplier(params.statuses)
+
+
 # --- Server-applied events ---
 
 ## Interrupts the current attack, ability, dodge or swap and stops the player
@@ -223,6 +244,7 @@ func kill() -> void:
 	swap_tick = -1
 	swap_buffer = 0
 	stagger_ticks = 0
+	statuses.clear()
 	server_events += 1
 
 
@@ -230,6 +252,7 @@ func revive(params: PlayerParams) -> void:
 	dead = false
 	stamina = params.max_stamina
 	stamina_regen_wait = 0
+	statuses.clear()
 	server_events += 1
 
 
@@ -260,6 +283,56 @@ func end_active_window(params: PlayerParams) -> void:
 		return
 	attack_tick = attack.recovery_start_tick()
 	server_events += 1
+
+
+## Server: applies a status (index into params.statuses) from someone else,
+## e.g. a debuff from a hit. duration_ticks -1 = the status's own. A stun also
+## staggers for its duration (stun and stagger are one mechanic). Returns false
+## if nothing was applied (dead, or not a status).
+func apply_status(params: PlayerParams, index: int, stacks: int = 1, duration_ticks: int = -1,
+		source: int = 0) -> bool:
+	if dead or not statuses.apply(params.statuses, index, stacks, duration_ticks, source):
+		return false
+	server_events += 1
+	var def := params.statuses.get_def(index)
+	if def.stuns:
+		apply_stagger(statuses.ticks_left(index))
+	return true
+
+
+## Server: this player landed a damaging hit. Returns the statuses it applies to
+## the target from the player's own on-hit statuses ([index, stacks] each, e.g.
+## Bloodlust's bleed), using up their stacks.
+func take_on_hit_statuses(params: PlayerParams) -> Array[Vector2i]:
+	var before := statuses.to_packed()
+	var result := statuses.take_on_hit_statuses(params.statuses)
+	if statuses.to_packed() != before:
+		server_events += 1
+	return result
+
+
+## Server: removes every debuff (a cleanse). Removing a stun also ends its
+## stagger. Returns how many were removed.
+func cleanse(params: PlayerParams) -> int:
+	var stunned := false
+	for e in statuses.entries:
+		var def := params.statuses.get_def(e.status)
+		stunned = stunned or (def != null and def.stuns)
+	var removed := statuses.remove_debuffs(params.statuses)
+	if removed > 0:
+		if stunned:
+			stagger_ticks = 0
+		server_events += 1
+	return removed
+
+
+## Inside the sim: an attack or ability with a self_status (Bloodlust) applies
+## it to its user as it starts, so the client predicts it.
+func _apply_self_status(attack: AttackParams, params: PlayerParams) -> void:
+	if attack == null or attack.self_status.is_empty():
+		return
+	statuses.apply(params.statuses, params.statuses.index_of(attack.self_status),
+			attack.self_status_stacks)
 
 
 ## Loadout changes (weapons, slotted abilities) can't happen mid-attack,
@@ -330,10 +403,10 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 # --- Dodge ---
 
 ## A dodge can start when not already dodging or swapping, with enough stamina,
-## on the floor or with an air dodge left, and not mid-attack (except during
-## recovery, which the dodge cancels).
+## on the floor or with an air dodge left, not rooted, and not mid-attack
+## (except during recovery, which the dodge cancels).
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
-	return (can_act() and dodge_tick < 0 and swap_tick < 0
+	return (can_act() and can_move(params) and dodge_tick < 0 and swap_tick < 0
 			and stamina >= params.dodge_stamina_cost
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
@@ -491,6 +564,7 @@ func _handle_attack_input(buttons: int, aim_yaw: float, params: PlayerParams) ->
 		attack_serial += 1
 		yaw = aim_yaw
 		queued_attack = ATTACK_NONE
+		_apply_self_status(attack_params(params), params)
 		return
 	if queued_attack_ticks <= 0:
 		queued_attack = ATTACK_NONE
@@ -504,6 +578,7 @@ func _start_ability(index: int, aim_yaw: float, params: PlayerParams) -> void:
 	yaw = aim_yaw
 	ability_dir = forward(yaw)
 	cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = weapon(params).ability(index).cooldown_ticks
+	_apply_self_status(weapon(params).ability(index), params)
 
 
 func _attack_turn_speed(params: PlayerParams) -> float:
@@ -535,7 +610,8 @@ func to_array() -> Array:
 			air_dodges_used, attack_type, attack_tick, queued_attack, queued_attack_ticks,
 			stagger_ticks, dead, server_events, attack_hold, blocking, on_floor,
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
-			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial]
+			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
+			statuses.to_packed()]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -567,6 +643,7 @@ static func from_array(data: Array) -> PlayerState:
 	s.ability_dir = data[24]
 	s.queued_ability_slot = data[25]
 	s.attack_serial = data[26]
+	s.statuses = StatusEffects.from_packed(data[27])
 	return s
 
 
@@ -599,4 +676,5 @@ func matches(other: PlayerState) -> bool:
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot
-			and attack_serial == other.attack_serial)
+			and attack_serial == other.attack_serial
+			and statuses.to_packed() == other.statuses.to_packed())

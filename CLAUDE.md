@@ -64,13 +64,17 @@ game/
   items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
+  status/status_def.gd       One status effect's tuning (data/status_effects.cfg).
+  status/status_defs.gd      Every status, by index (what the network sends); validate().
+  status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
+                             cleanse, on-hit (Bloodlust). Pure logic, unit tested.
 ui/                  connect_menu (client start screen), hud (health/stamina bars, ability bar,
-                     weapon line, debug info), mastery_panel (K: tree, respec, slots),
+                     weapon line, status row, debug info), mastery_panel (K: tree, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
                      weapon_<id> (broadsword, dual_axes), class_<id> (fighter),
                      mastery (shared tree rules), mastery_<weapon>, loot (rarities + loot
-                     tables), items, affixes, party (.cfg).
+                     tables), items, affixes, party, status_effects (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -105,7 +109,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   velocity and state and replays unacknowledged inputs. "Corrections" on the HUD count
   only unexpected ones and should stay 0 on localhost; a mismatch caused by a server
   event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn,
-  parry counter, ability stopped on hit, loadout change) isn't counted. `--verbose` logs
+  parry counter, ability stopped on hit, loadout change, a status applied/used
+  up/cleansed by the server) isn't counted. `--verbose` logs
   each unexpected one, and server-side input drops.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
@@ -133,6 +138,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   affects the sim and isn't in `to_array()`, reconciliation will break. Anything that
   changes the sim goes in `PlayerState.step` or `PlayerMovement.step`, which both server
   and prediction run. Keep them deterministic: no randomness, no `Input`, durations in ticks.
+- **`PlayerState.to_array()` layout**: indices 0–26 as listed in `to_array()`; 27 =
+  `StatusEffects.to_packed()` (`PackedInt32Array`, 4 ints per status: index into
+  `StatusDefs`, stacks, ticks left, ticks elapsed). Append new fields at the end.
+  Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
+  statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`. Clients flash the body white while
   it's true.
 
@@ -197,6 +207,46 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (`revive()`). The client shows a countdown banner from the `HIT_DEFEATED` event.
 - No lag compensation yet: hits use targets' current server positions, while the
   attacker sees them `interpolation_delay` in the past.
+
+## Status effects
+
+- `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
+  from an ally; removed by a cleanse) or **buff**; `affects` = **sim** (changes
+  movement/actions, predicted: slow, root, stun) or **damage** (server-only numbers:
+  bleed, exposed, damage_up, damage_reduction, bloodlust). Duration, max_stacks, then
+  only the keys for what it does. Reapplying adds stacks (capped) and resets the time to
+  full (never shortens). `StatusDefs.validate()` checks the file (a unit test runs it).
+- **Players**: `PlayerState.statuses` (synced in `to_array()`), ticked down at the top of
+  `PlayerState.step`. Slow scales walking speed and root stops walking/dodging/jumping/
+  dashing in `PlayerMovement`/`can_dodge`. **Stun = stagger**: applying a stun staggers
+  for its duration (same interrupt and "can't act"); the status entry is the name/timer
+  and what a cleanse removes (`cleanse()` also ends the stagger). Enemies: stun =
+  `brain.stagger`.
+- **Server events vs prediction**: the server applying a status (`apply_status`), using
+  up an on-hit stack (`take_on_hit_statuses`) or cleansing (`cleanse`) bumps
+  `server_events`. A self-buff from your own attack/ability (`self_status`) starts inside
+  `step()` (`_apply_self_status`), so it's predicted.
+- **Applying**: attack/ability keys `applies_status`, `status_stacks`, `status_duration`
+  (target, server, on `HIT_DAMAGED` only: not blocked/evaded/parried/killing hits) and
+  `self_status`, `self_status_stacks` (self, in the sim). Owner statuses with
+  `on_hit_status` (Bloodlust) add that status to each damaging hit and, with
+  `consume_on_hit`, use up a stack per hit. All in `World._give_hit_statuses` /
+  `_give_status`, which refuses debuffs between allies (`are_allies`). Death and respawn
+  clear statuses.
+- **Damage** (server, `World`): attacker `damage_dealt_multiplier` × target
+  `damage_taken_multiplier` (per-stack bonuses add up, then multiply) in
+  `_on_attack_stepped`, `_on_enemy_attack_stepped` and `_strike_player`. Damage over time:
+  `StatusEffects.tick()` returns what's due (`PlayerState.status_damage`,
+  `Enemy.status_damage`); `World._apply_player_status_damage` /
+  `_apply_enemy_status_damage` apply it (× damage taken) after the tick's steps, through
+  the normal death path (`_kill_player`, `_damage_enemy`), reported as
+  `HIT_STATUS_DAMAGE` (or `HIT_DEFEATED`) with the status's source as attacker.
+- **UI**: HUD status row (local player, predicted: name, stacks, seconds; green edge =
+  buff, red = debuff); a status line under remote players' and Husks' health.
+- Fighter status abilities: Broadsword **Opening Strike** (Exposed), Dual Axes
+  **Bloodlust** (self-buff: next 4 hits bleed) and **Hamstring** (Slow, default axes R
+  slot). Root, stun, damage_up and damage_reduction exist for later abilities (nothing
+  applies them yet).
 
 ## Enemies
 
@@ -288,8 +338,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 16 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits on each other, Husk fights still happen
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 16 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk) and a bleed tick
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits and 0 debuffs on each other, Husk fights still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
@@ -300,7 +350,11 @@ Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:p
 `--class=ID` (client: character class, default `fighter`; unknown = default),
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
 Husk within 15 m, else the nearest player), then both use abilities (guard up between), then circle
-with weapon swap/jump/air dodge/ground dodge and a free respec; see `World._bot_input`),
+with weapon swap/jump/air dodge/ground dodge and a free respec; see `World._bot_input`.
+On joining it slots its status abilities first (`BuildService.bot_slot_status_abilities`);
+it uses Bloodlust as soon as its target is within 2 m on its own turn or in the
+ability phase, then a hitting ability; the ability phase's first press prefers a
+self-buff, then a status ability),
 `--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
 accepts any invite; it doesn't attack or use abilities until it's in a party, then
 still swings at its ally when no Husk is near, which the server ignores; see
