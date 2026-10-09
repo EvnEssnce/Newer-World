@@ -130,6 +130,8 @@ var _roar_guards := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
+## World/Loot: drops, pickup, inventories (both sides).
+var loot: LootSystem
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
 
@@ -175,6 +177,7 @@ func _ready() -> void:
 	_verbose = LaunchArgs.has_flag("verbose")
 	_add_party_system()
 	_add_projectile_system()
+	_add_loot_system()
 	_builds = BuildService.new()
 	_builds.name = "Builds"
 	add_child(_builds)
@@ -310,6 +313,7 @@ func _client_ready(class_id: String) -> void:
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
 	_builds.send_build(player)
+	loot.add_player(peer_id)
 	print("[server] peer %d joined as %s (%d players)" % [
 			peer_id, player.build.class_def.id, _players.get_child_count()])
 
@@ -933,6 +937,7 @@ func _damage_enemy(enemy: Enemy, damage: float, stagger_ticks: int, attacker_id:
 	if killed:
 		enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
 		_enemy_kills += 1
+		loot.on_enemy_killed(enemy)
 	_send_hit(attacker_id, enemy.enemy_id, damage, HIT_DEFEATED if killed else alive_result)
 	return killed
 
@@ -1301,6 +1306,14 @@ func _add_party_system() -> void:
 	party.name = "Party"
 	party.players = _players
 	add_child(party)
+
+
+## World/Loot must exist on the server and every client (RPCs by path).
+func _add_loot_system() -> void:
+	loot = LootSystem.new()
+	loot.name = "Loot"
+	loot.players = _players
+	add_child(loot)
 
 
 # --- Projectiles (the PROJ tag; see ProjectileSystem) ---
@@ -1939,8 +1952,10 @@ func print_summary() -> void:
 		_print_ember_summary()
 		_print_juggernaut_summary()
 		_projectiles.print_summary()
+		loot.print_summary()
 		return
 	_projectiles.print_client_summary()
+	loot.print_client_summary()
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,

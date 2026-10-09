@@ -81,7 +81,14 @@ game/
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
   items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
   items/item.gd              One rolled item (plain data, to_dict/from_dict).
-  items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
+  items/loot_roller.gd       Rolls loot tables and items (and a kill: one roll per contributor).
+                             Pure logic, unit tested.
+  items/inventory.gd         One player's items (slots, uids). Pure logic, unit tested.
+  items/ground_loot.gd       Personal drops on the ground: owner, reach, expiry, partial
+                             pickups. Pure logic, unit tested.
+  items/loot_system.gd       World/Loot: kill rolls, drop/pickup/discard RPCs, inventories;
+                             client drop visuals, pickup prompt, bot pickups.
+  items/loot_drop_visual.gd  Client look of a drop: sack, rarity beam, best item's name.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
   status/status_def.gd       One status effect's tuning (data/status_effects.cfg).
@@ -92,7 +99,8 @@ game/
 ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars, ability
                      bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
-                     party_hud (party frames, invite prompt, party notices; built in code).
+                     party_hud (party frames, invite prompt, party notices; built in code),
+                     loot_hud (pickup prompt, loot feed) and inventory_panel (I).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer), class_<id> (fighter, juggernaut),
@@ -139,6 +147,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   applied/used up/cleansed by the server, forced movement, Ember gained, Rebirth
   started/finished) isn't counted. `--verbose` logs
   each unexpected one, and server-side input drops.
+- **Loot** (`World/Loot`, `LootSystem`; see "Loot"): reliable RPCs. Client → server
+  `_request_pickup()` (no arguments: the server picks up the sender's own drops in
+  reach of its server position) and `_request_discard(uid)`; server → that client only
+  `_receive_drop(id, position, items)` (new or what's left of one),
+  `_receive_drop_removed(id)`, `_receive_inventory(items, slots)`,
+  `_receive_picked(items)` (the feed) and `_receive_notice(text)`. Items travel as
+  `Item.to_dict()`. Never in snapshots, never touches `PlayerState`.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
   `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
@@ -632,12 +647,13 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
 
 WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
 click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery panel (K
-or Esc closes it), T/Y/N/L/Delete party (see below), F3 hitboxes, Esc frees the mouse.
+or Esc closes it), T/Y/N/L/Delete party (see below), F pick up your loot in reach, I
+inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse.
 Panels that need the mouse join the `modal_ui` group: while one is visible, clicks and
-wheel scrolls don't recapture the mouse. 1–9 are reserved for later, F for pickup and I
-for inventory (milestone 2): don't bind them to anything else.
+wheel scrolls don't recapture the mouse. 1–9 are reserved for later (consumables):
+don't bind them to anything else.
 
-## Loot (milestone 2; rolls only so far)
+## Loot (milestone 2; drops, pickup and inventory so far)
 
 - `data/loot.cfg`: rarity tiers (affix count, color) and loot tables (`[table_<id>]`:
   drop chance, rolls, gear score range, item and rarity weights). `data/items.cfg`: item
@@ -647,13 +663,30 @@ for inventory (milestone 2): don't bind them to anything else.
   modify combat numbers directly (damage_pct, crit_chance, max_health, ...).
 - Weapon items only name a weapon type (`data/weapon_<type>.cfg` holds the attacks) and
   are class-locked. `weapon_power` is a percent of the weapon file's damage.
-- `LootRoller` is server only and seeded by a `RandomNumberGenerator`. Loot will be
-  personal: each player who damaged an enemy gets their own roll.
+- `LootRoller` is server only and seeded by a `RandomNumberGenerator`.
+- **Personal loot** (`LootSystem`, server): an enemy's `[loot] table` (enemy file; ""
+  = none) is rolled once per player in `Enemy.damaged_by` (anyone whose hit, projectile
+  or damage over time took health since it (re)spawned or healed at home) when it dies
+  (`World._damage_enemy` → `on_enemy_killed`), `LootRoller.roll_kill`. Each roll that
+  drops something becomes its own `GroundLoot.Drop`, `[drops] scatter` m from the body
+  (snapped to the ground), seen only by its owner, gone after `[drops] lifetime`. No
+  party loot rules needed.
+- **Pickup** (F): the server moves the sender's drops within `[drops] pickup_range`
+  (horizontal, its own positions; not while dead) into their `Inventory`, nearest
+  first; a full inventory (`[inventory] slots`) leaves the rest on the ground with a
+  notice. Items get a `uid` in the inventory (requests name items by it). Discard (two
+  clicks in the I panel) deletes an item. Inventories live on the server and are lost
+  on disconnect (persistence is milestone 5).
+- **Client**: `LootDropVisual` (sack, a beam in the best item's rarity color, its name
+  drawn on top), the "[F] Pick up" prompt and a feed of pickups/notices (`LootHud`,
+  canvas layer 2, above the HUD), `InventoryPanel` (I: newest first, rarity color, kind,
+  gear score, `Item.stat_lines`). A `--bot` picks up its drops when within 80% of reach.
+  Counted in `SUMMARY loot` (server) and `SUMMARY client=N loot` lines; the smoke test
+  checks drops and a pickup (with `drop_chance` 1).
 - `ItemDatabase.validate()` checks the three files against each other; a unit test runs
   it on the real data. `tools\roll_loot.ps1 [-Table husk] [-Kills 50000]` prints what a
   table really drops.
-- Not built yet: drops in the world, pickup (F), inventory (I), equipping. See
-  PROGRESS.md for the order.
+- Not built yet: equipping (gear changing your numbers). See PROGRESS.md.
 
 ## Parties and allies
 
@@ -697,11 +730,22 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped and picked up
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
+
+**Linux cloud sessions** (no PowerShell, no Godot installed): download
+`Godot_v4.7.2-stable_linux.x86_64.zip` from the godotengine GitHub releases into the
+scratchpad, run `--headless --import` once, then the same commands the scripts run:
+`--headless res://tests/framework/run_tests.tscn` for tests, and for the smoke test a
+headless server plus two `--bot` clients with the `--tune` list from `smoke_test.ps1`
+(grep it out of the file so it stays in one place), then read the `SUMMARY` lines. For
+frames, run a client with `xvfb-run -a <godot> --rendering-driver opengl3 -- --bot
+--screenshot-dir=...` (an ALSA audio error there is harmless). Two bots quitting at
+the same instant sometimes print `party_members=0` for one of them; that's quit
+timing, not a party bug.
 Both smoke scripts take `-Port N` (default 24599) so parallel runs (e.g. two worktrees)
 don't collide. Within one checkout, run them one after the other: they share the
 `build\smoke` log folder.
@@ -742,7 +786,7 @@ still swings at its ally when no Husk is near, which the server ignores; see
 `PartySystem._bot_step`), `--verbose` (log positions every 2 s, server logs hits and
 refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--mastery-panel` (open the K panel at start, for screenshot checks; `--mastery-panel=wings`
-opens it on the Wings tab),
+opens it on the Wings tab), `--inventory-panel` (open the I panel at start, same use),
 `--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
 `SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),
 `--screenshot-dir=PATH` (save the game window every 0.25 s as `frame_<N>.png`, for

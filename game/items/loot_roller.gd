@@ -3,6 +3,19 @@ class_name LootRoller
 ## unit tested (tests/test_loot.gd) and the same seed reproduces the same drops.
 
 
+## Personal loot for a kill: every player who damaged the enemy (peer ids, in
+## order) gets their own roll of the table. Returns peer id -> items, leaving
+## out players whose roll dropped nothing.
+static func roll_kill(table: ItemDatabase.LootTable, db: ItemDatabase, contributors: Array[int],
+		rng: RandomNumberGenerator) -> Dictionary[int, Array]:
+	var result: Dictionary[int, Array] = {}
+	for peer in contributors:
+		var items := roll_table(table, db, rng)
+		if not items.is_empty():
+			result[peer] = items
+	return result
+
+
 ## One player's drop from a kill: nothing (drop_chance failed), or `rolls` items,
 ## each with its own item, rarity and gear score.
 static func roll_table(table: ItemDatabase.LootTable, db: ItemDatabase,

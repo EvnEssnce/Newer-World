@@ -11,6 +11,43 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-09 (27): Loot drops, pickup and inventory (milestone 2, session 2)
+
+Built in a Linux cloud session (Godot downloaded there; see "Linux cloud sessions" in
+CLAUDE.md). Wave 3's playtest list (session 26) is untouched and still next for combat.
+
+Done:
+- **Personal loot**: when a Husk dies, every player who damaged it gets their own roll
+  of `[table_husk]` (`Enemy.damaged_by`, `LootRoller.roll_kill`). Each drop lands 1 m
+  from the body (`[drops] scatter`), only its owner sees it, and it disappears after
+  120 s (`[drops] lifetime`). The Husk's table is set in `data/enemy_husk.cfg [loot]`.
+- **Drops look**: a small sack with a light beam in the best item's rarity colour and
+  its name above it ("+N" when it holds more), drawn on top so a body can't hide it.
+- **F picks up** everything of yours within 2.5 m (`[drops] pickup_range`); a
+  "[F] Pick up Iron Broadsword (+1 more)" prompt shows when something is in reach, and a
+  feed on the right lists what you picked up in rarity colours. The server decides
+  (its own positions, not while defeated); a full bag leaves the rest on the ground.
+- **I opens the inventory**: 40 slots (`[inventory] slots`), newest first, each item's
+  rarity colour, kind ("Epic  Chest"), gear score and stats ("Sear: +3.1% crit
+  chance"). Discard takes two clicks. Inventories are lost on disconnect (persistence
+  is milestone 5).
+- Pure logic + tests: `Inventory`, `GroundLoot` (owner, reach, expiry, partial pickup).
+  The bot picks up its drops; the smoke test now requires a drop and a pickup (it runs
+  Husks at 100% drop chance). HUD hint line shortened to fit F and I.
+- Tests: 427. Smoke (Linux runner, same flags as the .ps1): default, `-Party` and
+  `-Class juggernaut` passed, 0 corrections; `SUMMARY loot` showed 9–15 drops and 7–13
+  pickups per run. Visuals checked from game frames (drops, prompt, panel, feed).
+  `smoke_test.ps1` itself wasn't run (no PowerShell here): run it on Windows once.
+
+Needs a hand playtest (`run_local_test.ps1`):
+- Kill Husks: do drops read well (beam, name, colours)? Is 2.5 m pickup reach right?
+- F prompt and the feed; I panel (scroll, Discard twice, I/Esc close, mouse back).
+- With the bot: you only see your own drops.
+
+Decisions to confirm: F takes every drop of yours in reach at once (no loot window);
+no pickup while defeated; a discarded item is deleted, not dropped; damage over time
+counts as damaging the enemy; a Husk that walks home and heals forgets who hit it.
+
 ### 2026-10-09 (26): Wave 3 playtest feedback (plan; nothing built yet)
 
 The developer playtested sessions 24–25 (`PLAYTEST.md` has the ticked list and notes).
@@ -800,11 +837,13 @@ building its Wave 1 in parallel: 1A ability framework/weapon swap/Fighter, 1B pa
    attributes** (design decision): gear stats are things like damage %, armor, max
    health/stamina, crit. Weapon items name a weapon type (class-locked; attack timings
    stay in 1A's `data/weapon_<name>.cfg`, not in loot data).
-2. **After Wave 1 merges** (touches `world.gd`, HUD): dead Husks drop **personal** loot
-   (everyone who damaged it gets their own server roll, so no party loot rules); pick up
-   with **F**, inventory screen on **I** (Wave 1 uses Q/E/R/X/K/Z/C).
-3. **After 1A merges:** equipping armor and weapons changes your numbers, built on 1A's
-   weapon slots, with gear bonuses feeding the same modifier path as mastery passives.
+2. **Done (session 27):** dead Husks drop **personal** loot (everyone who damaged it
+   gets their own server roll); pick up with **F**, inventory screen on **I**.
+3. **Next:** equipping armor and weapons changes your numbers, built on the weapon
+   slots, with gear bonuses feeding the same modifier path as mastery passives. Open
+   questions for it: how armor reduces damage; whether equipped weapon items replace
+   the class's default weapons or only modify them; head/legs/feet Legendaries still
+   roll only 2 affixes (session 10).
 
 Later / unscheduled:
 - Light attack combo chain (New World-style 3-hit string)?

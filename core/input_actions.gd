@@ -19,6 +19,9 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	&"wing_2": [KEY_C],
 	&"swap_weapon": [KEY_X],
 	&"toggle_mastery": [KEY_K],
+	# Loot (LootSystem): pick up your drops in reach, open the inventory.
+	&"pickup": [KEY_F],
+	&"toggle_inventory": [KEY_I],
 	&"toggle_hitboxes": [KEY_F3],
 	# Party (PartySystem). Invite/kick target the player nearest the crosshair.
 	&"party_invite": [KEY_T],

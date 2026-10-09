@@ -32,6 +32,8 @@ var threat_switch_ratio := 1.0
 var threat_decay_factor := 1.0
 
 var attack: AttackParams
+## Loot table id (data/loot.cfg [table_<id>]) its killers roll, or "" for none.
+var loot_table := ""
 
 static var _cache: Dictionary[String, EnemyParams] = {}
 
@@ -69,4 +71,5 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.threat_decay_factor = pow(1.0 - decay, 1.0 / tps)
 
 	p.attack = AttackParams.from_tuning(file, "attack", tps)
+	p.loot_table = Tuning.get_optional(file, "loot", "table", "")
 	return p
