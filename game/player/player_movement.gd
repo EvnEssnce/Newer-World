@@ -6,10 +6,11 @@ class_name PlayerMovement
 ## randomness, no frame-time dependence, no reading of Input here.
 
 
+## aim_pitch: the camera's pitch (radians, up = positive); see PlayerState.step.
 static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, buttons: int,
-		aim_yaw: float, params: PlayerParams, delta: float) -> void:
+		aim_yaw: float, params: PlayerParams, delta: float, aim_pitch := 0.0) -> void:
 	var on_floor := state.on_floor
-	state.step(move, buttons, aim_yaw, on_floor, params, delta)
+	state.step(move, buttons, aim_yaw, on_floor, params, delta, aim_pitch)
 	if not state.can_act():
 		move = Vector2.ZERO  # staggered, stunned or dead: slide to a stop, can't jump
 		buttons = 0
@@ -33,7 +34,8 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		horizontal = horizontal.move_toward(Vector3.ZERO, params.ground_deceleration * delta)
 	elif state.is_dashing(params):
 		# An ability dash (e.g. Shield Charge) works like a dodge: horizontal only.
-		var dash_speed := state.current_ability(params).dash_speed
+		# ability_dir's length is the fraction of the distance (Crashing Leap).
+		var dash_speed := state.current_ability(params).dash_speed_at(state.attack_tick)
 		horizontal = Vector3(state.ability_dir.x, 0.0, state.ability_dir.y) * dash_speed
 	else:
 		var speed := params.move_speed * state.status_move_multiplier(params)

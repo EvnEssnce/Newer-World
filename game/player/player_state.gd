@@ -127,7 +127,8 @@ var swap_buffer := 0
 ## Index into the equipped weapon's ability pool, or -1.
 var ability := -1
 ## World-space XZ direction of the ability's dash (its facing when it started,
-## or the opposite for a backward dash like Vault).
+## or the opposite for a backward dash like Vault). Its length is the fraction
+## of the dash distance covered (below 1 only for a pitch-aimed dash).
 var ability_dir := Vector2.ZERO
 
 # Statuses (indices into PlayerParams.statuses)
@@ -188,8 +189,10 @@ func _init() -> void:
 
 ## Advances one tick. move is the world-space XZ input (length <= 1); aim_yaw is
 ## the camera's facing: an attack starts facing it and keeps turning toward it.
+## aim_pitch is the camera's pitch (radians, up = positive), for dashes aimed by
+## it (AbilityParams.dash_aim_pitch).
 func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: PlayerParams,
-		delta: float) -> void:
+		delta: float, aim_pitch := 0.0) -> void:
 	if on_floor:
 		air_dodges_used = 0
 	for i in cooldowns.size():
@@ -225,7 +228,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	# Presses while staggered stay buffered and fire when the stagger ends.
 	_handle_dodge_input(move, buttons, on_floor, params)
 	_handle_swap_input(buttons, params)
-	_handle_attack_input(move, buttons, aim_yaw, params)
+	_handle_attack_input(move, buttons, aim_yaw, aim_pitch, params)
 	# Attacking and dodging take priority; holding block resumes the guard after.
 	blocking = ((buttons & BUTTON_BLOCK) != 0 and can_act() and dodge_tick < 0
 			and attack_tick < 0 and swap_tick < 0)
@@ -796,7 +799,8 @@ func cooldown_left(index: int) -> int:
 	return cooldowns[equipped * WeaponParams.MAX_ABILITIES + index]
 
 
-func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: PlayerParams) -> void:
+func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float,
+		params: PlayerParams) -> void:
 	var w := weapon(params)
 	var requested := ATTACK_NONE
 	if buttons & BUTTON_ATTACK:
@@ -834,7 +838,7 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 			queued_attack = ATTACK_NONE  # empty slot
 			return
 		if can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index)):
-			_start_ability(index, aim_yaw, params, move)
+			_start_ability(index, aim_yaw, aim_pitch, params, move)
 			queued_attack = ATTACK_NONE
 			return
 	elif queued_attack == ATTACK_WING:
@@ -846,7 +850,7 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 			queued_attack = ATTACK_NONE  # empty slot
 			return
 		if can_attack() and wing_cooldowns[wing_index] == 0 and can_afford(wing):
-			_start_ability(wing_index, aim_yaw, params, move, true)
+			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
 			queued_attack = ATTACK_NONE
 			return
 	elif can_attack():
@@ -864,8 +868,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, params: P
 ## move: this step's movement input (world XZ), for dashes that follow it.
 ## wing: index is into the Wing pool (a Wing ability) instead of the weapon's.
 ## Starts its cooldown and spends its Ember cost.
-func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Vector2.ZERO,
-		wing := false) -> void:
+func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: PlayerParams,
+		move := Vector2.ZERO, wing := false) -> void:
 	attack_type = ATTACK_WING if wing else ATTACK_ABILITY
 	ability = index
 	attack_tick = 0
@@ -879,6 +883,9 @@ func _start_ability(index: int, aim_yaw: float, params: PlayerParams, move := Ve
 		ability_dir = move.normalized() if move.length() > 0.1 else -forward(yaw)
 		# Face the way it goes (its turn_speed 0 keeps it there for the vault).
 		yaw = yaw_for_direction(ability_dir)
+	# A pitch-aimed dash (Crashing Leap) keeps its fraction of the distance in
+	# the length of ability_dir, which PlayerMovement doesn't normalize.
+	ability_dir *= started.dash_fraction(aim_pitch)
 	if wing:
 		wing_cooldowns[index] = started.cooldown_ticks
 	else:

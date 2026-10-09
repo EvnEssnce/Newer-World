@@ -11,6 +11,35 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-08 (22): Crashing Leap aimed by pitch, Diving Strike shape (items 1 and 2)
+
+Done (session 20's list is now complete):
+- **Crashing Leap aimed by camera pitch** (`weapon_dual_axes.cfg`: `dash_aim_pitch`,
+  `aim_full_pitch=0`, `aim_zero_pitch=35`, the camera's `max_pitch`). Level or looking
+  down = 4 m; looking up shortens it linearly; at the camera's top pitch it goes
+  straight up (0 m). Inputs now carry `aim_pitch` as a 5th element (server checks it's
+  finite and clamps to ±90°; bots send 0). The fraction is the length of
+  `ability_dir` at the start, so `to_array()` is unchanged. `PlayerState.step` and
+  `PlayerMovement.step` take `aim_pitch` as an optional last argument.
+- **Diving Strike shape** (`wings_fighter.cfg`): `dash_ease="in"` (speed ramps up,
+  same 5 m; `AbilityParams.dash_speed_at`), `leap_peak=0.3` (rises steeply, long
+  swoop down; `AbilityParams.leap_lift`, now used for every leap), and the hit window
+  moved into the swoop: windup 0.55 → 0.35 s, active 0.12 → 0.25 s (from about 1.8 m
+  in until just after landing). The Broadsword stab now plays during the swoop.
+- New ability keys documented in `weapon_broadsword.cfg`'s key list.
+
+Tests: 354 passed (new: pitch mapping, aimed dash distance and sync, eased dash
+distance, leap curve). Smoke: default and `-Party` both passed, 0 corrections. (Running
+the two in parallel in one checkout makes `-Party` fail: they share `build\smoke`.)
+
+**Needs a hand playtest** (`run_local_test.ps1`) of session 20's four items:
+- Crashing Leap: does looking up feel right for shortening it? (Tune
+  `aim_full_pitch`/`aim_zero_pitch`.) Note the cosmetic leap height doesn't change.
+- Diving Strike: rise and swoop, hits along the swoop (Husks), Broadsword stab.
+- Boomerang Axe's right axe leaves the hand; Opening Strike's stab.
+
+Next after the playtest: Wave 3 in `design/classes.md` (see session 19's **Next**).
+
 ### 2026-10-08 (21): Broadsword stab, Boomerang Axe visuals (items 4 and 3 below)
 
 Done (client visuals only, `player.gd` and `ProjectileSystem._process`):

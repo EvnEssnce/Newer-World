@@ -10,9 +10,10 @@ extends CharacterBody3D
 ## - Remote client player: drawn slightly in the past, interpolating between
 ##   server snapshots.
 ##
-## Inputs are [seq: int, move: Vector2, buttons: int, aim_yaw: float]. "move" is a
-## world-space XZ direction with length <= 1, already rotated by the client's
-## camera; "buttons" holds PlayerState.BUTTON_* bits; "aim_yaw" is the camera's yaw.
+## Inputs are [seq: int, move: Vector2, buttons: int, aim_yaw: float,
+## aim_pitch: float]. "move" is a world-space XZ direction with length <= 1,
+## already rotated by the client's camera; "buttons" holds PlayerState.BUTTON_*
+## bits; "aim_yaw" and "aim_pitch" are the camera's yaw and pitch (up = positive).
 
 ## Server only: emitted after each sim step in which an attack's hitbox is live.
 signal attack_stepped(player: Player)
@@ -221,9 +222,9 @@ func _process(_delta: float) -> void:
 		_show(state, state.yaw, state.dodge_progress(params), state.attack_tick)
 
 
-func _simulate(move: Vector2, buttons: int, aim_yaw: float, delta: float) -> void:
+func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, delta: float) -> void:
 	var was_on_floor := is_on_floor()
-	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta)
+	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta, aim_pitch)
 	if state.dodge_tick == 0:
 		dodges += 1
 		if not was_on_floor:
@@ -270,18 +271,21 @@ func on_hit_statuses_for_window() -> Array[Vector2i]:
 
 func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 	for input: Variant in inputs:
-		if not (input is Array and input.size() == 4 and input[0] is int
-				and input[1] is Vector2 and input[2] is int and input[3] is float):
+		if not (input is Array and input.size() == 5 and input[0] is int
+				and input[1] is Vector2 and input[2] is int and input[3] is float
+				and input[4] is float):
 			continue
 		var seq: int = input[0]
 		var move: Vector2 = input[1]
 		var aim_yaw: float = input[3]
-		if seq <= _last_queued_seq or not move.is_finite() or not is_finite(aim_yaw):
+		var aim_pitch: float = input[4]
+		if (seq <= _last_queued_seq or not move.is_finite() or not is_finite(aim_yaw)
+				or not is_finite(aim_pitch)):
 			continue
 		if verbose and seq != _last_queued_seq + 1 and _last_queued_seq > 0:
 			print("[server] peer %d inputs %d-%d never arrived" % [peer_id, _last_queued_seq + 1, seq - 1])
 		_input_queue.append([seq, move.limit_length(1.0), input[2] & PlayerState.ALL_BUTTONS,
-				aim_yaw])
+				aim_yaw, clampf(aim_pitch, -PI / 2.0, PI / 2.0)])
 		_last_queued_seq = seq
 	while _input_queue.size() > max_buffer:
 		if verbose:
@@ -294,7 +298,7 @@ func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 func server_process_inputs(max_per_tick: int, delta: float) -> void:
 	for i in mini(max_per_tick, _input_queue.size()):
 		var input: Array = _input_queue.pop_front()
-		_simulate(input[1], input[2], input[3], delta)
+		_simulate(input[1], input[2], input[3], input[4], delta)
 		last_processed_seq = input[0]
 
 
@@ -331,17 +335,17 @@ func damage_taken_multiplier() -> float:
 
 ## Predicts one step from this tick's input and returns the inputs to send.
 ## move_input is camera-relative (x right, y back).
-func client_predict(move_input: Vector2, buttons: int, aim_yaw: float, delta: float,
-		redundancy: int) -> Array:
+func client_predict(move_input: Vector2, buttons: int, aim_yaw: float, aim_pitch: float,
+		delta: float, redundancy: int) -> Array:
 	_reconcile(delta)
 	var world := Vector3(move_input.x, 0.0, move_input.y).rotated(Vector3.UP, get_camera_yaw())
 	var move := Vector2(world.x, world.z).limit_length(1.0)
-	var input := [_next_seq, move, buttons, aim_yaw]
+	var input := [_next_seq, move, buttons, aim_yaw, aim_pitch]
 	_next_seq += 1
 	_pending_inputs.append(input)
 	if _pending_inputs.size() > MAX_PENDING_INPUTS:
 		_predictions.erase(_pending_inputs.pop_front()[0])
-	_simulate(move, buttons, aim_yaw, delta)
+	_simulate(move, buttons, aim_yaw, aim_pitch, delta)
 	# Counted here rather than in _simulate: a swap that only happens in a
 	# reconcile replay (the server let it through sooner) still counts.
 	if state.equipped != _last_equipped:
@@ -400,12 +404,17 @@ func _reconcile(delta: float) -> void:
 		apply_floor_snap()
 	_predictions[ack_seq] = [server_pos, server_state.copy()]
 	for input in _pending_inputs:
-		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta)
+		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta, input[4])
 		_predictions[input[0]] = [global_position, state.copy()]
 
 
 func get_camera_yaw() -> float:
 	return _camera_pivot.rotation.y if _camera_pivot else 0.0
+
+
+## Radians, up = positive (the camera below the player looking up).
+func get_camera_pitch() -> float:
+	return _spring_arm.rotation.x if _spring_arm else 0.0
 
 
 ## Test bot screenshots: turn the camera to look where the bot aims.
@@ -555,11 +564,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var spin := 0.0
 	if ability_id == "whirlwind_edge":
 		spin = _spin_offset(ability, attack_tick)
-	var lift := 0.0
-	if ability and ability.leap_height > 0.0 and ability.dash_speed > 0.0:
-		var p := inverse_lerp(float(ability.dash_start_tick), float(ability.dash_end_tick), attack_tick)
-		if p >= 0.0 and p <= 1.0:
-			lift = 4.0 * ability.leap_height * p * (1.0 - p)
+	var lift := ability.leap_lift(attack_tick) if ability else 0.0
 	_model.rotation.y = yaw + spin
 	_model.position.y = lift
 	if view.dead:

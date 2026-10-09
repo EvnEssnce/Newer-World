@@ -920,7 +920,9 @@ func _client_tick(delta: float) -> void:
 	var move := Vector2.ZERO
 	var buttons := 0
 	var aim_yaw := _local_player.get_camera_yaw()
+	var aim_pitch := _local_player.get_camera_pitch()
 	if _bot:
+		aim_pitch = 0.0  # level: pitch-aimed leaps go their full distance
 		if (not _bot_status_slots_sent and _builds.local_build
 				and _local_player.state.can_change_loadout()):
 			_builds.bot_slot_status_abilities(_local_player.params)
@@ -954,7 +956,8 @@ func _client_tick(delta: float) -> void:
 			buttons |= PlayerState.BUTTON_ATTACK
 		if captured and Input.is_action_pressed(&"block"):
 			buttons |= PlayerState.BUTTON_BLOCK
-	var inputs := _local_player.client_predict(move, buttons, aim_yaw, delta, _input_redundancy)
+	var inputs := _local_player.client_predict(move, buttons, aim_yaw, aim_pitch, delta,
+			_input_redundancy)
 	_submit_inputs.rpc_id(1, inputs)
 
 

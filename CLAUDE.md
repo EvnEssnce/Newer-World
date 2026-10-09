@@ -105,13 +105,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - `server_relay` is off: clients never hear from each other directly, only via snapshots.
 - **Client → server**, every physics tick, `World._submit_inputs` (unreliable ordered,
   channel 1): the last `input_redundancy` inputs, each
-  `[seq, move: Vector2, buttons: int, aim_yaw: float]`. `move` is a world-space XZ
+  `[seq, move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float]`. `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
   `PlayerState.BUTTON_*` bits: jump (1), attack (4) and block (8) are sent while held;
   dodge (2), swap (16), abilities 1–3 (32/64/128, Q/E/R) and Wings 1–2 (256/512, Z/C)
   only on the tick they're pressed (the sim buffers them). Tap vs hold (light vs heavy) is decided inside the sim
   from the held attack bit. `aim_yaw` is the camera yaw; attacks, abilities and block
-  face it. New actions get new bits.
+  face it. `aim_pitch` is the camera pitch (radians, up = positive; the server clamps
+  it to ±90°; bots send 0); only pitch-aimed dashes use it. New actions get new bits.
 - **Server**: queues inputs per player (validated, bounded by `max_input_buffer`) and
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
@@ -234,7 +235,12 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `shape="radial"` (Whirlwind Edge, Crashing Leap slam), dash (`dash_distance`, moved in
   `PlayerMovement` like a dodge: Shield Charge, Crashing Leap, Lunge;
   `dash_direction="back"` dashes away from the facing, `"input"` the way the movement input
-  points, backward with none: Vault), ability i-frames (`iframe_start`/`iframe_end`:
+  points, backward with none: Vault; `dash_ease="in"` speeds up over the dash, same
+  distance, `AbilityParams.dash_speed_at`: Diving Strike; `dash_aim_pitch` with
+  `aim_full_pitch`/`aim_zero_pitch` shortens it as the camera looks up, to 0 m:
+  Crashing Leap, the fraction stored as the length of `PlayerState.ability_dir`, so
+  `to_array()` didn't change; cosmetic `leap_height` peaks at `leap_peak` of the dash,
+  `AbilityParams.leap_lift`), ability i-frames (`iframe_start`/`iframe_end`:
   Vault), `max_targets` (the server calls `end_active_window` once reached; everything the
   hitbox touches on that step is still hit, so Shield Charge stops at its first contact
   but hits the whole group there), on-hit statuses (one charge per hit window, given to
@@ -393,7 +399,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   stagger ≥ 0.3 s, `_with_surge_stagger`).
 - **Fighter Wings** (`data/wings_fighter.cfg`): Ember Mantle (25 Ember, Warded −40% 4 s),
   Wingbeat Surge (25, Empowered +20% 6 s), Pyre Heart (30, heals 200 over 5 s), Diving
-  Strike (20, 5 m leap + 2.5 m radial slam, height cosmetic). Defaults: Z Ember Mantle,
+  Strike (20, 5 m dive: steep rise, then an eased-in swoop whose 2.5 m radial hit
+  window covers the second half and the landing; height cosmetic). Defaults: Z Ember Mantle,
   C Wingbeat Surge.
 - **Rebirth** (`[rebirth]`, every class, server-decided): in `_kill_player`,
   `PlayerState.start_rebirth` runs if `can_rebirth` (Ember ≥ `rebirth_ember_needed()`
@@ -512,7 +519,8 @@ powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same 
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
 Both smoke scripts take `-Port N` (default 24599) so parallel runs (e.g. two worktrees)
-don't collide.
+don't collide. Within one checkout, run them one after the other: they share the
+`build\smoke` log folder.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
 `--class=ID` (client: character class, default `fighter`; unknown = default),

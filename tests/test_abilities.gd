@@ -303,8 +303,8 @@ func test_network_round_trip_keeps_ability_state() -> void:
 # --- Dash physics (PlayerMovement), in empty space ---
 
 ## Runs a dash ability from the origin, holding a sideways move input the whole
-## time. Returns [position, state].
-func _dash_run() -> Array:
+## time. aim_pitch is the camera pitch when it starts. Returns [position, state].
+func _dash_run(aim_pitch := 0.0) -> Array:
 	state = PlayerState.new()
 	state.stamina = params.max_stamina
 	state.set_loadout(PackedStringArray(), PackedInt32Array([4, -1, -1, -1, -1, -1]))
@@ -313,7 +313,7 @@ func _dash_run() -> Array:
 	params.gravity = 18.0
 	var body := CharacterBody3D.new()
 	(Engine.get_main_loop() as SceneTree).root.add_child(body)
-	PlayerMovement.step(body, state, Vector2.ZERO, Q, 0.0, params, DELTA)
+	PlayerMovement.step(body, state, Vector2.ZERO, Q, 0.0, params, DELTA, aim_pitch)
 	var start := body.global_position
 	# Ticks 1 .. dash_end_tick - 1: the windup tick, then the whole dash.
 	for i in dash.dash_end_tick - 1:
@@ -338,3 +338,70 @@ func test_dash_is_deterministic() -> void:
 	var second := _dash_run()
 	assert_eq(first[0], second[0])
 	assert_true((first[1] as PlayerState).matches(second[1]))
+
+
+# --- Dash aimed by camera pitch (Crashing Leap) ---
+
+func _aim_pitch_dash() -> void:
+	dash.dash_aim_pitch = true
+	dash.aim_full_pitch = deg_to_rad(0.0)
+	dash.aim_zero_pitch = deg_to_rad(40.0)
+
+
+func test_dash_fraction_by_pitch() -> void:
+	assert_almost(dash.dash_fraction(deg_to_rad(30.0)), 1.0, 0.0001, "not aimed: always full")
+	_aim_pitch_dash()
+	assert_almost(dash.dash_fraction(deg_to_rad(-60.0)), 1.0, 0.0001, "looking down: full")
+	assert_almost(dash.dash_fraction(0.0), 1.0, 0.0001, "level: full")
+	assert_almost(dash.dash_fraction(deg_to_rad(10.0)), 0.75, 0.0001)
+	assert_almost(dash.dash_fraction(deg_to_rad(20.0)), 0.5, 0.0001)
+	assert_almost(dash.dash_fraction(deg_to_rad(40.0)), 0.0, 0.0001, "max: straight up")
+	assert_almost(dash.dash_fraction(deg_to_rad(89.0)), 0.0, 0.0001)
+
+
+func test_aimed_dash_covers_its_fraction() -> void:
+	_aim_pitch_dash()
+	var full: Vector3 = _dash_run(deg_to_rad(-20.0))[0]
+	var half: Vector3 = _dash_run(deg_to_rad(20.0))[0]
+	var none: Vector3 = _dash_run(deg_to_rad(40.0))[0]
+	var dash_ticks := dash.dash_end_tick - dash.dash_start_tick
+	assert_almost(-full.z, dash.dash_speed * dash_ticks * DELTA, 0.0001, "full distance")
+	assert_almost(-half.z, -full.z * 0.5, 0.0001, "half distance")
+	assert_almost(Vector2(none.x, none.z).length(), 0.0, 0.0001, "straight up: stays put")
+
+
+func test_eased_dash_speeds_up_and_covers_the_same_distance() -> void:
+	var constant: Vector3 = _dash_run()[0]
+	dash.dash_ease_in = true
+	var speeds := []
+	for tick in range(dash.dash_start_tick, dash.dash_end_tick):
+		speeds.append(dash.dash_speed_at(tick))
+	for i in speeds.size() - 1:
+		assert_true(speeds[i] < speeds[i + 1], "speeds up: %s" % [speeds])
+	var eased: Vector3 = _dash_run()[0]
+	assert_almost(-eased.z, -constant.z, 0.0001, "same distance")
+	assert_almost(eased.x, 0.0, 0.0001)
+
+
+func test_leap_lift_peaks_at_leap_peak() -> void:
+	dash.leap_height = 2.0
+	var start := float(dash.dash_start_tick)
+	var length := float(dash.dash_end_tick - dash.dash_start_tick)
+	assert_almost(dash.leap_lift(start - 1.0), 0.0, 0.0001, "before the dash")
+	assert_almost(dash.leap_lift(start), 0.0, 0.0001)
+	assert_almost(dash.leap_lift(start + length * 0.5), 2.0, 0.0001, "symmetric by default")
+	assert_almost(dash.leap_lift(start + length * 0.25), 1.5, 0.0001)
+	dash.leap_peak = 0.25
+	assert_almost(dash.leap_lift(start + length * 0.25), 2.0, 0.0001, "peaks early")
+	assert_almost(dash.leap_lift(start + length * 0.125), 1.5, 0.0001, "steep rise")
+	assert_almost(dash.leap_lift(start + length * 0.625), 1.5, 0.0001, "long fall")
+	assert_almost(dash.leap_lift(start + length), 0.0, 0.0001, "lands at the end")
+
+
+func test_aimed_dash_survives_network_round_trip() -> void:
+	_aim_pitch_dash()
+	state.set_loadout(PackedStringArray(), PackedInt32Array([4, -1, -1, -1, -1, -1]))
+	state.step(Vector2.ZERO, Q, 0.0, true, params, DELTA, deg_to_rad(20.0))
+	assert_almost(state.ability_dir.length(), 0.5, 0.0001)
+	var copy := PlayerState.from_array(state.to_array())
+	assert_almost(copy.ability_dir.length(), 0.5, 0.0001, "the fraction is synced")
