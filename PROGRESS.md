@@ -38,9 +38,15 @@ To do (in this order; the dummy first, it helps test the rest):
 5. **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
    three tall shields in front that blocks enemies' movement. The first `SUMMON`: a
    server-spawned obstacle with spawn/despawn events to clients (like projectiles).
-   Design questions pending (who it blocks, size, duration, projectiles).
+   Decided: it **blocks only enemies** (the user and allies walk through; whether hostile
+   players in PvP count as enemies wasn't asked, so treat them as blocked unless that's
+   hard), **stops hostile projectiles** (yours and allies' pass), placed about **3 m in
+   front**, about **4.5 m wide × 2.5 m tall**, lasts **8 s**, **18 s** cooldown, **doesn't
+   move** once placed. Not breakable yet, but it **will be breakable later** (give it a
+   shape that can take health then).
 
-Branch: still `wave3-merge` (not on main yet).
+Wave 3 (sessions 22–25 plus this plan) was merged into main and pushed after the
+playtest; the fixes above go on top of main.
 
 ### 2026-10-09 (25): The Juggernaut (Wave 3, two agents)
 
