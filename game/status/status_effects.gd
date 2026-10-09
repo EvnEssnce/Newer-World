@@ -153,6 +153,29 @@ func damage_taken_multiplier(defs: StatusDefs) -> float:
 
 
 ## Multiplier on damage the owner deals: 1 + the sum of damage_dealt x stacks.
+## How many times faster light and heavy attacks play (Rampage): the fastest
+## status whose stamina condition holds (stamina_fraction = stamina / max). 1
+## = normal. Stacks don't change it.
+func attack_speed(defs: StatusDefs, stamina_fraction: float) -> float:
+	var result := 1.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and stamina_fraction >= def.attack_speed_min_stamina:
+			result = maxf(result, def.attack_speed)
+	return result
+
+
+## Shield Wall's cover box behind the owner while it blocks: (depth, width) in
+## meters, the largest of its statuses'; zero without one.
+func cover_box(defs: StatusDefs) -> Vector2:
+	var result := Vector2.ZERO
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.cover_depth > 0.0 and def.cover_width > 0.0:
+			result = Vector2(maxf(result.x, def.cover_depth), maxf(result.y, def.cover_width))
+	return result
+
+
 func damage_dealt_multiplier(defs: StatusDefs) -> float:
 	var bonus := 0.0
 	for e in entries:

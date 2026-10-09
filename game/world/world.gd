@@ -105,6 +105,10 @@ var _rebirths := 0
 ## Heals that restored health, and the health restored.
 var _heals := 0
 var _healed := 0.0
+## Hits on an ally that a Shield Wall holder blocked for them.
+var _shield_wall_covers := 0
+## Hold the Line pokes (Spear capstone).
+var _line_pokes := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -237,6 +241,8 @@ func _server_tick(delta: float) -> void:
 		else:
 			enemy.server_step(targets, delta)
 			_apply_enemy_status_damage(enemy)
+	for player: Player in _players.get_children():
+		_hold_the_line(player)
 	_projectiles.server_step(delta)
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
@@ -331,11 +337,12 @@ func _on_attack_stepped(attacker: Player) -> void:
 ## how many it connected with.
 func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -> int:
 	var connected := 0
+	var execute := attacker.execute_bonus()
 	for target: Player in _players.get_children():
 		if target == attacker:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
-				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale)
+				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute)
 		if result >= 0:
 			_pvp_hits += 1
 		if result >= 0 and result != HIT_EVADED:
@@ -352,17 +359,21 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 		attacker.attack_results[enemy.enemy_id] = true
 		connected += 1
 		strike_enemy(attacker.peer_id, attacker.global_position, attacker.state.yaw, attack,
-				enemy, damage_scale, attacker.on_hit_statuses_for_window)
+				enemy, damage_scale, attacker.on_hit_statuses_for_window, execute)
 	return connected
 
 
 ## Server: a player's attack (or projectile) connected with a living enemy:
 ## damage (× its damage-taken statuses), Ember, stagger, and if it survives the
 ## attack's statuses (plus on_hit's, e.g. Bloodlust's bleed; on_hit returns
-## Array[Vector2i]) and force away from attacker_pos. Returns true if it died.
+## Array[Vector2i]) and force away from attacker_pos. execute: the attacker's
+## execute bonus (Finishing Thrust, MasteryTree.execute_multiplier on the
+## enemy's health). Returns true if it died.
 func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
-		attack: AttackParams, enemy: Enemy, damage_scale: float, on_hit: Callable) -> bool:
+		attack: AttackParams, enemy: Enemy, damage_scale: float, on_hit: Callable,
+		execute := Vector2.ZERO) -> bool:
 	var damage := (attack.damage * damage_scale
+			* MasteryTree.execute_multiplier(execute, enemy.health / enemy.params.max_health)
 			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 	var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
 	_enemy_damaged += 1
@@ -427,27 +438,29 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 ## parrying player (Riposte) facing the attacker negates it and counters. A
 ## blocking player facing the attacker takes stamina damage instead. Allies
 ## (are_allies) are ignored entirely: no damage, stagger, block cost or label.
-## damage_scale: the attacker's damage modifiers. Returns the HIT_* result, or
-## -1 if the attack didn't connect (or already did).
+## damage_scale: the attacker's damage modifiers; execute: its execute bonus
+## (Finishing Thrust, scaled by the target's health). Returns the HIT_* result,
+## or -1 if the attack didn't connect (or already did).
 func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, results: Dictionary[int, bool], target: Player,
-		damage_scale: float = 1.0) -> int:
+		damage_scale: float = 1.0, execute := Vector2.ZERO) -> int:
 	if target.state.dead or results.get(target.peer_id, false):
 		return -1
 	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
 		return -1
 	return resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
-			damage_scale)
+			damage_scale, execute)
 
 
 ## Server: the rest of _strike_player once something touched the target (a
 ## hitbox, or a projectile: then attacker_pos is a point back along its path,
 ## so a guard or a parry must face where it came from, and knockback pushes
-## along it). Same rules and results.
+## along it). Same rules and results. A target that isn't guarding against it
+## but stands behind a blocking ally's Shield Wall is covered (_covered_hit).
 func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, results: Dictionary[int, bool], target: Player,
-		damage_scale: float = 1.0) -> int:
+		damage_scale: float = 1.0, execute := Vector2.ZERO) -> int:
 	if target.state.dead or results.get(target.peer_id, false):
 		return -1
 	if are_allies(attacker_id, target.peer_id):
@@ -463,14 +476,20 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	results[target.peer_id] = true
 	if _try_parry(attacker_id, attacker_pos, target):
 		return HIT_PARRIED
+	var guarded := _guards_against(target, attacker_pos)
+	if not guarded:
+		var holder := _shield_wall_holder(attacker_id, attacker_pos, target)
+		if holder:
+			return _covered_hit(attacker_id, attacker_pos, attacker_yaw, attack, damage_scale,
+					execute, holder, target)
 	var was_staggered := target.state.is_staggered()
-	var base_damage := attack.damage * damage_scale
+	var base_damage := (attack.damage * damage_scale
+			* MasteryTree.execute_multiplier(execute, target.health / target.params.max_health))
 	var damage := (base_damage
 			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
 			* target.damage_taken_multiplier())
 	var result := HIT_DAMAGED
-	if target.state.blocking and MeleeHitbox.is_in_front(target.global_position,
-			target.state.yaw, attacker_pos, target.params.block_arc):
+	if guarded:
 		var broke := target.state.take_blocked_hit(attack, target.params,
 				target.block_stamina_multiplier())
 		damage *= target.params.block_damage_taken
@@ -494,6 +513,139 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	if result != HIT_DEFEATED:
 		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
 	return result
+
+
+## True if a player's own guard is up and faces attacker_pos (within its block arc).
+func _guards_against(player: Player, attacker_pos: Vector3) -> bool:
+	return player.state.blocking and MeleeHitbox.is_in_front(player.global_position,
+			player.state.yaw, attacker_pos, player.params.block_arc)
+
+
+## Shield Wall: a living ally of target (not target itself, and not an ally of
+## the attacker) that is blocking with a cover status (StatusEffects.cover_box),
+## facing attacker_pos within its block arc, with target inside the box
+## straight behind it (MeleeHitbox.is_behind). Null if none.
+func _shield_wall_holder(attacker_id: int, attacker_pos: Vector3, target: Player) -> Player:
+	for holder: Player in _players.get_children():
+		if holder == target or holder.state.dead or not holder.state.blocking:
+			continue
+		if (not are_allies(holder.peer_id, target.peer_id)
+				or are_allies(attacker_id, holder.peer_id)):
+			continue
+		var box := holder.state.statuses.cover_box(holder.params.statuses)
+		if box.x <= 0.0:
+			continue
+		if (_guards_against(holder, attacker_pos)
+				and MeleeHitbox.is_behind(holder.global_position, holder.state.yaw,
+					target.global_position, box.x, box.y)):
+			return holder
+	return null
+
+
+## Server: Shield Wall. holder blocks a hit meant for target (an ally behind
+## it) through the normal blocked-hit path: the holder's stamina (its block
+## modifiers), block_damage_taken of the damage, a guard break (stagger, and
+## the attack's force) if it runs out or the attack breaks blocks. The target
+## takes nothing. Both are reported (the target as a 0-damage HIT_BLOCKED, so
+## its client shows "Blocked"). Returns HIT_BLOCKED for the target, so a
+## projectile that guards stop stops here.
+func _covered_hit(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
+		attack: AttackParams, damage_scale: float, execute: Vector2, holder: Player,
+		target: Player) -> int:
+	_shield_wall_covers += 1
+	var was_staggered := holder.state.is_staggered()
+	var damage := (attack.damage * damage_scale
+			* MasteryTree.execute_multiplier(execute, holder.health / holder.params.max_health)
+			* holder.state.statuses.damage_taken_multiplier(holder.params.statuses)
+			* holder.damage_taken_multiplier() * holder.params.block_damage_taken)
+	var broke := holder.state.take_blocked_hit(attack, holder.params,
+			holder.block_stamina_multiplier())
+	var result := HIT_GUARD_BROKEN if broke else HIT_BLOCKED
+	if broke:
+		_guard_breaks += 1
+	else:
+		_blocks += 1
+	holder.health = maxf(0.0, holder.health - damage)
+	_ember_from_damage(attacker_id, holder, damage)
+	if holder.health <= 0.0:
+		result = HIT_DEFEATED
+		_kill_player(holder)
+	elif broke:
+		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, holder, was_staggered)
+	_hits += 1
+	if _verbose:
+		print("[server] peer %d's Shield Wall covers peer %d" % [holder.peer_id, target.peer_id])
+	_send_hit(attacker_id, holder.peer_id, damage, result)
+	_send_hit(attacker_id, target.peer_id, 0.0, HIT_BLOCKED)
+	return HIT_BLOCKED
+
+
+# --- Hold the Line (Spear capstone) ---
+
+## Server, every tick after players and enemies have moved: a player with a
+## "hold_the_line" node in the tree of the weapon that's out, while blocking,
+## strikes each hostile player or living enemy that enters (outside last tick,
+## inside now) the reach box of the node's internal ability (`applies_to`,
+## e.g. line_poke) once, then not that target again for the ability's cooldown.
+## Server only: it never touches the holder's PlayerState, so nothing to
+## predict. The strike goes through resolve_strike / strike_enemy (blocks,
+## i-frames, parries, statuses, Ember, execute bonus as usual).
+func _hold_the_line(player: Player) -> void:
+	var poke: AbilityParams = null
+	if player.build and not player.state.dead:
+		var node := player.build.weapon_effect(player.state.weapon_id(), "hold_the_line")
+		if node:
+			var weapon := player.state.weapon(player.params)
+			poke = weapon.ability(weapon.ability_index(node.applies_to))
+	if poke == null:
+		player.line_inside.clear()
+		return
+	var pos := player.global_position
+	var yaw := player.state.yaw
+	var inside: Dictionary[int, bool] = {}
+	for target: Player in _players.get_children():
+		if (target != player and not target.state.dead
+				and not are_allies(player.peer_id, target.peer_id)
+				and MeleeHitbox.hits(pos, yaw, poke, target.global_position,
+					Player.BODY_RADIUS, Player.BODY_HEIGHT)):
+			inside[target.peer_id] = true
+	for enemy: Enemy in _enemies.get_children():
+		if not enemy.dead and MeleeHitbox.hits(pos, yaw, poke, enemy.global_position,
+				Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
+			inside[enemy.enemy_id] = true
+	if player.state.blocking:
+		for id: int in inside:
+			if player.line_inside.has(id) or _tick < player.line_ready_at.get(id, 0):
+				continue
+			player.line_ready_at[id] = _tick + poke.cooldown_ticks
+			_line_poke(player, poke, id)
+	player.line_inside = inside
+
+
+## Server: one Hold the Line poke on a player (id > 0) or an enemy (id < 0).
+func _line_poke(player: Player, poke: AbilityParams, target_id: int) -> void:
+	_line_pokes += 1
+	if _verbose:
+		print("[server] peer %d holds the line: pokes %d" % [player.peer_id, target_id])
+	var scale := (player.damage_multiplier(poke)
+			* player.state.statuses.damage_dealt_multiplier(player.params.statuses))
+	var execute := player.execute_bonus()
+	if target_id > 0:
+		var target := _player_by_id(target_id)
+		var results: Dictionary[int, bool] = {}
+		if target and resolve_strike(player.peer_id, player.global_position, player.state.yaw,
+				poke, results, target, scale, execute) == HIT_DAMAGED:
+			_give_hit_statuses(player.peer_id, poke, _no_on_hit_statuses(), target)
+		return
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.enemy_id == target_id and not enemy.dead:
+			strike_enemy(player.peer_id, player.global_position, player.state.yaw, poke, enemy,
+					scale, _no_on_hit_statuses, execute)
+
+
+## No on-hit statuses (Hold the Line's pokes don't use up Bloodlust charges).
+func _no_on_hit_statuses() -> Array[Vector2i]:
+	return []
 
 
 ## Server: a player's health reached 0 (a hit or damage over time). With
@@ -1468,10 +1620,12 @@ func print_summary() -> void:
 				_players.get_child_count(), _tick, _hits, _deaths, _respawns, _blocks, _guard_breaks])
 		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d" % [
 				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills])
-		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d" % [
-				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored])
-		print("SUMMARY abilities uses=%d ability_hits=%d parries=%d swaps=%d builds=%d builds_refused=%d" % [
-				_ability_uses, _ability_hits, _parries, _swaps, _builds.accepted, _builds.rejected])
+		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d shield_wall_covers=%d" % [
+				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored,
+				_shield_wall_covers])
+		print("SUMMARY abilities uses=%d ability_hits=%d parries=%d swaps=%d builds=%d builds_refused=%d line_pokes=%d" % [
+				_ability_uses, _ability_hits, _parries, _swaps, _builds.accepted, _builds.rejected,
+				_line_pokes])
 		print("SUMMARY statuses applied=%d on_enemies=%d self_buffs=%d dot_ticks=%d dot_damage=%d ally_refused=%d ally_applied=%d" % [
 				_statuses_applied, _statuses_on_enemies, _self_buffs, _status_ticks,
 				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])

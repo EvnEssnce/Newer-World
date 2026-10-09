@@ -141,6 +141,10 @@ var _window_on_hit: Array[Vector2i] = []
 var _window_on_hit_taken := false
 ## Server tick at which a dead player respawns.
 var respawn_at_tick := -1
+## Hold the Line (World._hold_the_line): target ids inside the poke's reach
+## last tick, and per target the server tick it can be poked again.
+var line_inside: Dictionary[int, bool] = {}
+var line_ready_at: Dictionary[int, int] = {}
 ## Damage over time (bleed) from this tick's sim steps, not yet applied to
 ## health. World applies it after processing inputs.
 var status_damage_pending := 0.0
@@ -319,6 +323,15 @@ func damage_multiplier(attack: AttackParams) -> float:
 	# A Wing ability only gets the Wing tree's modifiers.
 	var weapon_id := "" if state.is_using_wing() else state.weapon_id()
 	return build.damage_multiplier(weapon_id, kind, ability_id, health / params.max_health)
+
+
+## Server: the execute bonus (Finishing Thrust) of the weapon that's out, as
+## (amount, threshold) for MasteryTree.execute_multiplier; zero during a Wing
+## ability.
+func execute_bonus() -> Vector2:
+	if build == null or state.is_using_wing():
+		return Vector2.ZERO
+	return build.execute_bonus(state.weapon_id())
 
 
 ## Server: the mastery modifier on the stamina this player's blocked hits cost.
@@ -589,7 +602,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_axe_right_pivot.visible = axes and not _axe_thrown
 	_axe_left_pivot.visible = axes
 	_spear_pivot.visible = spear
-	var shield_up := view.blocking or ability_id in ["shield_charge", "riposte"]
+	var shield_up := view.blocking or ability_id in ["shield_charge", "riposte", "shield_wall"]
 	_shield_pivot.position = SHIELD_RAISED if shield_up else SHIELD_REST
 	_shield_pivot.rotation.y = 0.0 if shield_up else SHIELD_REST_YAW
 	# A swap starts with the (new) weapon lowered and raises it.
@@ -677,7 +690,7 @@ static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_SPIN, SWORD_SPIN)
 		"shield_charge":
 			return SWORD_IDLE
-		"riposte":
+		"riposte", "shield_wall":
 			return _phase_pose3(attack, tick, SWORD_IDLE, SWORD_PARRY, SWORD_PARRY)
 		"rising_cut":
 			return _phase_pose3(attack, tick, SWORD_IDLE, RISING_WOUND, RISING_STRUCK)
@@ -748,7 +761,7 @@ static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: Str
 	var chop := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_STRUCK, 0.0)).x
 	if ability_id == "frenzy":
 		return _frenzy_pitches(attack, tick, chop)
-	if ability_id == "bloodlust":
+	if ability_id in ["bloodlust", "rampage"]:
 		# Both axes raised high, then lowered.
 		var raised := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_WOUND, 0.0)).x
 		return Vector2(raised, raised)

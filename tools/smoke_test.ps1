@@ -52,6 +52,11 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # projectile hit doesn't hang on one or two throws.
     '--tune=weapon_spear/ability_javelin_cast/cooldown=2.0',
     '--tune=weapon_dual_axes/ability_boomerang_axe/cooldown=2.0',
+    # Hold the Line (the bots learn the Spear capstones on its cycle) pokes only
+    # what steps into reach while they block; the bots already stand inside the
+    # real 2.6 m reach when their guard goes up, so a long reach gives the poke
+    # path (line_pokes= in the abilities summary) a chance to run. No check.
+    '--tune=weapon_spear/ability_line_poke/range=6.0',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0')
@@ -137,7 +142,8 @@ if (-not $abilitySummary) {
     Write-Host "PASS abilities: $($abilitySummary.Line)" -ForegroundColor Green
 }
 # Statuses: the bots slot their status abilities (Opening Strike, Bloodlust,
-# Hamstring), so the server must apply statuses (some on Husks) and deal bleed
+# Rampage, Shield Wall, Skewer, Perforate; Javelin Cast slows),
+# so the server must apply statuses (some on Husks) and deal bleed
 # damage. Allies must never debuff each other.
 $statusSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY statuses applied=(\d+) on_enemies=(\d+) self_buffs=(\d+) dot_ticks=(\d+) dot_damage=(\d+) ally_refused=(\d+) ally_applied=(\d+)'
 if (-not $statusSummary) {

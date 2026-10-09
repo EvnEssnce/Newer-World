@@ -165,7 +165,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
   rebirth_cooldown, rebirth_charges, Z slot, C slot, Wing cooldowns by pool index
-  without trailing zeros]`. Append new fields at the end. A player's snapshot entry is
+  without trailing zeros]`; 35 = `attack_speed_carry` (float, Rampage: see "Attack
+  speed" under Status effects). Append new fields at the end. A player's snapshot entry is
   about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
   player already goes over it (Godot warns "above the MTU"); interest management /
   delta compression will be needed before bigger tests.
@@ -252,9 +253,37 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
   branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
-  low_health_damage, block_stamina, none; Wing trees add damage_taken, mantle_heal,
-  surge_stagger). Respecs are free any time except mid-attack/ability/swap. K opens the
-  panel. A tree file may set its own `[tree] points` (the Wing tree does).
+  low_health_damage, block_stamina, execute_damage, hold_the_line, none; Wing trees add
+  damage_taken, mantle_heal, surge_stagger). Respecs are free any time except
+  mid-attack/ability/swap. K opens the panel. A tree file may set its own `[tree] points`
+  (the Wing tree does).
+- **Execute damage** (Spear capstone **Finishing Thrust**, `effect="execute_damage"`,
+  `amount` 0.6, `threshold` 0.3): the one per-*target* damage factor.
+  `Player.execute_bonus()` = (amount, threshold) of the weapon that's out (zero for a
+  Wing ability); `MasteryTree.execute_multiplier(bonus, target health fraction)` = 1 +
+  amount × (1 − fraction / threshold) below the threshold. It's passed as the optional
+  `execute` argument of `_strike_player` / `resolve_strike` / `strike_enemy`; a
+  projectile captures it at release (`Projectile.execute`) like `damage_scale`.
+- **Hold the Line** (Spear Lancer capstone, `effect="hold_the_line"`, `applies_to` = the
+  internal ability `line_poke` in `weapon_spear.cfg`: its box, damage 40, Slow 2 s, and
+  its `cooldown` (2 s) is **per target**). Server only (`World._hold_the_line`, every
+  tick after enemies move): while a player with the node and that weapon out is
+  blocking, each hostile player or living enemy that *enters* the poke's box (outside
+  last tick, inside now: `Player.line_inside` / `line_ready_at`) is struck once through
+  `resolve_strike` / `strike_enemy` (allies skipped; blocks, i-frames, parries,
+  statuses, Ember, execute as usual). Never touches the holder's `PlayerState`, so
+  nothing to predict. No poke animation yet (the hit label shows it).
+- **Shield Wall** (Broadsword Vanguard tier 2, ALLY): a short cast that self-buffs
+  `shield_wall` (6 s; `cover_depth` 2.5 m, `cover_width` 1.8 m in
+  `status_effects.cfg`). In `resolve_strike`, after the target's own parry, a target
+  not guarding the hit itself (`_guards_against`) is covered by a blocking ally with a
+  cover status (`StatusEffects.cover_box`) that faces the attacker within its block arc
+  and has the target inside the box straight behind it (`MeleeHitbox.is_behind`):
+  `_covered_hit` runs the normal blocked-hit path on the holder (stamina, guard break +
+  force, `block_damage_taken`) and the target takes nothing; both get a hit event (the
+  target a 0-damage `HIT_BLOCKED`) and `resolve_strike` returns `HIT_BLOCKED`, so
+  melee, Husk swings and projectiles (a guard-stopped one stops) are all covered.
+  Counted as `shield_wall_covers=` on the `SUMMARY party` line.
 - **Forced movement** (the `FORCE` tag: knockback, pull, launch). Per attack, optional
   `force_direction` ("away" / "toward" / "forward"), `force_distance` (m),
   `force_height` (launch peak, m), `force_duration` (s), `force_needs_stagger` (only
@@ -321,8 +350,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
   from an ally; removed by a cleanse) or **buff**; `affects` = **sim** (changes
-  movement/actions, predicted: slow, root, stun) or **damage** (server-only numbers:
-  bleed, exposed, damage_up, damage_reduction, bloodlust, pyre_heart's healing).
+  movement/actions, predicted: slow, root, stun, rampage) or **damage** (server-only
+  numbers: bleed, exposed, damage_up, damage_reduction, bloodlust, pyre_heart's healing,
+  shield_wall's cover).
   Duration, max_stacks, then
   only the keys for what it does. Reapplying adds stacks (capped) and resets the time to
   full (never shortens). `StatusDefs.validate()` checks the file (a unit test runs it).
@@ -332,6 +362,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   for its duration (same interrupt and "can't act"); the status entry is the name/timer
   and what a cleanse removes (`cleanse()` also ends the stagger). Enemies: stun =
   `brain.stagger`.
+- **Attack speed** (`attack_speed` 1–2, `attack_speed_min_stamina` fraction; Rampage
+  1.25 at ≥ 50% stamina): `StatusEffects.attack_speed(defs, stamina fraction)`. In
+  `PlayerState._step_attack_speed`, a light or heavy attack (not abilities) adds
+  (speed − 1) per tick to `attack_speed_carry` (synced, index 35); each whole tick
+  skips the tick just reached, but only a windup or recovery tick (never from the first
+  hit window to the last, never a projectile release), else it waits for the next one.
+  So hit windows keep every tick; the carry resets when the attack ends.
 - **Server events vs prediction**: the server applying a status (`apply_status`), using
   up an on-hit stack (`take_on_hit_statuses`) or cleansing (`cleanse`) bumps
   `server_events`. A self-buff from your own attack/ability (`self_status`) starts inside
@@ -362,7 +399,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   **Bloodlust** (self-buff: next 4 hits bleed) and **Hamstring** (Slow, default axes R
   slot), Spear **Skewer** (Root 1.5 s, Lancer tier 2) and **Perforate** (5 thrusts, each
   its own hit window adding a bleed stack; Impaler tier 2; both in the default
-  allocation, not the default slots). The Fighter Wings apply damage_reduction (Ember
+  allocation, not the default slots), Dual Axes **Rampage** (self-buff, attack speed;
+  Berserker tier 2) and Broadsword **Shield Wall** (self-buff, cover; Vanguard tier 2),
+  both in the default allocation, not the default slots. The Fighter Wings apply damage_reduction (Ember
   Mantle), damage_up (Wingbeat Surge) and pyre_heart. Stun exists for later abilities
   (nothing applies it yet).
 
@@ -529,11 +568,16 @@ Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:p
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
 Husk within 15 m, else the nearest player), then both use abilities (guard up between; a
 knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free
-respec (odd cycles also learn new abilities like Rising Cut) and the next cycle's weapons
+respec (odd cycles also learn new abilities like Rising Cut; even cycles learn the built
+capstones that fit, i.e. the Spear's Hold the Line and Finishing Thrust,
+`BuildService._bot_learn_capstones`) and the next cycle's weapons
 (the default loadout in the first cycle; then a different focus weapon each cycle:
 Spear, Dual Axes, Broadsword; `BuildService.bot_weapons_for_cycle`); see
-`World._bot_input`. On joining it slots its status abilities first
-(`BuildService.bot_slot_status_abilities`); it uses Bloodlust as soon as its target is
+`World._bot_input`. On joining it slots its status abilities first, self-buffs before
+`applies_status` ones, keeping one slot for a projectile ability
+(`BuildService.bot_slot_status_abilities`: Broadsword Shield Wall + Opening Strike, Dual
+Axes Bloodlust + Rampage, Spear Skewer + Perforate); it uses a self-buff (the first
+ready one) as soon as its target is
 within 2 m on its own turn or in the ability phase, then a hitting ability; the ability
 phase's first press prefers a knockback ability, then a self-buff, then a status ability.
 Wings (`World._bot_wing_input`): Wingbeat Surge as its attack turn starts, Ember Mantle
@@ -564,8 +608,9 @@ can be overridden, strings need no quotes). The smoke test uses `--tune` for low
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
 checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`) so a
-reborn bot is back in the fight quickly, and 2 s Javelin Cast / Boomerang Axe cooldowns
-for more throws.
+reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe cooldowns
+for more throws, and a 6 m Hold the Line reach so pokes (`line_pokes=` on the
+`SUMMARY abilities` line, no check) happen in most runs.
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.

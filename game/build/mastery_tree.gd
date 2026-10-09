@@ -32,13 +32,16 @@ class MasteryNode:
 	## Active nodes: the ability it unlocks.
 	var ability := ""
 	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina",
-	## "none", or (Wing trees) "damage_taken", "mantle_heal", "surge_stagger".
+	## "execute_damage", "hold_the_line", "none", or (Wing trees)
+	## "damage_taken", "mantle_heal", "surge_stagger".
 	var effect := "none"
 	## "damage": "light", "heavy", "abilities", "all" or one ability id.
 	## "mantle_heal" / "surge_stagger": the Wing ability whose self-buff it needs.
+	## "hold_the_line": the internal ability that pokes.
 	var applies_to := ""
 	var amount := 0.0
-	## "low_health_damage": applies below this fraction of max health.
+	## "low_health_damage": applies below this fraction of the attacker's max
+	## health. "execute_damage": below this fraction of the target's.
 	var threshold := 0.0
 
 
@@ -264,6 +267,27 @@ func damage_multiplier(allocated: PackedStringArray, attack_kind: String, abilit
 				if health_fraction < n.threshold:
 					bonus += n.amount
 	return maxf(0.0, 1.0 + bonus)
+
+
+## "execute_damage" nodes (Finishing Thrust): (total amount, threshold) for
+## execute_multiplier; the threshold is the largest of them. Zero without one.
+func execute_bonus(allocated: PackedStringArray) -> Vector2:
+	var result := Vector2.ZERO
+	for id in allocated:
+		var n := get_node(id)
+		if n and n.kind != KIND_ACTIVE and n.effect == "execute_damage":
+			result = Vector2(result.x + n.amount, maxf(result.y, n.threshold))
+	return result
+
+
+## Damage multiplier against a target at target_health_fraction (health / max)
+## from an execute bonus (amount, threshold): below the threshold it grows
+## linearly from 1 at the threshold to 1 + amount at 0 health; 1 above it.
+static func execute_multiplier(bonus: Vector2, target_health_fraction: float) -> float:
+	if bonus.x <= 0.0 or bonus.y <= 0.0 or target_health_fraction >= bonus.y:
+		return 1.0
+	var depth := 1.0 - maxf(0.0, target_health_fraction) / bonus.y
+	return 1.0 + bonus.x * depth
 
 
 ## Server-side multiplier on the stamina a blocked hit costs.

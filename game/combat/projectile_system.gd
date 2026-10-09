@@ -102,6 +102,7 @@ func server_fire(player: Player) -> void:
 		proj.owner_id = player.peer_id
 		proj.attack = attack
 		proj.damage_scale = scale
+		proj.execute = player.execute_bonus()
 		_active.append(proj)
 		_fired += 1
 		for peer_id in world._connected_player_ids():
@@ -203,7 +204,7 @@ func _hit_player(proj: Projectile, target: Player, at: Vector3) -> bool:
 	var source := _source(proj, at)
 	var allied := world.are_allies(proj.owner_id, target.peer_id)
 	var result := world.resolve_strike(proj.owner_id, source[0], source[1], proj.attack,
-			proj.results, target, proj.damage_scale)
+			proj.results, target, proj.damage_scale, proj.execute)
 	if allied:
 		if result >= 0:
 			_ally_hits += 1
@@ -228,7 +229,7 @@ func _hit_enemy(proj: Projectile, enemy: Enemy, at: Vector3) -> bool:
 	world.note_projectile_hit(proj.attack is AbilityParams, false)
 	var keeps_going := proj.register_hit(enemy.enemy_id, false)
 	world.strike_enemy(proj.owner_id, source[0], source[1], proj.attack, enemy,
-			proj.damage_scale, _on_hit_for.bind(proj))
+			proj.damage_scale, _on_hit_for.bind(proj), proj.execute)
 	return keeps_going
 
 
