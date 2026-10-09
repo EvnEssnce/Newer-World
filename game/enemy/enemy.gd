@@ -44,6 +44,9 @@ var respawn_at_tick := -1
 var attack_results: Dictionary[int, bool] = {}
 ## A knockback, pull or launch in progress (start_force).
 var force := ForcedMotion.new()
+## Server: the player whose knockback is moving it and who has the Tempest
+## Wings capstone (a wall hit stuns), or 0.
+var wall_stun_source := 0
 var _rng := RandomNumberGenerator.new()
 var _gravity := 0.0
 

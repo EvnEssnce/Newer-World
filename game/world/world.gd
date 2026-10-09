@@ -122,6 +122,11 @@ var _crits := 0
 var _hook_staggers := 0
 var _brace_staggers := 0
 var _ramp_stacks := 0
+## Juggernaut: Earthshaker aftershocks sent, Tempest Wings wall stuns, Anchor
+## Defiant stacks given (one per taunted enemy).
+var _aftershocks := 0
+var _wall_stuns := 0
+var _roar_guards := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -239,6 +244,7 @@ func _server_tick(delta: float) -> void:
 		if player.state.dead:
 			_server_dead_player(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
+		_check_wall_stun(player)
 		_apply_player_status_damage(player)
 		_apply_player_status_heal(player)
 	var targets := {}
@@ -253,6 +259,7 @@ func _server_tick(delta: float) -> void:
 					print("[server] enemy %d respawned" % enemy.enemy_id)
 		else:
 			enemy.server_step(targets, delta)
+			_check_wall_stun(enemy)
 			_apply_enemy_status_damage(enemy)
 	for player: Player in _players.get_children():
 		_hold_the_line(player)
@@ -336,6 +343,8 @@ func _on_attack_stepped(attacker: Player) -> void:
 		return
 	var damage_scale := (attacker.damage_multiplier(attack)
 			* attacker.state.statuses.damage_dealt_multiplier(attacker.params.statuses))
+	# After damage_multiplier: it tells a heavy apart by identity.
+	attack = _with_hammer_capstones(attacker, attack)
 	var connected := _hit_targets(attacker, attack, damage_scale)
 	if (connected > 0 and attack.impact_radius > 0.0
 			and _target_limit_reached(attacker, attack)):
@@ -398,7 +407,7 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 			HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED):
 		return true
 	_give_hit_statuses(attacker_id, attack, on_hit.call(), enemy)
-	_force_enemy(attacker_pos, attacker_yaw, attack, enemy, was_staggered)
+	_force_enemy(attacker_pos, attacker_yaw, attack, enemy, was_staggered, attacker_id)
 	return false
 
 
@@ -792,6 +801,116 @@ func _ramp_on_hit(attacker: Player) -> void:
 		_ramp_stacks += 1
 
 
+# --- Juggernaut: War Hammer capstones, Wing tree effects (server only) ---
+
+## Server, every live tick of a player's attack: the War Hammer capstones of
+## the weapon that's out. Earthshaker ("heavy_shockwave"): each heavy is
+## counted once (HeavyCounter); every amount-th sends out the internal ability
+## applies_to's projectile from where the player stands (the spawn reaches
+## every client, the thrower's included). Breaker ("heavy_breaks_block"):
+## returns a copy of the heavy that always breaks blocks. Otherwise returns
+## `attack` unchanged. Never touches the predicted sim.
+func _with_hammer_capstones(attacker: Player, attack: AttackParams) -> AttackParams:
+	if attacker.build == null or attacker.state.attack_type != PlayerState.ATTACK_HEAVY:
+		return attack
+	var weapon_id := attacker.state.weapon_id()
+	var shock := attacker.build.weapon_effect(weapon_id, "heavy_shockwave")
+	if shock and attacker.heavy_counter.register(attacker.state.attack_serial, roundi(shock.amount)):
+		var weapon := attacker.state.weapon(attacker.params)
+		var wave := weapon.ability(weapon.ability_index(shock.applies_to))
+		if wave:
+			_aftershocks += 1
+			_projectiles.server_fire_attack(attacker, wave)
+	if attacker.build.weapon_effect(weapon_id, "heavy_breaks_block") and not attack.breaks_block:
+		var breaking := attack.copy()
+		breaking.breaks_block = true
+		return breaking
+	return attack
+
+
+## Server: where a hit's force moves its target (ForceParams.displacement). A
+## player attacker's "force_distance" Wing passives (Tempest Wings) push
+## knockbacks and shoves farther (ForceParams.scaled), never pulls.
+func _force_displacement(attacker_id: int, force: ForceParams, attacker_pos: Vector3,
+		attacker_yaw: float, target_pos: Vector3, p: PlayerParams) -> Vector2:
+	var moved := force.displacement(attacker_pos, attacker_yaw, target_pos, p.force_max_distance,
+			p.force_pull_gap)
+	var attacker := _player_by_id(attacker_id) if attacker_id > 0 else null
+	if attacker == null or attacker.build == null or force.direction == ForceParams.DIRECTION_TOWARD:
+		return moved
+	return ForceParams.scaled(moved, attacker.build.wing_effect_amount("force_distance"),
+			p.force_max_distance)
+
+
+## The wall_stun_source for a force a player (attacker_id) just started: the
+## attacker if it has the Tempest Wings capstone ("wall_stun") and it isn't a
+## pull, else 0.
+func _wall_stun_source(attacker_id: int, force: ForceParams) -> int:
+	var attacker := _player_by_id(attacker_id) if attacker_id > 0 else null
+	if (attacker == null or attacker.build == null or force.direction == ForceParams.DIRECTION_TOWARD
+			or attacker.build.wing_effect("wall_stun") == null):
+		return 0
+	return attacker_id
+
+
+## Server, after a player or enemy moved this tick: Tempest Wings. A target
+## knocked back by a player with the capstone (wall_stun_source) that was
+## driven into a wall (ForcedMotion.pushed_into_wall) gets the capstone's
+## status (a stun) for amount seconds, once per knockback, through
+## _give_status (allies and immunities refuse it).
+func _check_wall_stun(target: Node3D) -> void:
+	var player := target as Player
+	var enemy := target as Enemy
+	var source_id: int = player.wall_stun_source if player else enemy.wall_stun_source
+	if source_id == 0:
+		return
+	var force: ForcedMotion = player.state.force if player else enemy.force
+	var body := target as CharacterBody3D
+	var dead: bool = player.state.dead if player else enemy.dead
+	if not dead and force.is_active() and not (body.is_on_wall()
+			and ForcedMotion.pushed_into_wall(force.velocity, body.get_wall_normal())):
+		return  # still being pushed, no wall yet
+	if player:
+		player.wall_stun_source = 0
+	else:
+		enemy.wall_stun_source = 0
+	if dead or not force.is_active():
+		return
+	var source := _player_by_id(source_id)
+	var node := source.build.wing_effect("wall_stun") if source and source.build else null
+	if node == null:
+		return
+	var ticks := roundi(node.amount * Engine.physics_ticks_per_second)
+	if _give_status(source_id, target, StatusDefs.current().index_of(node.status), 1, ticks):
+		_wall_stuns += 1
+		if _verbose:
+			print("[server] %d knocked into a wall: stunned" % (player.peer_id if player else enemy.enemy_id))
+
+
+## Server: a taunt from source_id landed on an enemy. With the Anchor capstone
+## ("roar_guard") and the taunt coming from its ability (applies_to, i.e.
+## Challenger's Roar is running), the source gains amount stacks of the
+## capstone's status (Defiant: stacking damage reduction).
+func _roar_guard(source_id: int) -> void:
+	var source := _player_by_id(source_id) if source_id > 0 else null
+	if source == null or source.build == null or source.state.dead:
+		return
+	var node := source.build.wing_effect("roar_guard")
+	if node == null or not source.state.is_using_ability():
+		return
+	if source.state.current_ability(source.params).id != node.applies_to:
+		return
+	if _give_status(source_id, source, StatusDefs.current().index_of(node.status),
+			maxi(1, roundi(node.amount)), -1):
+		_roar_guards += 1
+
+
+func _print_juggernaut_summary() -> void:
+	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d wall_stuns=%d roar_guards=%d" % [
+			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
+			_roar_guards])
+
+
 ## Server: a player's health reached 0 (a hit or damage over time). With
 ## enough Ember and Rebirth ready, a Rebirth starts (_server_dead_player raises
 ## them when it's done); otherwise the respawn timer.
@@ -858,12 +977,13 @@ func _force_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 	var p := target.params
 	var tps := float(Engine.physics_ticks_per_second)
 	var moved := target.state.start_force(p,
-			force.displacement(attacker_pos, attacker_yaw, target.global_position,
-					p.force_max_distance, p.force_pull_gap),
+			_force_displacement(attacker_id, force, attacker_pos, attacker_yaw,
+					target.global_position, p),
 			force.ticks(p.gravity, p.force_max_height, tps),
 			force.launch_speed(p.gravity, p.force_max_height), 1.0 / tps)
 	if not moved:
 		return
+	target.wall_stun_source = _wall_stun_source(attacker_id, force)
 	_forced_players += 1
 	if attacker_id > 0:
 		_forced_pvp += 1
@@ -875,19 +995,20 @@ func _force_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 
 ## Server: like _force_player, for a player's hit on an enemy (which survived).
 func _force_enemy(attacker_pos: Vector3, attacker_yaw: float, attack: AttackParams, enemy: Enemy,
-		was_staggered: bool) -> void:
+		was_staggered: bool, attacker_id := 0) -> void:
 	var force := attack.force
 	if force == null or (force.needs_stagger and not was_staggered):
 		return
 	var p := PlayerParams.current()
 	var tps := float(Engine.physics_ticks_per_second)
 	var moved := enemy.start_force(
-			force.displacement(attacker_pos, attacker_yaw, enemy.global_position,
-					p.force_max_distance, p.force_pull_gap),
+			_force_displacement(attacker_id, force, attacker_pos, attacker_yaw,
+					enemy.global_position, p),
 			force.ticks(p.gravity, p.force_max_height, tps),
 			force.launch_speed(p.gravity, p.force_max_height), 1.0 / tps)
 	if not moved:
 		return
+	enemy.wall_stun_source = _wall_stun_source(attacker_id, force)
 	_forced_enemies += 1
 	if force.height > 0.0:
 		_launches += 1
@@ -949,9 +1070,8 @@ func _send_hit(attacker_id: int, target_id: int, damage: float, result: int) -> 
 func _give_hit_statuses(source_id: int, attack: AttackParams, on_hit: Array[Vector2i],
 		target: Node3D) -> void:
 	var defs := StatusDefs.current()
-	if not attack.applies_status.is_empty():
-		_give_status(source_id, target, defs.index_of(attack.applies_status), attack.status_stacks,
-				attack.status_duration_ticks)
+	for status: Array in attack.target_statuses():
+		_give_status(source_id, target, defs.index_of(status[0]), status[1], status[2])
 	for status in on_hit:
 		_give_status(source_id, target, status.x, status.y, -1)
 
@@ -983,6 +1103,7 @@ func _give_status(source_id: int, target: Node3D, index: int, stacks: int,
 		_statuses_on_enemies += 1
 		if def.forces_target:
 			_taunts += 1
+			_roar_guard(source_id)
 	if def.is_debuff() and between_allies:
 		_ally_statuses_applied += 1
 	if _verbose:
@@ -1439,29 +1560,41 @@ func _bot_self_buff_input(distance: float, t: float, cycle: int) -> int:
 	return button
 
 
-## Bot Wing abilities (Z / C), at most one press of each ability per cycle:
-## Wingbeat Surge as its attack turn starts, Ember Mantle as its block turn
-## starts (or Pyre Heart, if that's slotted and it's hurt), and Diving Strike
-## whenever the target is 3-7 m away before the circling phase. While a Rebirth
-## is ready it only spends Ember above the Rebirth threshold, so it keeps a
-## Rebirth for its next death (the decision the design asks players to make).
-## turn_time: seconds into its attack turn (outside 0-2 = its block turn).
+## Bot Wing abilities (Z / C), at most one press of each ability per cycle, by
+## role (_bot_wing_role, so it works for every class's Wings): a damage buff
+## (Wingbeat Surge) as its attack turn starts, a burst around it (Gale Burst,
+## Challenger's Roar) later in that turn, after its heavy, a
+## guard (Ember Mantle, Unbowed) as its block turn starts (or a heal, Pyre
+## Heart, if that's slotted and it's hurt), and a dive (Diving Strike, Meteor
+## Drop) whenever the target is 3-7 m away before the circling phase. While a
+## Rebirth is ready it only spends Ember above the Rebirth threshold, so it
+## keeps a Rebirth for its next death (the decision the design asks players to
+## make). turn_time: seconds into its attack turn (outside 0-2 = its block turn).
 func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float) -> int:
 	var state := _local_player.state
 	if state.is_attacking() or state.dead:
 		return 0
 	if not _bot_wing_pressed.has("cycle") or _bot_wing_pressed["cycle"] != cycle:
 		_bot_wing_pressed = {"cycle": cycle}
-	var wanted: Array[String] = []
+	var roles: Array[String] = []
 	if distance >= 3.0 and distance <= 7.0:
-		wanted.append("diving_strike")
+		roles.append("dive")
 	if phase < 4.0 and turn_time >= 0.0 and turn_time < 0.3:
-		wanted.append("wingbeat_surge")
+		roles.append("offense")
+	if phase < 4.0 and turn_time >= 1.0 and turn_time < 2.0:
+		roles.append("burst")  # after its heavy (a press at once would replace it)
 	var off_time := turn_time + 2.0 if turn_time < 0.0 else turn_time - 2.0
 	if phase < 4.0 and off_time >= 0.0 and off_time < 0.3:
 		if _local_player.health < _local_player.params.max_health * 0.8:
-			wanted.append("pyre_heart")
-		wanted.append("ember_mantle")
+			roles.append("heal")
+		roles.append("guard")
+	var wanted: Array[String] = []
+	var pool := state.wings(_local_player.params)
+	for role in roles:
+		for index in (pool.abilities.size() if pool else 0):
+			var wing := pool.ability(index)
+			if wing and _bot_wing_role(wing) == role:
+				wanted.append(wing.id)
 	for ability_id in wanted:
 		if _bot_wing_pressed.has(ability_id):
 			continue
@@ -1470,6 +1603,24 @@ func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float
 			_bot_wing_pressed[ability_id] = true
 			return PlayerState.BUTTON_WING_1 << slot
 	return 0
+
+
+## Bot: what a Wing ability is for. "dive": it dashes (Diving Strike, Meteor
+## Drop); "burst": it hits around you (Gale Burst, Challenger's Roar); "heal":
+## its self-buff heals (Pyre Heart); "offense": its self-buff adds damage
+## (Wingbeat Surge); "guard": any other self-buff (Ember Mantle, Unbowed).
+func _bot_wing_role(wing: AbilityParams) -> String:
+	if wing.dash_speed > 0.0:
+		return "dive"
+	if wing.shape != AttackParams.SHAPE_NONE:
+		return "burst"
+	var defs := _local_player.params.statuses
+	var buff := defs.get_def(defs.index_of(wing.self_status)) if not wing.self_status.is_empty() else null
+	if buff and buff.heal_per_interval > 0.0:
+		return "heal"
+	if buff and buff.damage_dealt > 0.0:
+		return "offense"
+	return "guard"
 
 
 ## The Wing slot holding a ready, affordable Wing ability, or -1. While a
@@ -1786,8 +1937,7 @@ func print_summary() -> void:
 				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])
 		_print_force_summary()
 		_print_ember_summary()
-		print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d" % [
-				_crits, _hook_staggers, _brace_staggers, _ramp_stacks])
+		_print_juggernaut_summary()
 		_projectiles.print_summary()
 		return
 	_projectiles.print_client_summary()

@@ -3,7 +3,8 @@ extends Node3D
 ## How a projectile looks on clients (cosmetic only; ProjectileSystem moves
 ## it). "feather": a flat, tapered vane on a quill, pointing along its velocity
 ## (the game's projectile signature), with a short fading streak behind it.
-## "axe": a hand axe spinning flat. Colored per kind (data/projectiles.cfg).
+## "axe": a hand axe spinning flat. "wave": a crescent rolling along the
+## ground (Shockwave). Colored per kind (data/projectiles.cfg).
 ## Meshes are built in code once per kind.
 
 ## Fraction of the length the vane is wide (each side of the quill).
@@ -15,6 +16,12 @@ const STREAK_SECONDS := 0.025
 ## Vane outline: [fraction of the length from the tip, fraction of VANE_WIDTH].
 const VANE_PROFILE := [[0.06, 0.0], [0.16, 0.75], [0.32, 1.0], [0.55, 0.85], [0.78, 0.6],
 		[0.88, 0.45], [0.84, 0.0]]
+
+## Wave: degrees the crescent spans, meters deep its ground band is, and
+## meters tall its ridge is.
+const WAVE_ARC_DEGREES := 120.0
+const WAVE_BAND := 0.45
+const WAVE_RIDGE_HEIGHT := 0.45
 
 static var _meshes: Dictionary[String, Mesh] = {}
 
@@ -44,7 +51,13 @@ func show_at(pos: Vector3, velocity: Vector3) -> void:
 
 static func _mesh_for(p: ProjectileParams) -> Mesh:
 	if not _meshes.has(p.id):
-		_meshes[p.id] = _build_axe(p) if p.visual == ProjectileParams.VISUAL_AXE else _build_feather(p)
+		match p.visual:
+			ProjectileParams.VISUAL_AXE:
+				_meshes[p.id] = _build_axe(p)
+			ProjectileParams.VISUAL_WAVE:
+				_meshes[p.id] = _build_wave(p)
+			_:
+				_meshes[p.id] = _build_feather(p)
 	return _meshes[p.id]
 
 
@@ -105,6 +118,39 @@ static func _build_axe(p: ProjectileParams) -> Mesh:
 			Vector3(w, 0.0, -half + p.length * 0.22)]
 	for i in range(1, points.size() - 1):
 		_triangle(st, points[0], points[i], points[i + 1], base, edge, edge)
+	var mesh := st.commit()
+	mesh.surface_set_material(0, _material(p.color))
+	return mesh
+
+
+## A shockwave: a crescent `length` meters across, bulging forward (-Z), lying
+## on the ground (release_height below the projectile's center) with a low,
+## fading ridge rising from its front edge.
+static func _build_wave(p: ProjectileParams) -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var arc := deg_to_rad(WAVE_ARC_DEGREES) / 2.0
+	var radius := p.length / 2.0 / sin(arc)
+	var center_z := radius * cos(arc)  # the ends of the arc sit at z = 0
+	var ground := -p.release_height + 0.02
+	var bright := p.color.lightened(0.35)
+	var faint := Color(p.color, 0.0)
+	var segments := 12
+	for i in segments:
+		var a := lerpf(-arc, arc, float(i) / segments)
+		var b := lerpf(-arc, arc, float(i + 1) / segments)
+		var outer_a := Vector3(radius * sin(a), ground, center_z - radius * cos(a))
+		var outer_b := Vector3(radius * sin(b), ground, center_z - radius * cos(b))
+		var inner := radius - WAVE_BAND
+		var inner_a := Vector3(inner * sin(a), ground, center_z - inner * cos(a))
+		var inner_b := Vector3(inner * sin(b), ground, center_z - inner * cos(b))
+		# The band on the ground, bright at the front edge.
+		_triangle(st, outer_a, outer_b, inner_b, bright, bright, faint)
+		_triangle(st, outer_a, inner_b, inner_a, bright, faint, faint)
+		# The ridge, rising from the front edge and fading upward.
+		var up := Vector3(0.0, WAVE_RIDGE_HEIGHT, 0.0)
+		_triangle(st, outer_a, outer_b, outer_b + up, p.color, p.color, faint)
+		_triangle(st, outer_a, outer_b + up, outer_a + up, p.color, faint, faint)
 	var mesh := st.commit()
 	mesh.surface_set_material(0, _material(p.color))
 	return mesh

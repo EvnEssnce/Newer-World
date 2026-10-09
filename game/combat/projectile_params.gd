@@ -7,6 +7,8 @@ extends RefCounted
 const FILE := "projectiles"
 const VISUAL_FEATHER := "feather"
 const VISUAL_AXE := "axe"
+## A crescent rolling along the ground (Shockwave).
+const VISUAL_WAVE := "wave"
 
 var id := ""
 ## Meters per second at launch.
@@ -103,6 +105,6 @@ func validate() -> String:
 		return "%s: hit_radius and pierce can't be negative" % id
 	if returns and (return_speed <= 0.0 or return_after_ticks >= lifetime_ticks):
 		return "%s: a returning projectile needs return_speed > 0 and return_after < lifetime" % id
-	if not visual in [VISUAL_FEATHER, VISUAL_AXE]:
-		return "%s: visual must be \"feather\" or \"axe\"" % id
+	if not visual in [VISUAL_FEATHER, VISUAL_AXE, VISUAL_WAVE]:
+		return "%s: visual must be \"feather\", \"axe\" or \"wave\"" % id
 	return ""

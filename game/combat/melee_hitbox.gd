@@ -6,7 +6,8 @@ class_name MeleeHitbox
 ## Box (SHAPE_BOX): starts at the attacker's center and reaches hitbox_range
 ## forward (forward is -Z rotated by yaw), hitbox_width wide, from the attacker's
 ## feet up hitbox_height. Radial (SHAPE_RADIAL): a cylinder of radius
-## hitbox_range around the attacker, hitbox_height tall, ignoring facing.
+## hitbox_range around the attacker, hitbox_height tall, ignoring facing; with
+## hitbox_arc (a cone, Seismic Slam), only that wide in front.
 
 
 static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
@@ -21,7 +22,11 @@ static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 	if attack.shape == AttackParams.SHAPE_RADIAL:
 		# A circle of radius hitbox_range around the attacker, all the way round.
 		var flat := Vector2(target_pos.x - attacker_pos.x, target_pos.z - attacker_pos.z)
-		return flat.length() <= attack.hitbox_range + target_radius
+		if flat.length() > attack.hitbox_range + target_radius:
+			return false
+		# A cone (hitbox_arc > 0): the target's center must be inside the arc.
+		return attack.hitbox_arc <= 0.0 or is_in_front(attacker_pos, yaw, target_pos,
+				attack.hitbox_arc)
 	# Horizontal: rotate the target into the attacker's space (forward = -Z), then
 	# check the distance from the capsule's center to the box's rectangle.
 	var offset := target_pos - attacker_pos

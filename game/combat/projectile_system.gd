@@ -86,7 +86,15 @@ func _physics_process(delta: float) -> void:
 ## Server: `player`'s current attack just reached its release tick: throws its
 ## projectiles from its server position and facing.
 func server_fire(player: Player) -> void:
-	var attack := player.state.current_attack(player.params)
+	server_fire_attack(player, player.state.current_attack(player.params))
+
+
+## Server: throws `attack`'s projectiles from `player`'s server position and
+## facing (server_fire, or a server-side throw outside the predicted timeline:
+## the Earthshaker capstone's aftershock). Every client gets the spawn; the
+## thrower's own client has no cosmetic copy waiting for a server-side throw,
+## so it draws it on the render clock like anyone else's.
+func server_fire_attack(player: Player, attack: AttackParams) -> void:
 	var p := ProjectileParams.get_kind(attack.projectile) if attack else null
 	if p == null:
 		return

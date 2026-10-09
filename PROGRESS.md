@@ -11,6 +11,79 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-09 (25): The Juggernaut (Wave 3, two agents)
+
+Scaffold first (main session, `613a249`): `data/class_juggernaut.cfg` (Halberd,
+Greataxe, War Hammer; default loadout Halberd + War Hammer), stub weapons so the class
+loads, `-Class ID` on `smoke_test.ps1` and `run_local_test.ps1`, and the smoke test's
+Spear check became a per-class-weapon check ("weapons": every class weapon used). Then
+two agents filled in separate files, merged on `wave3-merge` (6 conflicts: keep-both
+for counters, model calls, projectile kinds, mastery effect docs, CLAUDE.md;
+`AttackParams.copy()` + `range_copy` combined; one `SUMMARY juggernaut` line).
+
+**Halberd** (Warden / Headsman; Q/E/R Hooking Pull, Wide Reap, Crowd Sweep): Hooking Pull
+(5.5 m line, pulls 4.5 m, marks Hooked 2.5 s), Wide Reap (150, 3.6 × 6 m), Pole Vault (6
+m, landing knockback), Brace (Braced + staggers a melee attacker who was dashing or hits
+within the first 1 s, players and Husks), Cleaving Arc (200, Exposed), Crowd Sweep (push
+4 m). Capstones: **Caught on the Hook** (your next damaging hit on a target you Hooked
+staggers ≥ 0.8 s, uses the mark), **Headsman's Verdict** (heavies on already-staggered
+targets crit). New: the first **crit system** (`[crit] damage_multiplier=1.5` in
+combat.cfg, "Critical! -N" label, hit result 8), ready for gear crit chance.
+
+**Greataxe** (Maelstrom / Bloodied; Q/E/R Vortex, Charging Chop, Grounding Blow): Vortex
+(3 pulling spins of 70, 3.5 m), Charging Chop (6 m), Grounding Blow (110, Slow 3 s),
+Executioner's Swing (170, up to +150% below 30%: ability-level execute keys), Iron Hide
+(−8% damage taken per hostile within 5 m, max 5), Hurl (thrown axe ~15 m, Slow 5 s; **no
+pickup**: a fixed slow). Capstones: Maelstrom (Vortex hit/pull radius ×2, server-side;
+F3 still draws 3.5 m), **Red Tide** (Bloodied: +3% damage per stack, 8 max, 2.5 s,
+refreshed per hit).
+
+**War Hammer** (Earthshaker / Breaker; Q/E/R Seismic Slam, Clout, Upheaval): heavy 240,
+0.7 s stagger, doesn't break blocks by default. Seismic Slam (90° 4 m cone: new `arc`
+key), Clout (stun 1.5 s), Shatter (new Shattered: +15% damage taken, 2 stacks), Upheaval
+(radial launch), Shockwave (new flat piercing `shockwave` projectile, "wave" visual,
+staggers), Steadfast. Capstones: Earthshaker (every 3rd heavy sends an aftershock wave,
+`HeavyCounter`, `ProjectileSystem.server_fire_attack`), Breaker (heavies break blocks).
+
+**Juggernaut Wings** (Tempest Wings / Anchor; Z Gale Burst, C Challenger's Roar): Gale
+Burst (20 Ember, 4 m knockback 3.5 m), Challenger's Roar (25, 8 m, Taunted + Slow 3 s via
+new `applies_status_2` keys), Meteor Drop (30, 6 m leap, launch at landing), Unbowed (25).
+Capstones: Tempest Wings (knocked into a wall = stunned 1.5 s, players and enemies,
+`ForcedMotion.pushed_into_wall`), Anchor (Defiant: −6% damage taken per enemy the Roar
+taunts, 5 max). Passives: knockback distance (+20%, +20%), damage taken (−5%, −8%).
+
+Bots: Wing abilities are now chosen by role (`World._bot_wing_role`), so any class's Wings
+work; area Wings are pressed 1–2 s into the attack turn. Bots learn built capstones (Wing
+and weapon). No new `to_array()` fields; every Juggernaut mechanic is server-only.
+
+Tests: 416 passed after the merge. Smoke after merge: Fighter default and `-Party`
+passed; `-Class juggernaut` passed; `-Class juggernaut -Party` failed once "no player was
+moved by force" (Juggernauts spend time knockback-immune; known luck check) and passed on
+the rerun. 0 corrections in all. `SUMMARY juggernaut` showed hook_staggers 1,
+brace_staggers 1, bloodied_stacks 4, aftershocks 1–2, roar_guards 1–2; **crits and wall
+stuns never fired** in bot runs.
+
+**Playtest** (`run_local_test.ps1 -Class juggernaut`, `-Party` for the Roar/allies):
+- Feel and numbers of all three weapons; pull/push distances; Pole Vault, Charging Chop,
+  Meteor Drop arcs; Seismic Slam's cone; Shockwave's look and reach.
+- Never seen in play: Headsman crits, Vortex ×2 range, wall stuns (Gale Burst a Husk
+  into a crate), Breaker on a real guard.
+- Models: the greataxe is mostly hidden behind the body from the follow camera.
+- Everything from session 24 (Rampage, Shield Wall, Hold the Line, Finishing Thrust,
+  threat).
+
+**Decisions to confirm** (besides session 24's): Brace "charge" = dashing or within 1 s
+of bracing; Hooked is applied even without the capstone (a mark that does nothing alone);
+Hooking Pull hooks everything its line touches on contact; crits only on targets
+staggered *before* the hit, 1.5×; Challenger's Roar is a 0-damage hit (a facing guard
+blocks it, enemies show "0"); Defiant counts only taunts from the Roar itself; an
+interrupted heavy doesn't count toward Earthshaker; wall stun never from pulls, and also
+on players; Shattered 2 × 15% vs Exposed 25%.
+
+**Next:** playtest, then fast-forward main to `wave3-merge` and push. After that, per
+`design/classes.md`: the Assassin (Talons first). Still open from before: snapshot size
+(a third player already exceeds the MTU), loot drops/pickup/inventory (milestone 2).
+
 ### 2026-10-09 (24): Fighter leftovers and enemy threat (Wave 3, two agents)
 
 Skewer/Perforate were playtested ("looks great") and pushed. Then two agents built in

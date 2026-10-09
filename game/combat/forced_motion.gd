@@ -57,6 +57,17 @@ func stop() -> void:
 	launch = 0.0
 
 
+## True if a body being pushed along `push` (world XZ velocity) that touches a
+## wall with `wall_normal` was driven into it: the wall faces back against the
+## push (within 60 degrees) and is steep (not a slope or the floor). For the
+## Tempest Wings capstone (stun on a wall hit). Pure math.
+static func pushed_into_wall(push: Vector2, wall_normal: Vector3) -> bool:
+	var flat := Vector2(wall_normal.x, wall_normal.z)
+	if push.length() < 0.5 or flat.length() < 0.7:
+		return false
+	return flat.normalized().dot(push.normalized()) <= -0.5
+
+
 func matches(other: ForcedMotion) -> bool:
 	return (ticks == other.ticks and velocity.is_equal_approx(other.velocity)
 			and is_equal_approx(launch, other.launch))
