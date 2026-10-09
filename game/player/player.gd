@@ -150,6 +150,11 @@ var line_ready_at: Dictionary[int, int] = {}
 var status_damage_pending := 0.0
 ## Healing over time (Pyre Heart) from this tick's sim steps, not yet applied.
 var status_heal_pending := 0.0
+## Server: War Hammer heavies counted for the Earthshaker capstone.
+var heavy_counter := HeavyCounter.new()
+## Server: the player whose knockback is moving this one and who has the
+## Tempest Wings capstone (a wall hit stuns), or 0.
+var wall_stun_source := 0
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -183,6 +188,8 @@ var _radial_mesh: CylinderMesh
 var _wing_pivots: Array[Node3D] = []
 var _rebirth_fire: MeshInstance3D
 var _rebirth_mesh: CylinderMesh
+## Placeholder War Hammer, built in code (client; _build_hammer_model).
+var _hammer_pivot: Node3D
 
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
@@ -216,6 +223,7 @@ func _ready() -> void:
 	_box_mesh = _hitbox_debug.mesh as BoxMesh
 	_radial_mesh = CylinderMesh.new()
 	_build_phoenix_visuals()
+	_build_hammer_model()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -619,6 +627,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		var pose := _sword_pose(attack, view.attack_type, ability_id, attack_tick)
 		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
 		_sword_pivot.position = _sword_rest_position + Vector3(0.0, 0.0, pose.z)
+	_show_hammer(model == "war_hammer", attack, view.attack_type, ability_id, attack_tick, lowered)
 
 	_show_hitbox(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
@@ -859,5 +868,76 @@ func _show_phoenix(view: PlayerState, attack: AttackParams, attack_tick: float) 
 func _rebirth_rise(view: PlayerState) -> float:
 	var progress := view.rebirth_progress(params)
 	return clampf((progress - 0.7) / 0.3, 0.0, 1.0) if progress >= 0.0 else 0.0
+
+
+# --- War Hammer model (Juggernaut; placeholder, client) ---
+
+## Hammer pivot pose: x = pitch (up), y = sweep (left), z = meters pulled back.
+const HAMMER_IDLE := Vector3(-0.5, 0.25, 0.0)
+## Light: a diagonal swing from the right shoulder.
+const HAMMER_LIGHT_WOUND := Vector3(1.0, -1.0, 0.0)
+const HAMMER_LIGHT_STRUCK := Vector3(-0.8, 0.8, 0.0)
+## Heavy and the slams: raised high overhead, then down onto the ground.
+const HAMMER_SLAM_WOUND := Vector3(2.4, 0.0, 0.1)
+const HAMMER_SLAM_STRUCK := Vector3(-1.25, 0.0, -0.1)
+## Clout: a flat sideways blow.
+const HAMMER_CLOUT_WOUND := Vector3(0.2, -1.6, 0.0)
+const HAMMER_CLOUT_STRUCK := Vector3(0.0, 1.0, 0.0)
+## Steadfast: the head planted on the ground in front.
+const HAMMER_PLANTED := Vector3(-1.45, 0.0, 0.0)
+const HAMMER_HANDLE_COLOR := Color(0.42, 0.28, 0.16)
+const HAMMER_HEAD_COLOR := Color(0.45, 0.47, 0.52)
+## Abilities drawn as an overhead slam.
+const HAMMER_SLAMS := ["seismic_slam", "shatter", "upheaval", "shockwave", "meteor_drop"]
+
+
+## A two-handed hammer: a long handle along -Z with a block head across its end.
+func _build_hammer_model() -> void:
+	_hammer_pivot = Node3D.new()
+	_hammer_pivot.position = Vector3(0.4, 0.3, -0.1)
+	_hammer_pivot.visible = false
+	for part: Array in [[Vector3(0.07, 0.07, 1.25), Vector3(0.0, 0.0, -0.5), HAMMER_HANDLE_COLOR],
+			[Vector3(0.28, 0.5, 0.3), Vector3(0.0, 0.0, -1.1), HAMMER_HEAD_COLOR]]:
+		var box := BoxMesh.new()
+		box.size = part[0]
+		var material := StandardMaterial3D.new()
+		material.albedo_color = part[2]
+		var mesh := MeshInstance3D.new()
+		mesh.mesh = box
+		mesh.material_override = material
+		mesh.position = part[1]
+		_hammer_pivot.add_child(mesh)
+	_roll_pivot.add_child(_hammer_pivot)
+
+
+## Shows the hammer (and hides the Fighter weapons) while the War Hammer is out,
+## posed for the current attack; lowered: 0..1 of a swap's lowered weapon.
+func _show_hammer(shown: bool, attack: AttackParams, attack_type: int, ability_id: String,
+		attack_tick: float, lowered: float) -> void:
+	if _hammer_pivot == null:
+		return
+	_hammer_pivot.visible = shown
+	if not shown:
+		return
+	for pivot in [_sword_pivot, _shield_pivot, _axe_right_pivot, _axe_left_pivot, _spear_pivot]:
+		pivot.visible = false
+	var pose := _hammer_pose(attack, attack_type, ability_id, attack_tick)
+	_hammer_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
+	_hammer_pivot.position = Vector3(0.4, 0.3, -0.1 + pose.z)
+
+
+static func _hammer_pose(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float) -> Vector3:
+	if attack == null:
+		return HAMMER_IDLE
+	if ability_id in HAMMER_SLAMS or attack_type == PlayerState.ATTACK_HEAVY:
+		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_SLAM_WOUND, HAMMER_SLAM_STRUCK)
+	if ability_id == "clout":
+		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_CLOUT_WOUND, HAMMER_CLOUT_STRUCK)
+	if ability_id == "steadfast":
+		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_PLANTED, HAMMER_PLANTED)
+	if attack_type == PlayerState.ATTACK_LIGHT:
+		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_LIGHT_WOUND, HAMMER_LIGHT_STRUCK)
+	return HAMMER_IDLE  # other Wing abilities: held ready
 
 

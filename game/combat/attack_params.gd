@@ -34,6 +34,9 @@ var shape := SHAPE_BOX
 var hitbox_range := 0.0
 var hitbox_width := 0.0
 var hitbox_height := 0.0
+## Radial only: limits the circle to a cone this wide (full width, radians) in
+## front of the attacker (Seismic Slam). 0 = all the way round.
+var hitbox_arc := 0.0
 ## Stops (skips to recovery) after hitting this many targets. 0 = no limit.
 var max_targets := 0
 ## When max_targets stops it (a charge on contact), everything within this many
@@ -48,6 +51,11 @@ var force: ForceParams = null
 var applies_status := ""
 var status_stacks := 1
 var status_duration_ticks := -1
+## A second status for the same targets (applies_status_2, status_stacks_2,
+## status_duration_2: Challenger's Roar taunts and slows).
+var applies_status_2 := ""
+var status_stacks_2 := 1
+var status_duration_2_ticks := -1
 ## Applied to the attacker when it starts, inside the predicted simulation
 ## (a self-buff such as Bloodlust), with self_status_stacks stacks.
 var self_status := ""
@@ -112,6 +120,7 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_range = Tuning.get_value(file, section, "range")
 	hitbox_width = Tuning.get_value(file, section, "width")
 	hitbox_height = Tuning.get_value(file, section, "height")
+	hitbox_arc = deg_to_rad(Tuning.get_optional(file, section, "arc", 0.0))
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
 	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
 	_load_statuses(file, section, tps)
@@ -129,8 +138,23 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	status_stacks = Tuning.get_optional(file, section, "status_stacks", 1)
 	var duration: float = Tuning.get_optional(file, section, "status_duration", -1.0)
 	status_duration_ticks = roundi(duration * tps) if duration > 0.0 else -1
+	applies_status_2 = Tuning.get_optional(file, section, "applies_status_2", "")
+	status_stacks_2 = Tuning.get_optional(file, section, "status_stacks_2", 1)
+	var duration_2: float = Tuning.get_optional(file, section, "status_duration_2", -1.0)
+	status_duration_2_ticks = roundi(duration_2 * tps) if duration_2 > 0.0 else -1
 	self_status = Tuning.get_optional(file, section, "self_status", "")
 	self_status_stacks = Tuning.get_optional(file, section, "self_status_stacks", 1)
+
+
+## The statuses this gives whoever it damages, as [id, stacks, duration ticks
+## (-1 = the status's own)] each: applies_status, then applies_status_2.
+func target_statuses() -> Array[Array]:
+	var result: Array[Array] = []
+	if not applies_status.is_empty():
+		result.append([applies_status, status_stacks, status_duration_ticks])
+	if not applies_status_2.is_empty():
+		result.append([applies_status_2, status_stacks_2, status_duration_2_ticks])
+	return result
 
 
 static func shape_from_name(shape_name: String) -> int:
@@ -148,10 +172,18 @@ static func shape_from_name(shape_name: String) -> int:
 ## A copy of this attack whose hitbox is a circle of `radius` meters around the
 ## attacker (same damage, stagger, statuses, force): a charge's impact.
 func radial_copy(radius: float) -> AttackParams:
-	var copy: AttackParams = get_script().new()
+	var result := copy()
+	result.shape = SHAPE_RADIAL
+	result.hitbox_range = radius
+	result.hitbox_arc = 0.0
+	return result
+
+
+## A copy of this attack (same script, every field), for a server-side variant
+## (the Breaker capstone's block-breaking heavy).
+func copy() -> AttackParams:
+	var result: AttackParams = get_script().new()
 	for property in get_property_list():
 		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
-			copy.set(property.name, get(property.name))
-	copy.shape = SHAPE_RADIAL
-	copy.hitbox_range = radius
-	return copy
+			result.set(property.name, get(property.name))
+	return result

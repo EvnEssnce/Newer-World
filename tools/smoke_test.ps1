@@ -48,11 +48,18 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # in every run (Husk swings bleed the bots; Broadsword heavies push Husks).
     '--tune=enemy_husk/attack/applies_status=bleed',
     '--tune=weapon_broadsword/heavy/force_distance=0.4',
+    '--tune=weapon_war_hammer/heavy/force_distance=0.4',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # More throws per run (each weapon is out for about one cycle), so a
     # projectile hit doesn't hang on one or two throws.
     '--tune=weapon_spear/ability_javelin_cast/cooldown=2.0',
     '--tune=weapon_dual_axes/ability_boomerang_axe/cooldown=2.0',
+    '--tune=weapon_war_hammer/ability_shockwave/cooldown=2.0',
+    # Earthshaker (the bots learn the War Hammer capstones before its cycle)
+    # sends its aftershock on every heavy instead of every 3rd: a bot swings
+    # one heavy per attack turn. Counted in "SUMMARY juggernaut aftershocks=",
+    # not checked.
+    '--tune=mastery_war_hammer/node_earthshaker/amount=1',
     # Skewer taunts instead of rooting, so taunts on Husks happen (nothing
     # applies them in the real data yet). Counted in "SUMMARY enemies taunts=",
     # not checked: it depends on the bot's Spear turn landing on a Husk.

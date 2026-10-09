@@ -33,7 +33,9 @@ class MasteryNode:
 	var ability := ""
 	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina",
 	## "execute_damage", "hold_the_line", "none", or (Wing trees)
-	## "damage_taken", "mantle_heal", "surge_stagger".
+	## "damage_taken", "mantle_heal", "surge_stagger", "force_distance",
+	## "wall_stun", "roar_guard"; War Hammer: "heavy_shockwave",
+	## "heavy_breaks_block".
 	var effect := "none"
 	## "damage": "light", "heavy", "abilities", "all" or one ability id.
 	## "mantle_heal" / "surge_stagger": the Wing ability whose self-buff it needs.
@@ -43,6 +45,9 @@ class MasteryNode:
 	## "low_health_damage": applies below this fraction of the attacker's max
 	## health. "execute_damage": below this fraction of the target's.
 	var threshold := 0.0
+	## "wall_stun" / "roar_guard": the status (data/status_effects.cfg id) it
+	## applies.
+	var status := ""
 
 
 ## The weapon id, or "wings_<class>" for a class's Wing tree.
@@ -114,6 +119,7 @@ static func from_tuning(weapon: String) -> MasteryTree:
 		n.applies_to = Tuning.get_optional(file, section, "applies_to", "")
 		n.amount = Tuning.get_optional(file, section, "amount", 0.0)
 		n.threshold = Tuning.get_optional(file, section, "threshold", 0.0)
+		n.status = Tuning.get_optional(file, section, "status", "")
 	return t
 
 

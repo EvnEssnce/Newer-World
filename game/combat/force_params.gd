@@ -57,6 +57,14 @@ static func direction_from_name(direction_name: String) -> int:
 	return DIRECTION_AWAY
 
 
+## A displacement made `bonus` (fraction) longer, capped at max_distance
+## (Tempest Wings' "force_distance" passives). A bonus of 0 or less leaves it.
+static func scaled(moved: Vector2, bonus: float, max_distance: float) -> Vector2:
+	if bonus <= 0.0:
+		return moved
+	return (moved * (1.0 + bonus)).limit_length(maxf(moved.length(), max_distance))
+
+
 ## World-space XZ meters a target at target_pos is moved by an attacker at
 ## attacker_pos facing attacker_yaw. Capped at max_distance; a pull never takes
 ## the target closer than pull_gap (and never pushes it away).

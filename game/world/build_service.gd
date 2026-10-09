@@ -135,15 +135,17 @@ func request_wings(nodes: PackedStringArray, slots: PackedStringArray) -> void:
 	_request_wings.rpc_id(1, nodes, slots)
 
 
-## Test bot: a free respec of the Wing tree to its default allocation, with the
-## Wing slots for a bot cycle (bot_wing_slots_for_cycle), so the smoke test
-## exercises the server's Wing validation and the bot gets to use every Wing
-## ability. Nothing is sent if that's already the build.
+## Test bot: a free respec of the Wing tree to its default allocation plus the
+## built capstones that fit (the first in file order on even cycles, the last
+## on odd ones, so each gets its turn), with the Wing slots for a bot cycle
+## (bot_wing_slots_for_cycle), so the smoke test exercises the server's Wing
+## validation and the bot gets to use every Wing ability. Nothing is sent if
+## that's already the build.
 func bot_respec_wings(cycle: int) -> void:
 	if local_build == null or local_build.wing_tree == null:
 		return
 	var tree := local_build.wing_tree
-	var nodes := tree.default_nodes.duplicate()
+	var nodes := _bot_learn_capstones(tree, tree.default_nodes.duplicate(), cycle % 2 == 1)
 	var slots := bot_wing_slots_for_cycle(cycle)
 	var unlocked := tree.unlocked_abilities(nodes)
 	for i in slots.size():
@@ -196,9 +198,13 @@ func bot_respec(weapon_id: String, cycle: int) -> void:
 				break
 		nodes = _bot_learn_capstones(tree, nodes)
 	else:
+		var before := nodes.size()
 		var learned := _bot_learn_new_actives(tree, nodes, slots)
 		nodes = learned[0]
 		slots = learned[1]
+		if nodes.size() == before:
+			# Every active is already learned (War Hammer): the capstones instead.
+			nodes = _bot_learn_capstones(tree, nodes)
 	var unlocked := tree.unlocked_abilities(nodes)
 	for i in slots.size():
 		if not (slots[i] in unlocked):
@@ -243,9 +249,14 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 ## Test bot: `nodes` plus each built capstone (a last-tier passive whose effect
 ## isn't "none": the Spear's Hold the Line and Finishing Thrust) that fits, with
 ## the lower nodes of its branch (in file order) it needs, so the smoke test
-## exercises them. A capstone that doesn't fit is left out.
-static func _bot_learn_capstones(tree: MasteryTree, nodes: PackedStringArray) -> PackedStringArray:
-	for id in tree.node_order:
+## exercises them. A capstone that doesn't fit is left out. reverse: try the
+## capstones last-first.
+static func _bot_learn_capstones(tree: MasteryTree, nodes: PackedStringArray,
+		reverse := false) -> PackedStringArray:
+	var order := tree.node_order.duplicate()
+	if reverse:
+		order.reverse()
+	for id in order:
 		var cap := tree.get_node(id)
 		if (cap.tier != tree.tier_count() or cap.kind == MasteryTree.KIND_ACTIVE
 				or cap.effect == "none" or id in nodes):

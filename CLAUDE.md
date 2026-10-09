@@ -44,7 +44,8 @@ game/
                      prediction, interpolation, hit display; test bot.
   world/build_service.gd  World/Builds node: class/weapon/mastery/Wing requests (RPCs), validation.
   player/player.gd   One player; server/local/remote roles (see below), health, visuals
-                     (incl. placeholder wings and the Rebirth fire).
+                     (incl. placeholder wings, the Rebirth fire and the War Hammer,
+                     built in code: `_build_hammer_model`/`_show_hammer`).
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
   player/player_state.gd     Stamina, dodge, attacks, abilities, cooldowns, weapon swap,
                              stagger, death, facing, Wing abilities, Ember, Rebirth.
@@ -55,16 +56,19 @@ game/
   combat/ability_params.gd   An ability: AttackParams + cooldown, dash, parry/counter, ember_cost.
   combat/weapon_params.gd    One weapon: light/heavy attacks, ability pool (data/weapon_<id>.cfg).
   combat/wing_params.gd      A class's Wing ability pool (data/wings_<class>.cfg).
-  combat/melee_hitbox.gd     Box/radial hitbox vs capsule test, frontal arc. Pure math, unit tested.
+  combat/melee_hitbox.gd     Box/radial/cone hitbox vs capsule test, frontal arc. Pure math, unit tested.
   combat/force_params.gd     An attack's forced movement (force_* keys): knockback/pull/push, launch.
-  combat/forced_motion.gd    A push/launch in progress (players: in PlayerState; enemies). Unit tested.
+  combat/forced_motion.gd    A push/launch in progress (players: in PlayerState; enemies);
+                             pushed_into_wall (Tempest Wings). Unit tested.
+  combat/heavy_counter.gd    Counts heavies once each (War Hammer Earthshaker). Unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
   combat/projectile_params.gd  One projectile kind (data/projectiles.cfg [projectile_<id>]).
   combat/projectile.gd       One projectile in flight: steps, boomerang legs, pierce, hit-once
                              bookkeeping, swept segment-vs-capsule test. Pure logic, unit tested.
   combat/projectile_system.gd  World/Projectiles: server flight + hits, spawn/turn/end events,
                              client copies (render clock / local cosmetic copy).
-  combat/projectile_visual.gd  Client look: feather (quill + vane + streak) or spinning axe.
+  combat/projectile_visual.gd  Client look: feather (quill + vane + streak), spinning axe or
+                             wave (a crescent on the ground: Shockwave).
   build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
   build/mastery_tree.gd      A weapon's mastery tree (or a class's Wing tree) and its rules.
                              Pure logic, unit tested.
@@ -89,7 +93,8 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
-                     weapon_<id> (broadsword, spear, dual_axes), class_<id> (fighter),
+                     weapon_<id> (broadsword, spear, dual_axes, war_hammer, ...),
+                     class_<id> (fighter, juggernaut),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, party, status_effects,
@@ -235,7 +240,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   buffered by `[abilities] buffer`). Cooldown starts with the ability and counts down
   for both weapons (`cooldowns`, per weapon slot × pool index). Variants:
   `windows`/`window_interval` (Frenzy: a target can be hit once per window),
-  `shape="radial"` (Whirlwind Edge, Crashing Leap slam), dash (`dash_distance`, moved in
+  `shape="radial"` (Whirlwind Edge, Crashing Leap slam; with `arc` (degrees) a cone in
+  front, `AttackParams.hitbox_arc`: Seismic Slam; the F3 debug draws the full circle), dash (`dash_distance`, moved in
   `PlayerMovement` like a dodge: Shield Charge, Crashing Leap, Lunge;
   `dash_direction="back"` dashes away from the facing, `"input"` the way the movement input
   points, backward with none: Vault; `dash_ease="in"` speeds up over the dash, same
@@ -255,8 +261,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
   branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
-  low_health_damage, block_stamina, execute_damage, hold_the_line, none; Wing trees add
-  damage_taken, mantle_heal, surge_stagger). Respecs are free any time except
+  low_health_damage, block_stamina, execute_damage, hold_the_line, heavy_shockwave,
+  heavy_breaks_block, none; Wing trees add damage_taken, mantle_heal, surge_stagger,
+  force_distance, wall_stun, roar_guard; a node may name a `status`). Respecs are free any time except
   mid-attack/ability/swap. K opens the panel. A tree file may set its own `[tree] points`
   (the Wing tree does).
 - **Execute damage** (Spear capstone **Finishing Thrust**, `effect="execute_damage"`,
@@ -286,6 +293,23 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   target a 0-damage `HIT_BLOCKED`) and `resolve_strike` returns `HIT_BLOCKED`, so
   melee, Husk swings and projectiles (a guard-stopped one stops) are all covered.
   Counted as `shield_wall_covers=` on the `SUMMARY party` line.
+- **War Hammer** (Juggernaut, `data/weapon_war_hammer.cfg`, model "war_hammer"): slow
+  and heavy (light 95 dmg 0.2 s stagger; heavy 240 dmg 0.7 s stagger, 0.6 s windup,
+  `breaks_block=false`; turn speed 420°/s). Abilities: Seismic Slam (90° cone 4 m,
+  stagger 0.8 s, knockback 2 m), Clout (one target, Stun 1.5 s), Shatter (Shattered),
+  Upheaval (3 m radial launch 1.5 m), Shockwave (projectile "shockwave": a low, flat,
+  piercing wave, 14 m/s, ~10 m, stagger 0.6 s, a guard doesn't stop it), Steadfast
+  (self). Tree `mastery_war_hammer.cfg`: Earthshaker (Slam, Upheaval, Shockwave) and
+  Breaker (Clout, Shatter, Steadfast); default slots Slam, Clout, Upheaval. Capstones
+  (server, `World._with_hammer_capstones`, every live heavy tick): **Earthshaker**
+  (`heavy_shockwave`: `Player.heavy_counter` (`HeavyCounter`, by `attack_serial`) sends
+  the internal `aftershock`'s wave every `amount`-th heavy via
+  `ProjectileSystem.server_fire_attack`; no cosmetic copy waits on the thrower's
+  client, so it draws the server's spawn on the render clock) and **Breaker**
+  (`heavy_breaks_block`: the heavy's hits use `AttackParams.copy()` with
+  `breaks_block=true`, made after `damage_multiplier`, which tells heavies apart by
+  identity). Counted on the `SUMMARY juggernaut` line (aftershocks, wall_stuns,
+  roar_guards; not checked).
 - **Forced movement** (the `FORCE` tag: knockback, pull, launch). Per attack, optional
   `force_direction` ("away" / "toward" / "forward"), `force_distance` (m),
   `force_height` (launch peak, m), `force_duration` (s), `force_needs_stagger` (only
@@ -306,7 +330,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - **Projectiles** (the `PROJ` tag). Kinds in `data/projectiles.cfg` (`[projectile_<id>]`:
   speed, gravity, pitch, lifetime, hit_radius, pierce, walls, stopped_by_guard, release
   point, optional `returns`/`return_after`/`return_speed`/`catch_radius`, and the look:
-  `visual` "feather" or "axe", length, color, spin). An attack or ability throws with
+  `visual` "feather", "axe" or "wave", length, color, spin). An attack or ability throws with
   `projectile` (kind id), `projectile_time` (s from its start), optional
   `projectile_count`/`projectile_spread` (degrees); usually `shape="none"`. Its damage,
   stagger, block cost, statuses and `force_*` are what the projectile's hit does,
@@ -376,7 +400,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `server_events`. A self-buff from your own attack/ability (`self_status`) starts inside
   `step()` (`_apply_self_status`), so it's predicted.
 - **Applying**: attack/ability keys `applies_status`, `status_stacks`, `status_duration`
-  (target, server, on `HIT_DAMAGED` only: not blocked/evaded/parried/killing hits) and
+  (target, server, on `HIT_DAMAGED` only: not blocked/evaded/parried/killing hits), a
+  second one for the same targets with `applies_status_2`, `status_stacks_2`,
+  `status_duration_2` (Challenger's Roar; `AttackParams.target_statuses()`), and
   `self_status`, `self_status_stacks` (self, in the sim). Owner statuses with
   `on_hit_status` (Bloodlust) add that status to each damaging hit and, with
   `consume_on_hit`, use up a stack per hit. All in `World._give_hit_statuses` /
@@ -404,8 +430,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   allocation, not the default slots), Dual Axes **Rampage** (self-buff, attack speed;
   Berserker tier 2) and Broadsword **Shield Wall** (self-buff, cover; Vanguard tier 2),
   both in the default allocation, not the default slots. The Fighter Wings apply damage_reduction (Ember
-  Mantle), damage_up (Wingbeat Surge) and pyre_heart. Stun exists for later abilities
-  (nothing applies it yet).
+  Mantle), damage_up (Wingbeat Surge) and pyre_heart. Juggernaut: War Hammer **Clout**
+  (Stun 1.5 s), **Shatter** (Shattered: +15% damage taken per stack, 2 stacks, 8 s),
+  **Steadfast** (self); Wings **Challenger's Roar** (Taunted + Slow 3 s), **Unbowed**
+  (self); the Anchor capstone's **Defiant** (−6% damage taken per stack, up to 5).
 - **Immunities** (server-decided keys; they refuse what would be applied, never remove
   what's there): `force_immune` (`PlayerState.is_force_immune` / `Enemy.is_force_immune`
   refuse knockback, pull, launch), `stagger_immune` (`PlayerState.apply_stagger(ticks,
@@ -414,11 +442,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   crowd-control debuffs, `StatusDef.is_crowd_control`: slow, root, stun, taunt).
   `StatusEffects.apply` checks `refuses()` itself, so players and enemies both respect
   it. Prediction is safe: the statuses are synced, and stagger, force and applied
-  statuses only ever come from the server. Juggernaut buffs waiting for their
-  abilities (nothing applies them yet): **Braced** (force immune, 3 s), **Steadfast**
-  (force + stagger, 4 s), **Unbowed** (all three, 4 s).
+  statuses only ever come from the server. Juggernaut buffs: **Braced** (force immune,
+  3 s; for the Halberd's Brace), **Steadfast** (force + stagger, 4 s; War Hammer),
+  **Unbowed** (all three, 4 s; Wings).
 - **Taunt**: `forces_target=true` (debuff only, `validate()` checks), status
-  **Taunted** (4 s; Challenger's Roar will apply it). On an enemy,
+  **Taunted** (4 s; Challenger's Roar applies it). On an enemy,
   `Enemy.apply_status` calls `brain.taunt(source)` (threat to the top) and
   `server_step` sets `brain.forced_target` from `StatusEffects.forced_target()` (the
   entry's server-only `source`) while it lasts. No effect on players.
@@ -461,6 +489,21 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   Strike (20, 5 m dive: steep rise, then an eased-in swoop whose 2.5 m radial hit
   window covers the second half and the landing; height cosmetic). Defaults: Z Ember Mantle,
   C Wingbeat Surge.
+- **Juggernaut Wings** (`data/wings_juggernaut.cfg`, tree branches Tempest Wings and
+  Anchor, 12 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
+  3.5 m), Challenger's Roar (25, 15 s: 8 m radial, no damage, Taunted + Slow 3 s; a guard
+  facing you blocks it), Meteor Drop (30, 16 s: 6 m eased-in leap, 4 m cosmetic height,
+  3 m radial crash at the landing, 160 damage, launch 1.8 m), Unbowed (25, 20 s: self
+  Unbowed). Defaults: Z Gale Burst, C Challenger's Roar. Passives: `force_distance`
+  (Strong Gusts / Hurricane +20% each: your "away"/"forward" pushes go farther,
+  `ForceParams.scaled`, capped at `[force] max_distance`; `World._force_displacement`),
+  damage_taken, block_stamina. Capstones (server, `World`): **Tempest Wings**
+  (`wall_stun`: a target your knockback drives into a wall gets `status` (stun) for
+  `amount` s, once per knockback, players and enemies: `_force_player`/`_force_enemy`
+  set `wall_stun_source`, `_check_wall_stun` runs after each player/enemy moves,
+  `ForcedMotion.pushed_into_wall` on `is_on_wall()`/`get_wall_normal()`) and **Anchor**
+  (`roar_guard`: each enemy Challenger's Roar taunts gives you a Defiant stack,
+  `_roar_guard` from `_give_status`).
 - **Rebirth** (`[rebirth]`, every class, server-decided): in `_kill_player`,
   `PlayerState.start_rebirth` runs if `can_rebirth` (Ember ≥ `rebirth_ember_needed()`
   and `rebirth_cooldown` 0, or an extra charge). It spends `cost` Ember, sets
@@ -602,7 +645,8 @@ Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:p
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
 Husk within 15 m, else the nearest player), then both use abilities (guard up between; a
 knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free
-respec (odd cycles also learn new abilities like Rising Cut; even cycles learn the built
+respec (odd cycles also learn new abilities like Rising Cut, or the capstones when there's
+nothing new, as for the War Hammer; even cycles learn the built
 capstones that fit, i.e. the Spear's Hold the Line and Finishing Thrust,
 `BuildService._bot_learn_capstones`) and the next cycle's weapons
 (the default loadout in the first cycle; then a different focus weapon each cycle:
@@ -614,11 +658,15 @@ Axes Bloodlust + Rampage, Spear Skewer + Perforate); it uses a self-buff (the fi
 ready one) as soon as its target is
 within 2 m on its own turn or in the ability phase, then a hitting ability; the ability
 phase's first press prefers a knockback ability, then a self-buff, then a status ability.
-Wings (`World._bot_wing_input`): Wingbeat Surge as its attack turn starts, Ember Mantle
-(or Pyre Heart when below 80% health) as its block turn starts, Diving Strike when the
-target is 3–7 m away; while a Rebirth is ready it only spends Ember above the 50
-threshold. At 7.6 s it also respecs its Wing slots: default on even cycles, Diving
-Strike / Pyre Heart in Z on odd ones, `BuildService.bot_respec_wings`.
+Wings (`World._bot_wing_input`, by role, `_bot_wing_role`, so any class works): a damage
+buff (Wingbeat Surge) as its attack turn starts, a burst around it (Gale Burst,
+Challenger's Roar) 1–2 s into that turn (after its heavy), a guard (Ember Mantle, Unbowed;
+or a heal, Pyre Heart, when below 80% health) as its block turn starts, a dive (Diving
+Strike, Meteor Drop) when the target is 3–7 m away; while a Rebirth is ready it only
+spends Ember above the 50 threshold. At 7.6 s it also respecs its Wing tree: default
+slots on even cycles, the other actives in Z on odd ones, plus the built Wing capstones
+that fit (first in file order on even cycles, last on odd: Tempest Wings / Anchor,
+Mantle of Renewal / Crushing Wingbeat), `BuildService.bot_respec_wings`.
 Projectiles: it slots projectile abilities right after status ones (every class weapon)
 and throws a ready one whenever its target is 3 m to 75% of the projectile's reach away
 before the circling phase; see `World._bot_projectile_button`),
@@ -640,10 +688,11 @@ bot's camera then turns to where it aims, and with `--verbose` it prints
 give the server and every client the same overrides; only keys that exist in the file
 can be overridden, strings need no quotes). The smoke test uses `--tune` for low health
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
-in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
-checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`) so a
-reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe cooldowns
-for more throws, Skewer applying Taunted instead of Root so Husks get taunted
+in the real data (Husk swings bleed, Broadsword and War Hammer heavies push) so its
+status and force checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`)
+so a reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe /
+Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` on the
+`SUMMARY juggernaut` line, no check), Skewer applying Taunted instead of Root so Husks get taunted
 (counted, not checked), and a 6 m Hold the Line reach so pokes (`line_pokes=` on the
 `SUMMARY abilities` line, no check) happen in most runs.
 

@@ -205,6 +205,12 @@ func damage_taken_multiplier() -> float:
 	return wing_tree.damage_taken_multiplier(wing_nodes) if wing_tree else 1.0
 
 
+## The sum of `amount` over allocated Wing-tree nodes with this effect
+## ("force_distance"), 0 without a Wing tree.
+func wing_effect_amount(effect: String) -> float:
+	return wing_tree.effect_amount(wing_nodes, effect) if wing_tree else 0.0
+
+
 ## The allocated Wing-tree node with this effect (capstones), or null.
 func wing_effect(effect: String) -> MasteryTree.MasteryNode:
 	return wing_tree.effect_node(wing_nodes, effect) if wing_tree else null
