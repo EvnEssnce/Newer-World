@@ -11,6 +11,37 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-09 (26): Wave 3 playtest feedback (plan; nothing built yet)
+
+The developer playtested sessions 24–25 (`PLAYTEST.md` has the ticked list and notes).
+Threat, Hold the Line, Finishing Thrust, Rampage: good. Juggernaut: "feels awesome";
+Halberd liked as the lighter tank weapon; Greataxe "really like"; Meteor Drop "looks
+amazing". Seen working in play: Headsman crits, Vortex ×2 range, wall stun. Not yet
+seen: Breaker breaking a guard. Every design call in session 24/25 is **kept**, except
+Hooked (below). Defiant stays Roar-only.
+
+To do (in this order; the dummy first, it helps test the rest):
+1. **Training dummy**: a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
+   or attacks, respawns/heals after a few seconds idle; one marker on the far side of
+   the test map from the Husk spawns. A DPS readout above it would help tuning.
+2. **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
+   option): longer windups/recoveries, and **hyper armor**: can't be staggered (still
+   takes damage) during the windup and swing of their heavies and big abilities. Likely
+   ability/attack keys like `armor_start`/`armor_end` checked where the server staggers
+   a player (`apply_stagger` callers); decide whether it also resists knockback.
+3. **Earthshaker**: the every-3rd-heavy aftershock becomes one **expanding ring** around
+   the user (hits each target once), not a forward wave. The **Shockwave** ability stays
+   a single forward wave, a bit **wider** (`projectile_shockwave` `hit_radius`/`length`).
+4. Small ones: **Hooked** only applied when the Warden capstone is learned; **Shatter**
+   cooldown 12 → ~6 s; **Meteor Drop** rises slower (~30% longer climb, same fast
+   crash); **Upheaval** animation reads as slamming the ground, not a swing.
+5. **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
+   three tall shields in front that blocks enemies' movement. The first `SUMMON`: a
+   server-spawned obstacle with spawn/despawn events to clients (like projectiles).
+   Design questions pending (who it blocks, size, duration, projectiles).
+
+Branch: still `wave3-merge` (not on main yet).
+
 ### 2026-10-09 (25): The Juggernaut (Wave 3, two agents)
 
 Scaffold first (main session, `613a249`): `data/class_juggernaut.cfg` (Halberd,
