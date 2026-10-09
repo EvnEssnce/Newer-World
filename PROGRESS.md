@@ -11,6 +11,38 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-09 (23): Spear Skewer and Perforate (Wave 3, first part)
+
+Session 22's work was playtested by the developer ("these all look great") and
+pushed. Then Wave 3 started with the rest of the Spear's abilities (data only, plus a
+visual):
+- **Skewer** (`weapon_spear.cfg`, Lancer tier 2): a narrow 3 m thrust, 90 damage,
+  roots for 1.5 s, 12 s cooldown. First ability to apply Root.
+- **Perforate** (Impaler tier 2): 5 thrusts 0.13 s apart, 30 damage each, each its own
+  hit window adding a stack of bleed (cap 5), 11 s cooldown.
+- Both are in the Spear's default allocation (7 of 19 points), not its default slots.
+  Bots slot them first (status abilities), so a bot's Spear now has Skewer, Perforate
+  and Javelin Cast on Q/E/R.
+- Perforate's look: the spear thrusts once per hit window
+  (`Player._repeated_thrust_pose`). Skewer uses the normal heavy thrust.
+
+Tests: 354 passed (no new logic: root, bleed and multi-window abilities already have
+tests). Smoke: default and `-Party` passed, 0 corrections; the server logs showed
+Skewer rooting a Husk and a player, and Perforate stacking bleed on a Husk.
+
+**Needs a hand playtest:** Skewer's root on a Husk (it should stop moving but still
+swing), Perforate's thrusts and bleed numbers, slot them in K.
+
+**Next (Wave 3):**
+- The Spear capstones are still placeholders (`effect="none"`): **Finishing Thrust**
+  (more damage vs targets below 30% health) needs the *target's* health in the damage
+  path (`_strike_player`, `strike_enemy`, projectiles): today `damage_scale` is worked
+  out once per attacker, not per target. **Hold the Line** (auto-poke while blocking)
+  is bigger.
+- Dual Axes **Rampage** (attack speed buff above 50% stamina) and Broadsword **Shield
+  Wall** (ALLY) are the Fighter's other unbuilt abilities.
+- Enemy threat (for taunts), then the Juggernaut.
+
 ### 2026-10-08 (22): Crashing Leap aimed by pitch, Diving Strike shape (items 1 and 2)
 
 Done (session 20's list is now complete):

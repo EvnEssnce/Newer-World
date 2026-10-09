@@ -690,8 +690,9 @@ static func _sword_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 	return _phase_pose3(attack, tick, SWORD_IDLE, LIGHT_WOUND, LIGHT_STRUCK)
 
 
-## Spear pivot pose (see SPEAR_IDLE): thrusts for light, heavy and Lunge, a low
-## sweep for Low Sweep, planted for Vault.
+## Spear pivot pose (see SPEAR_IDLE): thrusts for light, heavy, Lunge and
+## Skewer, repeated thrusts for Perforate, a low sweep for Low Sweep, planted
+## for Vault.
 static func _spear_pose(attack: AttackParams, attack_type: int, ability_id: String,
 		tick: float) -> Vector3:
 	if attack == null:
@@ -704,9 +705,24 @@ static func _spear_pose(attack: AttackParams, attack_type: int, ability_id: Stri
 	# Thrusts: the tip goes as far as the hitbox reaches, so a longer range is a
 	# longer thrust.
 	var thrust := Vector3(0.0, 0.0, -maxf(0.0, attack.hitbox_range - SPEAR_TIP_DISTANCE))
+	if ability_id == "perforate":
+		return _repeated_thrust_pose(attack, tick, SPEAR_LIGHT_STRUCK + thrust)
 	if attack_type == PlayerState.ATTACK_LIGHT:
 		return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_LIGHT_WOUND, SPEAR_LIGHT_STRUCK + thrust)
 	return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_HEAVY_WOUND, SPEAR_HEAVY_STRUCK + thrust)
+
+
+## Perforate: a light thrust in each hit window, drawing back between them.
+static func _repeated_thrust_pose(attack: AttackParams, tick: float, struck: Vector3) -> Vector3:
+	var since := tick - attack.windup_ticks
+	if since < 0.0 or tick >= attack.recovery_start_tick():
+		return _phase_pose3(attack, tick, SPEAR_IDLE, SPEAR_LIGHT_WOUND, struck)
+	var interval := float(attack.window_interval_ticks)
+	var into := since - floorf(since / interval) * interval
+	if into <= attack.active_ticks:
+		return SPEAR_LIGHT_WOUND.lerp(struck, into / maxf(attack.active_ticks, 1.0))
+	return struck.lerp(SPEAR_LIGHT_WOUND,
+			(into - attack.active_ticks) / maxf(interval - attack.active_ticks, 1.0))
 
 
 ## _phase_pose for a Vector3 pose.

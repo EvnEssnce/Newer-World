@@ -360,9 +360,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   buff, red = debuff); a status line under remote players' and Husks' health.
 - Fighter status abilities: Broadsword **Opening Strike** (Exposed), Dual Axes
   **Bloodlust** (self-buff: next 4 hits bleed) and **Hamstring** (Slow, default axes R
-  slot). The Fighter Wings apply damage_reduction (Ember Mantle), damage_up (Wingbeat
-  Surge) and pyre_heart. Root and stun exist for later abilities (nothing applies them
-  yet).
+  slot), Spear **Skewer** (Root 1.5 s, Lancer tier 2) and **Perforate** (5 thrusts, each
+  its own hit window adding a bleed stack; Impaler tier 2; both in the default
+  allocation, not the default slots). The Fighter Wings apply damage_reduction (Ember
+  Mantle), damage_up (Wingbeat Surge) and pyre_heart. Stun exists for later abilities
+  (nothing applies it yet).
 
 ## Ember, Wings and Rebirth
 
