@@ -47,7 +47,7 @@ func _tap() -> void:
 
 func test_stagger_interrupts_an_attack() -> void:
 	_tap()
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	assert_false(state.is_attacking())
 	assert_true(state.is_staggered())
 	assert_eq(state.server_events, 1)
@@ -55,12 +55,12 @@ func test_stagger_interrupts_an_attack() -> void:
 
 func test_stagger_interrupts_a_dodge() -> void:
 	_step(DODGE)
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	assert_false(state.is_dodging())
 
 
 func test_cannot_attack_or_dodge_while_staggered() -> void:
-	state.apply_stagger(10)
+	state.apply_stagger(10, params)
 	_tap()
 	_step(DODGE)
 	assert_false(state.is_attacking())
@@ -68,7 +68,7 @@ func test_cannot_attack_or_dodge_while_staggered() -> void:
 
 
 func test_stagger_lasts_its_ticks() -> void:
-	state.apply_stagger(3)
+	state.apply_stagger(3, params)
 	_steps(2)
 	assert_true(state.is_staggered())
 	_step()
@@ -76,7 +76,7 @@ func test_stagger_lasts_its_ticks() -> void:
 
 
 func test_press_during_stagger_fires_when_it_ends() -> void:
-	state.apply_stagger(3)
+	state.apply_stagger(3, params)
 	_step(ATTACK)
 	_step()
 	assert_false(state.is_attacking(), "still staggered")
@@ -86,7 +86,7 @@ func test_press_during_stagger_fires_when_it_ends() -> void:
 
 func test_zero_stagger_does_nothing() -> void:
 	_tap()
-	state.apply_stagger(0)
+	state.apply_stagger(0, params)
 	assert_true(state.is_attacking())
 	assert_eq(state.server_events, 0)
 
@@ -102,7 +102,7 @@ func test_dead_player_cannot_act_or_regen() -> void:
 
 func test_death_cancels_attack_and_stagger() -> void:
 	_tap()
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	state.kill()
 	assert_false(state.is_attacking())
 	assert_false(state.is_staggered())
@@ -111,7 +111,7 @@ func test_death_cancels_attack_and_stagger() -> void:
 
 func test_dead_players_are_not_staggered() -> void:
 	state.kill()
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	assert_false(state.is_staggered())
 	assert_eq(state.server_events, 1, "only the death")
 
@@ -128,7 +128,7 @@ func test_revive_restores_stamina_and_control() -> void:
 
 
 func test_network_round_trip_keeps_death_and_stagger() -> void:
-	state.apply_stagger(4)
+	state.apply_stagger(4, params)
 	var copy := PlayerState.from_array(state.to_array())
 	assert_true(copy.matches(state))
 	assert_eq(copy.stagger_ticks, 4)

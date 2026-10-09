@@ -72,6 +72,7 @@ game/
                              + Wing tree allocation and Z/C slots.
   enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
   enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
+  enemy/threat_table.gd      Threat per player, target choice, taunts. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
   items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
   items/item.gd              One rolled item (plain data, to_dict/from_dict).
@@ -81,7 +82,8 @@ game/
   status/status_def.gd       One status effect's tuning (data/status_effects.cfg).
   status/status_defs.gd      Every status, by index (what the network sends); validate().
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
-                             cleanse, on-hit (Bloodlust). Pure logic, unit tested.
+                             cleanse, on-hit (Bloodlust), immunities, taunt source.
+                             Pure logic, unit tested.
 ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars, ability
                      bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
@@ -264,8 +266,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   Server only decides it: `World._force_player` / `_force_enemy`, after a hit that
   damaged or guard-broke (not evaded, blocked, parried or fatal), never between allies
   (`are_allies`). `PlayerState.start_force` refuses i-frames, death and
-  `is_force_immune()` (the one immunity hook, false for now; Brace/Steadfast/Unbowed
-  will change it). **Choice:** being moved interrupts like a stagger (attack, ability,
+  `is_force_immune(params)` (the one immunity hook: a `force_immune` status, see
+  "Status effects"). **Choice:** being moved interrupts like a stagger (attack, ability,
   dodge, swap, guard), and the target can't act until it ends; presses stay buffered.
   `PlayerMovement` sets the horizontal velocity from it (linear ease-out, so the
   distance is exact) and the launch speed on its first step; gravity and
@@ -322,7 +324,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
   from an ally; removed by a cleanse) or **buff**; `affects` = **sim** (changes
   movement/actions, predicted: slow, root, stun) or **damage** (server-only numbers:
-  bleed, exposed, damage_up, damage_reduction, bloodlust, pyre_heart's healing).
+  bleed, exposed, damage_up, damage_reduction, bloodlust, pyre_heart's healing; also
+  the server-decided immunities and taunt).
   Duration, max_stacks, then
   only the keys for what it does. Reapplying adds stacks (capped) and resets the time to
   full (never shortens). `StatusDefs.validate()` checks the file (a unit test runs it).
@@ -365,6 +368,22 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   allocation, not the default slots). The Fighter Wings apply damage_reduction (Ember
   Mantle), damage_up (Wingbeat Surge) and pyre_heart. Stun exists for later abilities
   (nothing applies it yet).
+- **Immunities** (server-decided keys; they refuse what would be applied, never remove
+  what's there): `force_immune` (`PlayerState.is_force_immune` / `Enemy.is_force_immune`
+  refuse knockback, pull, launch), `stagger_immune` (`PlayerState.apply_stagger(ticks,
+  params)` refuses hit staggers and guard-break staggers (the stamina is still taken);
+  enemies skip `brain.stagger` in `take_hit`; stuns are refused), `cc_immune` (refuses
+  crowd-control debuffs, `StatusDef.is_crowd_control`: slow, root, stun, taunt).
+  `StatusEffects.apply` checks `refuses()` itself, so players and enemies both respect
+  it. Prediction is safe: the statuses are synced, and stagger, force and applied
+  statuses only ever come from the server. Juggernaut buffs waiting for their
+  abilities (nothing applies them yet): **Braced** (force immune, 3 s), **Steadfast**
+  (force + stagger, 4 s), **Unbowed** (all three, 4 s).
+- **Taunt**: `forces_target=true` (debuff only, `validate()` checks), status
+  **Taunted** (4 s; Challenger's Roar will apply it). On an enemy,
+  `Enemy.apply_status` calls `brain.taunt(source)` (threat to the top) and
+  `server_step` sets `brain.forced_target` from `StatusEffects.forced_target()` (the
+  entry's server-only `source`) while it lasts. No effect on players.
 
 ## Ember, Wings and Rebirth
 
@@ -428,20 +447,36 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   negative id (`-1`, `-2`, ...), which is also its node name under `World/Enemies` and
   how hit events address it (peer ids are always positive).
 - **Server only**: each tick after the players, `Enemy.server_step` runs its
-  `EnemyBrain` (IDLE wander → CHASE nearest living player within `aggro_range` →
-  ATTACK when within `attack_range` and off cooldown → back to CHASE; STAGGERED when hit
-  by a staggering attack; RETURN home past `leash_range`, healing on arrival). Movement
-  is direct steering, no navmesh yet. Not predicted, so no PlayerState-style rules.
+  `EnemyBrain` (IDLE wander → CHASE its threat target → ATTACK when within
+  `attack_range` and off cooldown → back to CHASE; STAGGERED when hit by a staggering
+  attack; RETURN home past `leash_range` or when nobody has threat, healing on
+  arrival). Movement is direct steering, no navmesh yet. Not predicted, so no
+  PlayerState-style rules.
+- **Threat** (`ThreatTable` in `EnemyBrain.threat`, pure, unit tested; tuning in
+  `[threat]` of `data/enemy_<kind>.cfg`): threat per peer id from damage it takes
+  (`per_damage`; hits, projectiles, bleed: `Enemy.take_hit`), healing someone it has
+  threat on (`per_heal` to the healer: `World._heal_player` → `Enemy.on_heal`), and
+  coming within `aggro_range` the first time (`proximity`, nearest first so ties go to
+  the nearest). Optional `decay_per_second`. The target is the highest threat, but it
+  only switches when a challenger has more than `switch_ratio` × the current target's;
+  a swing keeps its target, CHASE/IDLE/end of stagger retarget every tick. Dead or
+  departed players drop out (`keep_only(targets)`): the next with threat is chased;
+  an empty table means RETURN. Leashing wipes the table, and threat is ignored while
+  walking home. A taunt (status `forces_target`, see Status effects) forces the
+  target and lifts the taunter to `switch_ratio` × the top. `SUMMARY enemies` adds
+  `target_switches`, `taunts` (on enemies) and `heal_threat` (enemies that gained
+  threat from a heal).
 - Enemy swings go through the same `World._strike_player` as player attacks (evade,
-  block, guard break, stagger, death). Player attacks on enemies: damage, aggro the
-  attacker, stagger × `stagger_multiplier`; death → respawn at home after `respawn_time`.
+  block, guard break, stagger, death). Player attacks on enemies: damage, threat for
+  the attacker, stagger × `stagger_multiplier`; death → respawn at home after
+  `respawn_time`.
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
 - Abilities hit enemies through the same path (`max_targets` and modifiers apply); a
   Husk swing into a Riposte is parried like a player's.
 - Forced movement works on enemies too (server only, `Enemy.start_force`, same
-  `force_*` params; `Enemy.is_force_immune()` is the hook). An enemy's own attack can
+  `force_*` params; `Enemy.is_force_immune()` is the hook: a `force_immune` status). An enemy's own attack can
   have `force_*` keys: the Husk's `force_distance` is 0 (off); the smoke test turns it
   on (0.4 m: a longer shove pushed the bots out of their fights and broke the guard
   check) with `--tune` so predicted players get knocked back in most runs.
@@ -564,8 +599,9 @@ can be overridden, strings need no quotes). The smoke test uses `--tune` for low
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword heavies push) so its status and force
 checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`) so a
-reborn bot is back in the fight quickly, and 2 s Javelin Cast / Boomerang Axe cooldowns
-for more throws.
+reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe cooldowns
+for more throws, and Skewer applying Taunted instead of Root so Husks get taunted
+(counted, not checked).
 
 To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
 read the saved frames. Never screenshot the desktop: it captures the developer's screen.

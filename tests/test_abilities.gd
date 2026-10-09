@@ -279,7 +279,7 @@ func test_dash_window() -> void:
 
 func test_stagger_interrupts_ability_but_keeps_cooldown() -> void:
 	_step(Q)
-	state.apply_stagger(10)
+	state.apply_stagger(10, params)
 	assert_false(state.is_attacking())
 	assert_eq(state.cooldown_left(0), strike.cooldown_ticks)
 

@@ -53,11 +53,11 @@ var last_heal_source := 0
 
 ## Adds `stacks` of a status (capped at max_stacks) and resets its time to
 ## duration_ticks (-1 = the status's own duration). Returns false if the index
-## isn't a status.
+## isn't a status or the owner is immune to it (refuses).
 func apply(defs: StatusDefs, index: int, stacks: int = 1, duration_ticks: int = -1,
 		source: int = 0) -> bool:
 	var def := defs.get_def(index)
-	if def == null or stacks <= 0:
+	if def == null or stacks <= 0 or refuses(defs, index):
 		return false
 	var duration := duration_ticks if duration_ticks > 0 else def.duration_ticks
 	var e := find(index)
@@ -140,6 +140,41 @@ func can_move(defs: StatusDefs) -> bool:
 ## duration, so their own stagger checks cover it too.)
 func can_act(defs: StatusDefs) -> bool:
 	return not _any(defs, func(def: StatusDef) -> bool: return def.stuns)
+
+
+## Immune to knockback, pull and launch (Braced, Steadfast, Unbowed).
+func force_immune(defs: StatusDefs) -> bool:
+	return _any(defs, func(def: StatusDef) -> bool: return def.force_immune)
+
+
+## Immune to stagger: hits, guard breaks and stuns (Steadfast, Unbowed).
+func stagger_immune(defs: StatusDefs) -> bool:
+	return _any(defs, func(def: StatusDef) -> bool: return def.stagger_immune)
+
+
+## Immune to crowd-control debuffs: slow, root, stun, taunt (Unbowed).
+func cc_immune(defs: StatusDefs) -> bool:
+	return _any(defs, func(def: StatusDef) -> bool: return def.cc_immune)
+
+
+## True if the owner's statuses refuse this status being applied: a stun while
+## stagger or CC immune, any crowd-control debuff while CC immune.
+func refuses(defs: StatusDefs, index: int) -> bool:
+	var def := defs.get_def(index)
+	if def == null:
+		return false
+	if def.stuns and stagger_immune(defs):
+		return true
+	return def.is_crowd_control() and cc_immune(defs)
+
+
+## The source (peer id) of a taunt (forces_target) on the owner, 0 = none.
+func forced_target(defs: StatusDefs) -> int:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.forces_target and e.source > 0:
+			return e.source
+	return 0
 
 
 ## Multiplier on damage the owner takes: 1 + the sum of damage_taken x stacks.

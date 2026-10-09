@@ -96,6 +96,7 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	if dead:
 		return
 	status_damage = statuses.tick(status_defs)
+	brain.forced_target = statuses.forced_target(status_defs)
 	var desired := brain.step(global_position, home, targets, params, delta, _rng)
 	if brain.attack_tick == 0:
 		attack_results.clear()
@@ -111,7 +112,9 @@ func server_step(targets: Dictionary, delta: float) -> void:
 		attack_stepped.emit(self)
 
 
-## Applies a player's hit. Returns true if it killed the enemy.
+## Applies a player's hit (or damage over time): damage, threat for the
+## attacker (a peer id; others are ignored) and stagger unless it's immune
+## (a stagger_immune status). Returns true if it killed the enemy.
 func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
 	health = maxf(0.0, health - damage)
 	if health <= 0.0:
@@ -120,20 +123,32 @@ func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
 		statuses.clear()
 		force.stop()
 		return true
-	if attacker_id > 0:
-		brain.aggro(attacker_id)
-	brain.stagger(roundi(stagger_ticks * params.stagger_multiplier))
+	brain.add_threat(attacker_id, damage * params.threat_per_damage, params)
+	if not statuses.stagger_immune(status_defs):
+		brain.stagger(roundi(stagger_ticks * params.stagger_multiplier))
 	return false
+
+
+## Server: healer_id healed target_id by `amount`: if it has threat on the
+## healed player, the healer gains threat (per point healed).
+func on_heal(target_id: int, healer_id: int, amount: float) -> void:
+	if not dead and brain.threat.has(target_id):
+		brain.add_threat(healer_id, amount * params.threat_per_heal, params)
 
 
 ## Server: applies a status (index into status_defs) from source. A stun
 ## staggers the brain for its duration (the same STAGGERED state as a hit
-## stagger). Returns false if nothing was applied.
+## stagger); a taunt (forces_target) puts the source at the top of its threat
+## (the target itself is forced in server_step while it lasts). Refused
+## (false) while dead or immune (StatusEffects.refuses).
 func apply_status(index: int, stacks: int, duration_ticks: int, source: int) -> bool:
 	if dead or not statuses.apply(status_defs, index, stacks, duration_ticks, source):
 		return false
-	if status_defs.get_def(index).stuns:
+	var def := status_defs.get_def(index)
+	if def.stuns:
 		brain.stagger(statuses.ticks_left(index))
+	if def.forces_target:
+		brain.taunt(source, params)
 	return true
 
 
@@ -151,17 +166,19 @@ func respawn() -> void:
 	global_position = home
 	velocity = Vector3.ZERO
 	force.stop()
+	var switches := brain.target_switches
 	brain = EnemyBrain.new()
+	brain.target_switches = switches
 	brain.wander_point = home
 	respawn_at_tick = -1
 
 
 # --- Forced movement (server) ---
 
-## Can't be pushed, pulled or launched. Nothing grants it yet (a hook for
-## heavy enemies and bosses, like PlayerState.is_force_immune).
+## Can't be pushed, pulled or launched: a force_immune status (for heavy
+## enemies and bosses later, like PlayerState.is_force_immune).
 func is_force_immune() -> bool:
-	return false
+	return statuses.force_immune(status_defs)
 
 
 ## Moves this enemy `displacement` meters (world XZ) over `ticks` steps of

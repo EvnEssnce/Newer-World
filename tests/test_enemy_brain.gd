@@ -23,6 +23,10 @@ func before_each() -> void:
 	params.attack_cooldown_ticks = 30
 	params.wander_radius = 4.0
 	params.wander_pause_ticks = 0
+	params.threat_per_damage = 1.0
+	params.threat_proximity = 10.0
+	params.threat_switch_ratio = 1.1
+	params.threat_decay_factor = 1.0
 	var attack := AttackParams.new()
 	attack.windup_ticks = 6
 	attack.active_ticks = 2
@@ -119,9 +123,78 @@ func test_returns_home_when_target_is_gone() -> void:
 
 
 func test_being_hit_while_idle_aggros_the_attacker() -> void:
-	brain.aggro(7)
+	brain.add_threat(7, 50.0, params)
 	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
 	assert_eq(brain.target_id, 7)
+
+
+func test_damage_threat_takes_the_target_past_the_switch_ratio() -> void:
+	var targets := {1: Vector3(3, 0, 0), 2: Vector3(0, 0, 5)}
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 1, "nearest first")
+	brain.add_threat(2, 10.0, params)  # 20 vs 10 proximity: more than 1.1x
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 2)
+	brain.add_threat(1, 11.0, params)  # 21 vs 20: not enough
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 2, "doesn't flicker on close values")
+	assert_eq(brain.target_switches, 1)
+
+
+func test_target_dies_next_one_with_threat_is_chased() -> void:
+	brain.add_threat(1, 50.0, params)
+	brain.add_threat(2, 5.0, params)
+	_step(HOME, {1: Vector3(5, 0, 0), 2: Vector3(30, 0, 0)})
+	assert_eq(brain.target_id, 1)
+	_step(HOME, {2: Vector3(30, 0, 0)})  # 1 died: out of the targets
+	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
+	assert_eq(brain.target_id, 2, "still has threat on 2, even out of aggro range")
+
+
+func test_taunt_forces_the_target_then_sticks() -> void:
+	var targets := {1: Vector3(5, 0, 0), 2: Vector3(0, 0, 6)}
+	brain.add_threat(1, 300.0, params)
+	_step(HOME, targets)
+	assert_true(brain.taunt(2, params))
+	brain.forced_target = 2
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 2)
+	brain.add_threat(1, 500.0, params)
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 2, "forced while the taunt lasts")
+	brain.forced_target = 0
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 1, "threat decides again once it ends")
+
+
+func test_taunt_threat_keeps_aggro_after_it_ends() -> void:
+	var targets := {1: Vector3(5, 0, 0), 2: Vector3(0, 0, 6)}
+	brain.add_threat(1, 300.0, params)
+	_step(HOME, targets)
+	brain.taunt(2, params)
+	brain.forced_target = 2
+	_step(HOME, targets)
+	brain.forced_target = 0
+	_step(HOME, targets)
+	assert_eq(brain.target_id, 2)
+
+
+func test_taunt_wakes_an_idle_enemy() -> void:
+	assert_true(brain.taunt(4, params))
+	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
+	assert_eq(brain.target_id, 4)
+
+
+func test_leashing_wipes_threat_and_ignores_new_threat_until_home() -> void:
+	brain.add_threat(1, 100.0, params)
+	_step(Vector3(21, 0, 0), {1: Vector3(25, 0, 0)})
+	assert_eq(brain.mode, EnemyBrain.Mode.RETURN)
+	assert_true(brain.threat.is_empty())
+	brain.add_threat(1, 100.0, params)
+	assert_false(brain.taunt(1, params))
+	assert_true(brain.threat.is_empty(), "walking home ignores threat")
+	_step(Vector3(0.2, 0, 0), {})
+	assert_eq(brain.mode, EnemyBrain.Mode.IDLE)
 
 
 func test_wanders_near_its_camp() -> void:

@@ -60,6 +60,8 @@ func validate() -> String:
 			return "%s: changes movement or actions, so affects must be \"sim\"" % def.id
 		if def.move_multiplier < 0.0:
 			return "%s: move_multiplier can't be negative" % def.id
+		if def.forces_target and not def.is_debuff():
+			return "%s: forces_target (a taunt) must be a debuff" % def.id
 		if not def.on_hit_status.is_empty() and index_of(def.on_hit_status) < 0:
 			return "%s: on_hit_status \"%s\" doesn't exist" % [def.id, def.on_hit_status]
 	return ""

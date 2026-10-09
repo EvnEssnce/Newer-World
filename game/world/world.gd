@@ -62,6 +62,10 @@ var _enemy_hits := 0
 ## Player hits on enemies.
 var _enemy_damaged := 0
 var _enemy_kills := 0
+## Taunts (forces_target statuses) applied to enemies.
+var _taunts := 0
+## Enemies that gained threat from a heal (one per enemy per heal).
+var _heal_threat := 0
 ## Player attacks that connected with another player (including evaded/blocked).
 var _pvp_hits := 0
 ## Player attacks that touched an ally and were ignored (once per attack and ally).
@@ -486,7 +490,8 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		result = HIT_DEFEATED
 		_kill_player(target)
 	elif result == HIT_DAMAGED:
-		target.state.apply_stagger(_with_surge_stagger(attacker_id, attack.stagger_ticks))
+		target.state.apply_stagger(_with_surge_stagger(attacker_id, attack.stagger_ticks),
+				target.params)
 	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
 		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
@@ -685,6 +690,8 @@ func _give_status(source_id: int, target: Node3D, index: int, stacks: int,
 	_statuses_applied += 1
 	if enemy:
 		_statuses_on_enemies += 1
+		if def.forces_target:
+			_taunts += 1
 	if def.is_debuff() and between_allies:
 		_ally_statuses_applied += 1
 	if _verbose:
@@ -784,6 +791,11 @@ func _heal_player(target: Player, amount: float, healer_id: int) -> float:
 	if healer == null:
 		healer = target
 	_give_ember(healer, healed * healer.params.ember_per_heal, false)
+	# Healing someone an enemy is fighting draws its attention to the healer.
+	for enemy: Enemy in _enemies.get_children():
+		if not enemy.dead and enemy.brain.threat.has(target.peer_id):
+			enemy.on_heal(target.peer_id, healer.peer_id, healed)
+			_heal_threat += 1
 	_send_hit(healer.peer_id, target.peer_id, healed, HIT_HEALED)
 	return healed
 
@@ -1466,8 +1478,12 @@ func print_summary() -> void:
 	if multiplayer.is_server():
 		print("SUMMARY server players=%d ticks=%d hits=%d deaths=%d respawns=%d blocks=%d guard_breaks=%d" % [
 				_players.get_child_count(), _tick, _hits, _deaths, _respawns, _blocks, _guard_breaks])
-		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d" % [
-				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills])
+		var switches := 0
+		for enemy: Enemy in _enemies.get_children():
+			switches += enemy.brain.target_switches
+		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d target_switches=%d taunts=%d heal_threat=%d" % [
+				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills, switches,
+				_taunts, _heal_threat])
 		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d" % [
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored])
 		print("SUMMARY abilities uses=%d ability_hits=%d parries=%d swaps=%d builds=%d builds_refused=%d" % [

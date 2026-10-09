@@ -218,7 +218,7 @@ func test_dead_players_are_not_moved_and_death_stops_force() -> void:
 
 
 func test_nobody_is_force_immune_yet() -> void:
-	assert_false(state.is_force_immune())
+	assert_false(state.is_force_immune(params))
 
 
 func test_network_round_trip_keeps_force() -> void:

@@ -52,6 +52,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # projectile hit doesn't hang on one or two throws.
     '--tune=weapon_spear/ability_javelin_cast/cooldown=2.0',
     '--tune=weapon_dual_axes/ability_boomerang_axe/cooldown=2.0',
+    # Skewer taunts instead of rooting, so taunts on Husks happen (nothing
+    # applies them in the real data yet). Counted in "SUMMARY enemies taunts=",
+    # not checked: it depends on the bot's Spear turn landing on a Husk.
+    '--tune=weapon_spear/ability_skewer/applies_status=taunted',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0')

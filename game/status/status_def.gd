@@ -41,9 +41,25 @@ var on_hit_stacks := 0
 ## Each such hit uses up one stack of this status.
 var consume_on_hit := false
 
+# Server-decided effects
+## Taunt: an enemy with it targets the status's source (players: no effect).
+var forces_target := false
+## Immunities of the owner, checked by the server when something is applied:
+## refuses knockback, pull and launch...
+var force_immune := false
+## ...refuses stagger (hits, guard breaks) and stuns...
+var stagger_immune := false
+## ...refuses crowd-control debuffs (is_crowd_control: slow, root, stun, taunt).
+var cc_immune := false
+
 
 func is_debuff() -> bool:
 	return category == CATEGORY_DEBUFF
+
+
+## A debuff that takes control away: slows, roots, stuns, taunts.
+func is_crowd_control() -> bool:
+	return is_debuff() and (move_multiplier < 1.0 or stops_movement or stuns or forces_target)
 
 
 func deals_damage_over_time() -> bool:
@@ -78,4 +94,8 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.on_hit_status = Tuning.get_optional(file, section, "on_hit_status", "")
 	s.on_hit_stacks = Tuning.get_optional(file, section, "on_hit_stacks", 1)
 	s.consume_on_hit = Tuning.get_optional(file, section, "consume_on_hit", false)
+	s.forces_target = Tuning.get_optional(file, section, "forces_target", false)
+	s.force_immune = Tuning.get_optional(file, section, "force_immune", false)
+	s.stagger_immune = Tuning.get_optional(file, section, "stagger_immune", false)
+	s.cc_immune = Tuning.get_optional(file, section, "cc_immune", false)
 	return s

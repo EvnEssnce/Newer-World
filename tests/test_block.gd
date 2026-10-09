@@ -60,7 +60,7 @@ func test_holding_block_blocks() -> void:
 
 
 func test_cannot_block_while_staggered() -> void:
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	_step(BLOCK)
 	assert_false(state.blocking)
 

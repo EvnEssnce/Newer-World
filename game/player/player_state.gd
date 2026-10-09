@@ -273,9 +273,10 @@ func status_move_multiplier(params: PlayerParams) -> float:
 # --- Server-applied events ---
 
 ## Interrupts the current attack, ability, dodge or swap and stops the player
-## acting for ticks. (An interrupted swap keeps the new weapon out.)
-func apply_stagger(ticks: int) -> void:
-	if ticks <= 0 or dead:
+## acting for ticks. (An interrupted swap keeps the new weapon out.) Refused
+## while dead or stagger immune (a stagger_immune status: Steadfast, Unbowed).
+func apply_stagger(ticks: int, params: PlayerParams) -> void:
+	if ticks <= 0 or dead or statuses.stagger_immune(params.statuses):
 		return
 	_end_attack()
 	queued_attack = ATTACK_NONE
@@ -298,7 +299,7 @@ func take_blocked_hit(attack: AttackParams, params: PlayerParams, multiplier: fl
 	server_events += 1
 	if broke:
 		blocking = false
-		apply_stagger(params.guard_break_stagger_ticks)
+		apply_stagger(params.guard_break_stagger_ticks, params)
 	return broke
 
 
@@ -362,7 +363,9 @@ func end_active_window(params: PlayerParams) -> void:
 ## Server: applies a status (index into params.statuses) from someone else,
 ## e.g. a debuff from a hit. duration_ticks -1 = the status's own. A stun also
 ## staggers for its duration (stun and stagger are one mechanic). Returns false
-## if nothing was applied (dead, or not a status).
+## if nothing was applied (dead, not a status, or immune: StatusEffects.refuses,
+## a stun while stagger immune or any crowd control while CC immune). A taunt
+## (forces_target) only does something on enemies.
 func apply_status(params: PlayerParams, index: int, stacks: int = 1, duration_ticks: int = -1,
 		source: int = 0) -> bool:
 	if dead or not statuses.apply(params.statuses, index, stacks, duration_ticks, source):
@@ -370,7 +373,7 @@ func apply_status(params: PlayerParams, index: int, stacks: int = 1, duration_ti
 	server_events += 1
 	var def := params.statuses.get_def(index)
 	if def.stuns:
-		apply_stagger(statuses.ticks_left(index))
+		apply_stagger(statuses.ticks_left(index), params)
 	return true
 
 
@@ -415,10 +418,11 @@ func is_forced() -> bool:
 
 
 ## Can't be pushed, pulled or launched. The one place forced movement asks, so
-## future effects (the Juggernaut's Brace, Steadfast, Unbowed) only change this.
-## Nothing grants it yet.
-func is_force_immune() -> bool:
-	return false
+## other sources only change this. Today: a force_immune status (the
+## Juggernaut's Braced, Steadfast, Unbowed). Statuses are synced, but only the
+## server applies force, so a refusal never needs predicting.
+func is_force_immune(params: PlayerParams) -> bool:
+	return statuses.force_immune(params.statuses)
 
 
 ## Server: moves this player `displacement` meters (world XZ) over `ticks`
@@ -428,7 +432,7 @@ func is_force_immune() -> bool:
 ## buffered). Refused (false) while dead, in i-frames, or immune.
 func start_force(params: PlayerParams, displacement: Vector2, ticks: int, launch_speed: float,
 		delta: float) -> bool:
-	if dead or ticks <= 0 or is_invulnerable(params) or is_force_immune():
+	if dead or ticks <= 0 or is_invulnerable(params) or is_force_immune(params):
 		return false
 	_end_attack()
 	queued_attack = ATTACK_NONE

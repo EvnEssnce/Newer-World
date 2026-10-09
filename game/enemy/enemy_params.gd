@@ -19,6 +19,18 @@ var attack_cooldown_ticks := 0
 var wander_radius := 0.0
 var wander_pause_ticks := 0
 
+# Threat ([threat]; see ThreatTable)
+## Per point of damage it takes from a player (hits, projectiles, damage over time).
+var threat_per_damage := 0.0
+## Per point of health a player heals someone it has threat on.
+var threat_per_heal := 0.0
+## For coming within aggro_range while it isn't walking home.
+var threat_proximity := 0.0
+## A challenger needs more than this x the current target's threat to take it.
+var threat_switch_ratio := 1.0
+## Every threat is multiplied by this each tick (1 = no decay).
+var threat_decay_factor := 1.0
+
 var attack: AttackParams
 
 static var _cache: Dictionary[String, EnemyParams] = {}
@@ -48,6 +60,13 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.attack_cooldown_ticks = roundi(Tuning.get_value(file, "ai", "attack_cooldown") * tps)
 	p.wander_radius = Tuning.get_value(file, "ai", "wander_radius")
 	p.wander_pause_ticks = roundi(Tuning.get_value(file, "ai", "wander_pause") * tps)
+
+	p.threat_per_damage = Tuning.get_value(file, "threat", "per_damage")
+	p.threat_per_heal = Tuning.get_value(file, "threat", "per_heal")
+	p.threat_proximity = Tuning.get_value(file, "threat", "proximity")
+	p.threat_switch_ratio = maxf(1.0, Tuning.get_value(file, "threat", "switch_ratio"))
+	var decay: float = clampf(Tuning.get_value(file, "threat", "decay_per_second"), 0.0, 1.0)
+	p.threat_decay_factor = pow(1.0 - decay, 1.0 / tps)
 
 	p.attack = AttackParams.from_tuning(file, "attack", tps)
 	return p

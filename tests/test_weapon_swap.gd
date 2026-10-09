@@ -210,7 +210,7 @@ func test_cannot_change_loadout_mid_attack_or_swap() -> void:
 
 func test_stagger_ends_swap_but_keeps_the_new_weapon() -> void:
 	_step(SWAP)
-	state.apply_stagger(5)
+	state.apply_stagger(5, params)
 	assert_false(state.is_swapping())
 	assert_eq(state.weapon(params), axes)
 

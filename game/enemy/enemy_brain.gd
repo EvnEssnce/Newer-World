@@ -4,6 +4,13 @@ extends RefCounted
 ## notice players, chase, swing, and walk home if pulled too far. Pure logic
 ## (positions in, desired velocity out), so it's unit tested
 ## (tests/test_enemy_brain.gd). Server only; death and health live in Enemy.
+##
+## Target choice is a ThreatTable: players gain threat by coming within
+## aggro_range (threat_proximity, nearest first), damaging it and healing
+## someone it fights (add_threat). While chasing it retargets every tick
+## (ThreatTable.pick_target); a swing keeps its target. An empty table (the
+## target died or left, nobody else has threat) sends it home, like leashing;
+## walking home wipes the table and ignores new threat until it's back.
 
 enum Mode { IDLE, CHASE, ATTACK, STAGGERED, RETURN }
 
@@ -20,6 +27,13 @@ var wander_point := Vector3.ZERO
 var wander_wait := 0
 ## True only for the step in which it got back to its camp after leashing.
 var arrived_home := false
+## Who it wants to fight.
+var threat := ThreatTable.new()
+## Set by Enemy before each step: the taunting player (peer id) it must target
+## while the taunt lasts, 0 = none.
+var forced_target := 0
+## Times it changed from one target to another (counted for the server summary).
+var target_switches := 0
 
 
 ## Advances one tick and returns the desired horizontal velocity (x, z).
@@ -28,32 +42,48 @@ func step(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParams,
 		delta: float, rng: RandomNumberGenerator) -> Vector2:
 	arrived_home = false
 	cooldown_ticks = maxi(0, cooldown_ticks - 1)
+	if mode != Mode.RETURN:
+		_update_threat(pos, targets, params)
 	match mode:
 		Mode.IDLE:
-			var nearest := _nearest_target(pos, targets, params.aggro_range)
-			if nearest != 0:
-				aggro(nearest)
+			if _retarget(params) != 0:
+				mode = Mode.CHASE
 				return _chase(pos, home, targets, params, delta)
 			return _wander(pos, home, params, delta, rng)
 		Mode.CHASE:
+			_retarget(params)
 			return _chase(pos, home, targets, params, delta)
 		Mode.ATTACK:
 			return _attack(pos, targets, params, delta)
 		Mode.STAGGERED:
 			stagger_ticks -= 1
 			if stagger_ticks <= 0:
-				mode = Mode.CHASE if targets.has(target_id) else Mode.RETURN
+				mode = Mode.CHASE if _retarget(params) != 0 else Mode.RETURN
 			return Vector2.ZERO
 		Mode.RETURN:
 			return _return(pos, home, params, delta)
 	return Vector2.ZERO
 
 
-## Starts chasing a player (e.g. one who hit it) if it isn't busy with another.
-func aggro(peer_id: int) -> void:
+## Adds threat for a player (e.g. one who hit it). Ignored while walking home.
+## An idle enemy starts chasing at once.
+func add_threat(peer_id: int, amount: float, params: EnemyParams) -> void:
+	if mode == Mode.RETURN or not threat.add(peer_id, amount):
+		return
+	if mode == Mode.IDLE and _retarget(params) != 0:
+		mode = Mode.CHASE
+
+
+## A taunt by peer_id: its threat goes to the top (ThreatTable.taunt). The
+## forced target itself comes from forced_target. Ignored while walking home.
+## Returns true if taken.
+func taunt(peer_id: int, params: EnemyParams) -> bool:
+	if mode == Mode.RETURN or not threat.taunt(peer_id, params.threat_switch_ratio):
+		return false
 	if mode == Mode.IDLE:
 		mode = Mode.CHASE
-		target_id = peer_id
+		_set_target(peer_id)
+	return true
 
 
 ## Interrupts a swing and stops it acting for ticks.
@@ -72,6 +102,35 @@ func is_attacking() -> bool:
 func is_attack_active(params: EnemyParams) -> bool:
 	var a := params.attack
 	return attack_tick >= a.windup_ticks and attack_tick < a.windup_ticks + a.active_ticks
+
+
+## Decay, drop players who are gone (dead or left), and proximity threat for
+## players newly within aggro_range, nearest first (so ties go to the nearest).
+func _update_threat(pos: Vector3, targets: Dictionary, params: EnemyParams) -> void:
+	threat.decay(params.threat_decay_factor)
+	threat.keep_only(targets)
+	var near: Array = []
+	for id: int in targets:
+		if threat.has(id):
+			continue
+		var distance := _flat(targets[id] - pos).length()
+		if distance <= params.aggro_range:
+			near.append([distance, id])
+	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for entry: Array in near:
+		threat.add(entry[1], params.threat_proximity)
+
+
+## Picks the target from the threat table. Returns it (0 = nobody).
+func _retarget(params: EnemyParams) -> int:
+	_set_target(threat.pick_target(target_id, params.threat_switch_ratio, forced_target))
+	return target_id
+
+
+func _set_target(peer_id: int) -> void:
+	if peer_id != target_id and peer_id != 0 and target_id != 0:
+		target_switches += 1
+	target_id = peer_id
 
 
 func _wander(pos: Vector3, home: Vector3, params: EnemyParams, delta: float,
@@ -94,6 +153,7 @@ func _chase(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParam
 	if not targets.has(target_id) or _flat(pos - home).length() > params.leash_range:
 		mode = Mode.RETURN
 		target_id = 0
+		threat.clear()
 		return _return(pos, home, params, delta)
 	var to := _flat(targets[target_id] - pos)
 	if to.length() > params.attack_range:
@@ -130,6 +190,7 @@ func _return(pos: Vector3, home: Vector3, params: EnemyParams, delta: float) -> 
 		arrived_home = true
 		wander_point = pos
 		wander_wait = 0
+		threat.clear()
 		return Vector2.ZERO
 	return _walk(to, params.return_speed, params, delta)
 
@@ -142,17 +203,6 @@ func _walk(to: Vector2, speed: float, params: EnemyParams, delta: float) -> Vect
 func _turn_toward(to: Vector2, params: EnemyParams, delta: float) -> void:
 	if not to.is_zero_approx():
 		yaw = rotate_toward(yaw, PlayerState.yaw_for_direction(to), params.turn_speed * delta)
-
-
-static func _nearest_target(pos: Vector3, targets: Dictionary, max_range: float) -> int:
-	var best_id := 0
-	var best := max_range
-	for id: int in targets:
-		var distance := _flat(targets[id] - pos).length()
-		if distance <= best:
-			best = distance
-			best_id = id
-	return best_id
 
 
 static func _flat(v: Vector3) -> Vector2:
