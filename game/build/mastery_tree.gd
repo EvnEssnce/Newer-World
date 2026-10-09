@@ -32,12 +32,16 @@ class MasteryNode:
 	## Active nodes: the ability it unlocks.
 	var ability := ""
 	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina",
-	## "execute_damage", "hold_the_line", "none", or (Wing trees)
+	## "execute_damage", "hold_the_line", "hook_stagger", "crit_staggered",
+	## "ability_range", "ramp_on_hit", "none", or (Wing trees)
 	## "damage_taken", "mantle_heal", "surge_stagger".
 	var effect := "none"
-	## "damage": "light", "heavy", "abilities", "all" or one ability id.
+	## "damage", "crit_staggered": "light", "heavy", "abilities", "all" or one
+	## ability id.
 	## "mantle_heal" / "surge_stagger": the Wing ability whose self-buff it needs.
 	## "hold_the_line": the internal ability that pokes.
+	## "hook_stagger": the mark status it needs (Hooked); "ramp_on_hit": the
+	## status each hit adds (Bloodied); "ability_range": the ability.
 	var applies_to := ""
 	var amount := 0.0
 	## "low_health_damage": applies below this fraction of the attacker's max
@@ -259,9 +263,7 @@ func damage_multiplier(allocated: PackedStringArray, attack_kind: String, abilit
 			continue
 		match n.effect:
 			"damage":
-				if (n.applies_to == "all" or n.applies_to == attack_kind
-						or (attack_kind == "ability"
-							and (n.applies_to == "abilities" or n.applies_to == ability_id))):
+				if covers(n.applies_to, attack_kind, ability_id):
 					bonus += n.amount
 			"low_health_damage":
 				if health_fraction < n.threshold:
@@ -288,6 +290,41 @@ static func execute_multiplier(bonus: Vector2, target_health_fraction: float) ->
 		return 1.0
 	var depth := 1.0 - maxf(0.0, target_health_fraction) / bonus.y
 	return 1.0 + bonus.x * depth
+
+
+## True if a node's applies_to ("all", "light", "heavy", "abilities" or an
+## ability id) covers an attack (attack_kind "light", "heavy" or "ability",
+## then ability_id says which).
+static func covers(applies_to: String, attack_kind: String, ability_id: String) -> bool:
+	return (applies_to == "all" or applies_to == attack_kind
+			or (attack_kind == "ability" and (applies_to == "abilities" or applies_to == ability_id)))
+
+
+## Crits ("crit_staggered" nodes: the Halberd's Headsman capstone): crit_damage
+## (the [crit] multiplier, data/combat.cfg) if such a node covers this attack
+## and the target was staggered before the hit; else 1.
+func crit_multiplier(allocated: PackedStringArray, attack_kind: String, ability_id: String,
+		target_staggered: bool, crit_damage: float) -> float:
+	if not target_staggered:
+		return 1.0
+	for id in allocated:
+		var n := get_node(id)
+		if (n and n.kind != KIND_ACTIVE and n.effect == "crit_staggered"
+				and covers(n.applies_to, attack_kind, ability_id)):
+			return crit_damage
+	return 1.0
+
+
+## Hitbox range multiplier for one ability ("ability_range" nodes whose
+## applies_to is that ability: Maelstrom doubles Vortex's). 1 = none.
+func range_multiplier(allocated: PackedStringArray, ability_id: String) -> float:
+	var result := 1.0
+	for id in allocated:
+		var n := get_node(id)
+		if (n and n.kind != KIND_ACTIVE and n.effect == "ability_range"
+				and n.applies_to == ability_id and n.amount > 0.0):
+			result *= n.amount
+	return result
 
 
 ## Server-side multiplier on the stamina a blocked hit costs.

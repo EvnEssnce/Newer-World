@@ -154,6 +154,24 @@ func execute_bonus(weapon_id: String) -> Vector2:
 	return tree.execute_bonus(get_allocated(weapon_id)) if tree else Vector2.ZERO
 
 
+## The weapon tree's crit multiplier for one of that weapon's attacks on a
+## target (MasteryTree.crit_multiplier); 1 without a crit node.
+func crit_multiplier(weapon_id: String, attack_kind: String, ability_id: String,
+		target_staggered: bool, crit_damage: float) -> float:
+	var tree: MasteryTree = trees.get(weapon_id)
+	if tree == null:
+		return 1.0
+	return tree.crit_multiplier(get_allocated(weapon_id), attack_kind, ability_id,
+			target_staggered, crit_damage)
+
+
+## The weapon tree's hitbox range multiplier for one of its abilities
+## (MasteryTree.range_multiplier: Maelstrom); 1 without one.
+func range_multiplier(weapon_id: String, ability_id: String) -> float:
+	var tree: MasteryTree = trees.get(weapon_id)
+	return tree.range_multiplier(get_allocated(weapon_id), ability_id) if tree else 1.0
+
+
 ## The allocated passive/upgrade node with this effect in a weapon's tree
 ## (Hold the Line), or null.
 func weapon_effect(weapon_id: String, effect: String) -> MasteryTree.MasteryNode:

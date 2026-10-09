@@ -187,6 +187,50 @@ func damage_taken_multiplier(defs: StatusDefs) -> float:
 	return maxf(0.0, 1.0 + bonus)
 
 
+## Who applied a status (Entry.source, server only), 0 if it isn't there.
+func source_of(index: int) -> int:
+	var e := find(index)
+	return e.source if e else 0
+
+
+## Brace: ticks an attacker whose melee hit just landed on the owner is
+## staggered (the longest charge_stagger among its statuses), if the hit counts
+## as a charge for that status: the attacker was dashing, or the status started
+## less than its charge_window ago. 0 = no stagger.
+func charge_stagger_ticks(defs: StatusDefs, attacker_dashing: bool) -> int:
+	var result := 0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if (def and def.charge_stagger_ticks > 0
+				and (attacker_dashing or e.elapsed < def.charge_window_ticks)):
+			result = maxi(result, def.charge_stagger_ticks)
+	return result
+
+
+## Iron Hide: the largest crowd_radius among the owner's statuses (meters), 0
+## without one (then nothing needs counting).
+func crowd_radius(defs: StatusDefs) -> float:
+	var result := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.crowd_damage_taken != 0.0:
+			result = maxf(result, def.crowd_radius)
+	return result
+
+
+## Iron Hide: multiplier on damage the owner takes with `nearby` hostiles
+## around it: 1 + the sum of crowd_damage_taken x stacks x min(nearby,
+## crowd_max) over its statuses (each counting only hostiles within its own
+## radius is left to the caller: one radius, crowd_radius()). At least 0.
+func crowd_damage_taken_multiplier(defs: StatusDefs, nearby: int) -> float:
+	var bonus := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.crowd_damage_taken != 0.0:
+			bonus += def.crowd_damage_taken * e.stacks * mini(maxi(nearby, 0), def.crowd_max)
+	return maxf(0.0, 1.0 + bonus)
+
+
 ## Multiplier on damage the owner deals: 1 + the sum of damage_dealt x stacks.
 ## How many times faster light and heavy attacks play (Rampage): the fastest
 ## status whose stamina condition holds (stamina_fraction = stamina / max). 1

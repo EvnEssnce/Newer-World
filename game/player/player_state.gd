@@ -394,6 +394,15 @@ func take_on_hit_statuses(params: PlayerParams) -> Array[Vector2i]:
 	return result
 
 
+## Server: removes one status (the Warden capstone uses up Hooked). A server
+## event. Returns true if it was there.
+func remove_status(index: int) -> bool:
+	if not statuses.remove(index):
+		return false
+	server_events += 1
+	return true
+
+
 ## Server: removes every debuff (a cleanse). Removing a stun also ends its
 ## stagger. Returns how many were removed.
 func cleanse(params: PlayerParams) -> int:

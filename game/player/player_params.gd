@@ -68,6 +68,8 @@ var force_max_distance := 0.0
 var force_max_height := 0.0
 ## A pull stops this far from the puller (center to center).
 var force_pull_gap := 0.0
+## A critical hit's damage multiplier ([crit] in combat.cfg; server).
+var crit_damage_multiplier := 1.0
 
 # Wings (data/wings_<class>.cfg)
 ## Every class's Wing ability pool, by class id.
@@ -183,6 +185,7 @@ static func _load_force_limits(p: PlayerParams) -> void:
 	p.force_max_distance = Tuning.get_value("combat", "force", "max_distance")
 	p.force_max_height = Tuning.get_value("combat", "force", "max_height")
 	p.force_pull_gap = Tuning.get_value("combat", "force", "pull_gap")
+	p.crit_damage_multiplier = Tuning.get_value("combat", "crit", "damage_multiplier")
 
 
 ## The weapon with this id, or default_weapon.

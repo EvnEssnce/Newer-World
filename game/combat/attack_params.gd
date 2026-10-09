@@ -41,6 +41,11 @@ var max_targets := 0
 var impact_radius := 0.0
 ## Knockback / pull / launch on hit (force_* keys), or null for none.
 var force: ForceParams = null
+## This attack's own execute bonus (Executioner's Swing; execute_damage /
+## execute_threshold keys): (amount, threshold) for
+## MasteryTree.execute_multiplier on the target's health. Server only; zero =
+## none. Multiplies with the attacker's tree bonus (Finishing Thrust).
+var execute := Vector2.ZERO
 
 # Statuses (data/status_effects.cfg ids; "" = none)
 ## Applied to whoever this damages (server), with status_stacks stacks, for
@@ -114,6 +119,8 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_height = Tuning.get_value(file, section, "height")
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
 	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
+	execute = Vector2(Tuning.get_optional(file, section, "execute_damage", 0.0),
+			Tuning.get_optional(file, section, "execute_threshold", 0.0))
 	_load_statuses(file, section, tps)
 	force = ForceParams.from_tuning(file, section, tps)
 	projectile = Tuning.get_optional(file, section, "projectile", "")
@@ -154,4 +161,12 @@ func radial_copy(radius: float) -> AttackParams:
 			copy.set(property.name, get(property.name))
 	copy.shape = SHAPE_RADIAL
 	copy.hitbox_range = radius
+	return copy
+
+
+## A copy of this attack with its hitbox reaching `new_range` meters (same
+## shape and everything else): a server-side range upgrade (Maelstrom).
+func range_copy(new_range: float) -> AttackParams:
+	var copy := radial_copy(new_range)
+	copy.shape = shape
 	return copy

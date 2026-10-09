@@ -67,6 +67,10 @@ func validate() -> String:
 			return "%s: attack_speed must be between 1 and 2" % def.id
 		if def.cover_depth < 0.0 or def.cover_width < 0.0:
 			return "%s: cover_depth and cover_width can't be negative" % def.id
+		if def.charge_stagger_ticks < 0 or def.charge_window_ticks < 0:
+			return "%s: charge_stagger and charge_window can't be negative" % def.id
+		if def.crowd_damage_taken != 0.0 and (def.crowd_radius <= 0.0 or def.crowd_max <= 0):
+			return "%s: crowd_damage_taken needs a crowd_radius and crowd_max above 0" % def.id
 		if not def.on_hit_status.is_empty() and index_of(def.on_hit_status) < 0:
 			return "%s: on_hit_status \"%s\" doesn't exist" % [def.id, def.on_hit_status]
 	return ""

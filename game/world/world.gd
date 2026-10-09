@@ -23,8 +23,11 @@ const HIT_STATUS_DAMAGE := 6
 ## Healing (damage = health restored; attacker = the healer). Pyre Heart, the
 ## Mantle of Renewal capstone.
 const HIT_HEALED := 7
+## A damaging hit that crit (Headsman). Only ever sent to clients (for the
+## label): on the server the strike's result is HIT_DAMAGED.
+const HIT_CRITICAL := 8
 const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried",
-		"status damage", "healed"]
+		"status damage", "healed", "critical"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
@@ -113,6 +116,12 @@ var _healed := 0.0
 var _shield_wall_covers := 0
 ## Hold the Line pokes (Spear capstone).
 var _line_pokes := 0
+## Juggernaut (server): critical hits (Headsman), Hooked targets staggered
+## (Warden), chargers staggered by Brace, Bloodied stacks gained.
+var _crits := 0
+var _hook_staggers := 0
+var _brace_staggers := 0
+var _ramp_stacks := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -322,7 +331,7 @@ func _on_peer_left(peer_id: int) -> void:
 ## reaches the limit is still hit, and so is everything within its impact_radius
 ## then, so a charge into a group hits the whole group.
 func _on_attack_stepped(attacker: Player) -> void:
-	var attack := attacker.state.current_attack(attacker.params)
+	var attack := _with_range_upgrade(attacker, attacker.state.current_attack(attacker.params))
 	if _target_limit_reached(attacker, attack):
 		return
 	var damage_scale := (attacker.damage_multiplier(attack)
@@ -376,14 +385,17 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, enemy: Enemy, damage_scale: float, on_hit: Callable,
 		execute := Vector2.ZERO) -> bool:
-	var damage := (attack.damage * damage_scale
-			* MasteryTree.execute_multiplier(execute, enemy.health / enemy.params.max_health)
-			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 	var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
+	var crit := _crit_multiplier(attacker_id, attack, was_staggered)
+	var damage := (attack.damage * damage_scale * crit
+			* _execute_scale(execute, attack, enemy.health / enemy.params.max_health)
+			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 	_enemy_damaged += 1
 	_ember_from_damage(attacker_id, null, damage)
-	if _damage_enemy(enemy, damage, _with_surge_stagger(attacker_id, attack.stagger_ticks),
-			attacker_id, HIT_DAMAGED):
+	var stagger := _with_hook_stagger(attacker_id, enemy,
+			_with_surge_stagger(attacker_id, attack.stagger_ticks))
+	if _damage_enemy(enemy, damage, stagger, attacker_id,
+			HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED):
 		return true
 	_give_hit_statuses(attacker_id, attack, on_hit.call(), enemy)
 	_force_enemy(attacker_pos, attacker_yaw, attack, enemy, was_staggered)
@@ -408,6 +420,7 @@ func _on_ability_started(player: Player) -> void:
 func _on_player_attack_connected(attacker: Player, attack: AttackParams, count: int) -> void:
 	if attacker.state.is_using_ability():
 		_ability_hits += count
+	_ramp_on_hit(attacker)
 	if _target_limit_reached(attacker, attack):
 		attacker.state.end_active_window(attacker.params)
 
@@ -453,8 +466,11 @@ func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
 		return -1
-	return resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
+	var result := resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
 			damage_scale, execute)
+	if result in [HIT_DAMAGED, HIT_BLOCKED, HIT_GUARD_BROKEN]:
+		_brace_counter(attacker_id, target)
+	return result
 
 
 ## Server: the rest of _strike_player once something touched the target (a
@@ -487,11 +503,12 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 			return _covered_hit(attacker_id, attacker_pos, attacker_yaw, attack, damage_scale,
 					execute, holder, target)
 	var was_staggered := target.state.is_staggered()
-	var base_damage := (attack.damage * damage_scale
-			* MasteryTree.execute_multiplier(execute, target.health / target.params.max_health))
+	var crit := _crit_multiplier(attacker_id, attack, was_staggered)
+	var base_damage := (attack.damage * damage_scale * crit
+			* _execute_scale(execute, attack, target.health / target.params.max_health))
 	var damage := (base_damage
 			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
-			* target.damage_taken_multiplier())
+			* target.damage_taken_multiplier() * _crowd_multiplier(target))
 	var result := HIT_DAMAGED
 	if guarded:
 		var broke := target.state.take_blocked_hit(attack, target.params,
@@ -509,12 +526,13 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		result = HIT_DEFEATED
 		_kill_player(target)
 	elif result == HIT_DAMAGED:
-		target.state.apply_stagger(_with_surge_stagger(attacker_id, attack.stagger_ticks),
-				target.params)
+		target.state.apply_stagger(_with_hook_stagger(attacker_id, target,
+				_with_surge_stagger(attacker_id, attack.stagger_ticks)), target.params)
 	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
 		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
-	_send_hit(attacker_id, target.peer_id, damage, result)
+	_send_hit(attacker_id, target.peer_id, damage,
+			HIT_CRITICAL if crit > 1.0 and result == HIT_DAMAGED else result)
 	if result != HIT_DEFEATED:
 		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
 	return result
@@ -560,9 +578,10 @@ func _covered_hit(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 	_shield_wall_covers += 1
 	var was_staggered := holder.state.is_staggered()
 	var damage := (attack.damage * damage_scale
-			* MasteryTree.execute_multiplier(execute, holder.health / holder.params.max_health)
+			* _execute_scale(execute, attack, holder.health / holder.params.max_health)
 			* holder.state.statuses.damage_taken_multiplier(holder.params.statuses)
-			* holder.damage_taken_multiplier() * holder.params.block_damage_taken)
+			* holder.damage_taken_multiplier() * _crowd_multiplier(holder)
+			* holder.params.block_damage_taken)
 	var broke := holder.state.take_blocked_hit(attack, holder.params,
 			holder.block_stamina_multiplier())
 	var result := HIT_GUARD_BROKEN if broke else HIT_BLOCKED
@@ -651,6 +670,126 @@ func _line_poke(player: Player, poke: AbilityParams, target_id: int) -> void:
 ## No on-hit statuses (Hold the Line's pokes don't use up Bloodlust charges).
 func _no_on_hit_statuses() -> Array[Vector2i]:
 	return []
+
+
+# --- Juggernaut: Halberd and Greataxe mechanics (server only) ---
+
+## The execute bonuses on one hit: the attacker's tree bonus (Finishing
+## Thrust, captured as `execute`) times the attack's own (Executioner's Swing,
+## AttackParams.execute), each MasteryTree.execute_multiplier on the target's
+## health fraction.
+func _execute_scale(execute: Vector2, attack: AttackParams, health_fraction: float) -> float:
+	return (MasteryTree.execute_multiplier(execute, health_fraction)
+			* MasteryTree.execute_multiplier(attack.execute, health_fraction))
+
+
+## Crits (the Halberd's Headsman capstone, "crit_staggered"): the [crit]
+## multiplier if the attacking player's tree covers this attack and the target
+## was staggered before the hit, else 1. Enemies never crit.
+func _crit_multiplier(attacker_id: int, attack: AttackParams, target_staggered: bool) -> float:
+	var attacker := _player_by_id(attacker_id)
+	if attacker == null:
+		return 1.0
+	var crit := attacker.crit_multiplier(attack, target_staggered)
+	if crit > 1.0:
+		_crits += 1
+	return crit
+
+
+## Maelstrom ("ability_range"): the ability in use with its hitbox range times
+## the weapon tree's multiplier for it (Vortex reaches twice as far). Only the
+## server tests hits, so nothing to predict; F3 still draws the base range.
+func _with_range_upgrade(player: Player, attack: AttackParams) -> AttackParams:
+	var ability := attack as AbilityParams
+	if ability == null or player.build == null or player.state.is_using_wing():
+		return attack
+	var factor := player.build.range_multiplier(player.state.weapon_id(), ability.id)
+	return attack if is_equal_approx(factor, 1.0) else attack.range_copy(attack.hitbox_range * factor)
+
+
+## The Warden capstone ("hook_stagger"): a hit from a player whose weapon tree
+## (of the weapon that's out) has it, on a target carrying the node's mark
+## status (applies_to: Hooked, from Hooking Pull) applied by that same player,
+## staggers for at least the node's amount (seconds) and uses the mark up.
+## Returns the stagger ticks to apply. target: a Player or an Enemy.
+func _with_hook_stagger(attacker_id: int, target: Node3D, stagger_ticks: int) -> int:
+	var attacker := _player_by_id(attacker_id)
+	if attacker == null or attacker.build == null or attacker.state.is_using_wing():
+		return stagger_ticks
+	var node := attacker.build.weapon_effect(attacker.state.weapon_id(), "hook_stagger")
+	if node == null:
+		return stagger_ticks
+	var index := attacker.params.statuses.index_of(node.applies_to)
+	var player := target as Player
+	var statuses: StatusEffects = player.state.statuses if player else (target as Enemy).statuses
+	if index < 0 or statuses.source_of(index) != attacker_id:
+		return stagger_ticks
+	if player:
+		player.state.remove_status(index)
+	else:
+		statuses.remove(index)
+	_hook_staggers += 1
+	if _verbose:
+		print("[server] peer %d's hook staggers %s" % [attacker_id, target.name])
+	return maxi(stagger_ticks, roundi(node.amount * Engine.physics_ticks_per_second))
+
+
+## Brace: a melee hit (a hitbox, not a projectile) landed on a player. If the
+## target's statuses stagger chargers (Braced: charge_stagger) and this hit
+## counts as a charge (the attacking player was dashing, or it landed within
+## the status's charge_window), the attacker is staggered: a player through
+## apply_stagger (immunities apply; a server event), an enemy's brain.
+func _brace_counter(attacker_id: int, target: Player) -> void:
+	var attacker := _player_by_id(attacker_id)
+	var dashing := attacker != null and attacker.state.is_dashing(attacker.params)
+	var ticks := target.state.statuses.charge_stagger_ticks(target.params.statuses, dashing)
+	if ticks <= 0:
+		return
+	if attacker:
+		if attacker.state.dead or attacker.state.statuses.stagger_immune(attacker.params.statuses):
+			return
+		attacker.state.apply_stagger(ticks, attacker.params)
+	else:
+		var enemy := _enemies.get_node_or_null(str(attacker_id)) as Enemy
+		if enemy == null or enemy.dead or enemy.statuses.stagger_immune(enemy.status_defs):
+			return
+		enemy.brain.stagger(ticks)
+	_brace_staggers += 1
+	if _verbose:
+		print("[server] peer %d's Brace staggers %d" % [target.peer_id, attacker_id])
+
+
+## Iron Hide: the multiplier on damage a player takes from its crowd statuses
+## (StatusEffects.crowd_damage_taken_multiplier), counting living enemies and
+## hostile players within the largest crowd_radius. 1 without one.
+func _crowd_multiplier(player: Player) -> float:
+	var defs := player.params.statuses
+	var radius := player.state.statuses.crowd_radius(defs)
+	if radius <= 0.0:
+		return 1.0
+	var pos := player.global_position
+	var nearby := 0
+	for enemy: Enemy in _enemies.get_children():
+		if not enemy.dead and enemy.global_position.distance_to(pos) <= radius:
+			nearby += 1
+	for other: Player in _players.get_children():
+		if (other != player and not other.state.dead and not are_allies(player.peer_id, other.peer_id)
+				and other.global_position.distance_to(pos) <= radius):
+			nearby += 1
+	return player.state.statuses.crowd_damage_taken_multiplier(defs, nearby)
+
+
+## The Greataxe's Bloodied capstone ("ramp_on_hit"): each step a player's
+## melee attack or ability connects (with the weapon whose tree has it out)
+## gives it a stack of the node's status (applies_to: Bloodied, more damage
+## per stack, refreshed by every hit, so it falls off soon after the hits stop).
+func _ramp_on_hit(attacker: Player) -> void:
+	if attacker.build == null or attacker.state.is_using_wing():
+		return
+	var node := attacker.build.weapon_effect(attacker.state.weapon_id(), "ramp_on_hit")
+	if node and _give_status(attacker.peer_id, attacker,
+			attacker.params.statuses.index_of(node.applies_to), 1, -1):
+		_ramp_stacks += 1
 
 
 ## Server: a player's health reached 0 (a hit or damage over time). With
@@ -859,7 +998,7 @@ func _apply_player_status_damage(player: Player) -> void:
 	if raw <= 0.0 or player.state.dead:
 		return
 	var damage := (raw * player.state.statuses.damage_taken_multiplier(player.params.statuses)
-			* player.damage_taken_multiplier())
+			* player.damage_taken_multiplier() * _crowd_multiplier(player))
 	player.health = maxf(0.0, player.health - damage)
 	_status_ticks += 1
 	_status_damage += damage
@@ -1468,7 +1607,7 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) -> void:
 	var my_id := multiplayer.get_unique_id()
-	if result in [HIT_DAMAGED, HIT_DEFEATED, HIT_GUARD_BROKEN]:
+	if result in [HIT_DAMAGED, HIT_CRITICAL, HIT_DEFEATED, HIT_GUARD_BROKEN]:
 		if attacker_id == my_id:
 			_hits_landed += 1
 		if target_id == my_id:
@@ -1647,6 +1786,8 @@ func print_summary() -> void:
 				roundi(_status_damage), _ally_statuses_refused, _ally_statuses_applied])
 		_print_force_summary()
 		_print_ember_summary()
+		print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d" % [
+				_crits, _hook_staggers, _brace_staggers, _ramp_stacks])
 		_projectiles.print_summary()
 		return
 	_projectiles.print_client_summary()

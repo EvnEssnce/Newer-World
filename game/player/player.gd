@@ -216,6 +216,7 @@ func _ready() -> void:
 	_box_mesh = _hitbox_debug.mesh as BoxMesh
 	_radial_mesh = CylinderMesh.new()
 	_build_phoenix_visuals()
+	_build_halberd_greataxe()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -315,14 +316,30 @@ func get_snapshot() -> Array:
 func damage_multiplier(attack: AttackParams) -> float:
 	if build == null or attack == null:
 		return 1.0
-	var kind := "heavy" if attack == state.weapon(params).heavy_attack else "light"
-	var ability_id := ""
-	if attack is AbilityParams:
-		kind = "ability"
-		ability_id = (attack as AbilityParams).id
+	var kind := _attack_kind(attack)
 	# A Wing ability only gets the Wing tree's modifiers.
 	var weapon_id := "" if state.is_using_wing() else state.weapon_id()
-	return build.damage_multiplier(weapon_id, kind, ability_id, health / params.max_health)
+	return build.damage_multiplier(weapon_id, kind[0], kind[1], health / params.max_health)
+
+
+## [attack kind ("light", "heavy" or "ability"), ability id] of one of this
+## player's attacks, as the mastery trees name them.
+func _attack_kind(attack: AttackParams) -> PackedStringArray:
+	if attack is AbilityParams:
+		return PackedStringArray(["ability", (attack as AbilityParams).id])
+	var heavy := attack == state.weapon(params).heavy_attack
+	return PackedStringArray(["heavy" if heavy else "light", ""])
+
+
+## Server: the crit multiplier (Headsman: [crit] in data/combat.cfg) of the
+## weapon tree that's out for this attack on a target that was (or wasn't)
+## staggered before the hit; 1 = no crit (and always during a Wing ability).
+func crit_multiplier(attack: AttackParams, target_staggered: bool) -> float:
+	if build == null or attack == null or state.is_using_wing():
+		return 1.0
+	var kind := _attack_kind(attack)
+	return build.crit_multiplier(state.weapon_id(), kind[0], kind[1], target_staggered,
+			params.crit_damage_multiplier)
 
 
 ## Server: the execute bonus (Finishing Thrust) of the weapon that's out, as
@@ -575,7 +592,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var ability_id := ability.id if ability else ""
 
 	var spin := 0.0
-	if ability_id == "whirlwind_edge":
+	if ability_id in ["whirlwind_edge", "vortex"]:
 		spin = _spin_offset(ability, attack_tick)
 	var lift := ability.leap_lift(attack_tick) if ability else 0.0
 	_model.rotation.y = yaw + spin
@@ -597,8 +614,9 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var model := view.weapon(params).model
 	var axes := model == "dual_axes"
 	var spear := model == "spear"
-	_sword_pivot.visible = not axes and not spear
-	_shield_pivot.visible = not axes and not spear
+	var polearm_or_greataxe := model in ["halberd", "greataxe"]
+	_sword_pivot.visible = not axes and not spear and not polearm_or_greataxe
+	_shield_pivot.visible = not axes and not spear and not polearm_or_greataxe
 	_axe_right_pivot.visible = axes and not _axe_thrown
 	_axe_left_pivot.visible = axes
 	_spear_pivot.visible = spear
@@ -619,6 +637,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		var pose := _sword_pose(attack, view.attack_type, ability_id, attack_tick)
 		_sword_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
 		_sword_pivot.position = _sword_rest_position + Vector3(0.0, 0.0, pose.z)
+	_show_halberd_greataxe(model, view, attack, ability_id, attack_tick, lowered)
 
 	_show_hitbox(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
@@ -784,6 +803,148 @@ static func _frenzy_pitches(attack: AttackParams, tick: float, chop: float) -> V
 		pitch = lerpf(AXE_STRUCK, AXE_WOUND,
 				(into - attack.active_ticks) / maxf(interval - attack.active_ticks, 1.0))
 	return Vector2(pitch, AXE_WOUND) if index % 2 == 0 else Vector2(AXE_WOUND, pitch)
+
+
+# --- Juggernaut: Halberd and Greataxe models (placeholder, client) ---
+# Built in code. Poses are Vector3(pitch up, sweep left, meters pulled back;
+# negative = thrust forward), like the spear's, on a pivot at the right hand.
+
+const HALBERD_PIVOT := Vector3(0.35, 0.05, 0.0)
+const HALBERD_IDLE := Vector3(0.6, 0.0, 0.0)
+## Light: the axe head swept right to left at reach.
+const HALBERD_SWEEP_WOUND := Vector3(-0.15, -1.3, 0.0)
+const HALBERD_SWEEP_STRUCK := Vector3(-0.15, 1.3, 0.0)
+## Heavy and Cleaving Arc: raised high, chopped down.
+const HALBERD_CHOP_WOUND := Vector3(1.7, 0.0, 0.25)
+const HALBERD_CHOP_STRUCK := Vector3(-0.35, 0.0, -0.1)
+## Wide Reap: a much wider sweep. Crowd Sweep: low.
+const HALBERD_REAP_WOUND := Vector3(-0.25, -2.0, 0.0)
+const HALBERD_REAP_STRUCK := Vector3(-0.25, 2.0, 0.0)
+const HALBERD_LOW_WOUND := Vector3(-0.6, -1.4, 0.0)
+const HALBERD_LOW_STRUCK := Vector3(-0.6, 1.4, 0.0)
+## Hooking Pull: thrust out (the recovery draws it back in).
+const HALBERD_HOOK_OUT := Vector3(0.05, 0.0, -1.2)
+## Pole Vault and Brace: the butt planted on the ground ahead. Block: across.
+const HALBERD_PLANTED := Vector3(-0.9, 0.0, -0.2)
+const HALBERD_GUARD := Vector3(0.9, 0.9, 0.0)
+const GREATAXE_PIVOT := Vector3(0.4, 0.2, -0.1)
+const GREATAXE_IDLE := Vector3(1.0, 0.3, 0.0)
+## Light: a diagonal cleave.
+const GREATAXE_CLEAVE_WOUND := Vector3(0.9, -1.2, 0.0)
+const GREATAXE_CLEAVE_STRUCK := Vector3(-0.5, 1.2, 0.0)
+## Heavy, Charging Chop, Grounding Blow, Executioner's Swing: overhead chop.
+const GREATAXE_CHOP_WOUND := Vector3(2.2, 0.0, 0.1)
+const GREATAXE_CHOP_STRUCK := Vector3(-1.2, 0.0, 0.0)
+## Vortex: held out to the side while the body spins. Iron Hide / block: across.
+const GREATAXE_SPIN := Vector3(0.0, -PI / 2.0, 0.0)
+const GREATAXE_GUARD := Vector3(0.5, 0.9, 0.0)
+## Hurl: drawn back, thrown forward (it leaves the hands: set_axe_thrown).
+const GREATAXE_THROW_WOUND := Vector3(2.3, 0.0, 0.2)
+const GREATAXE_THROW_STRUCK := Vector3(0.3, 0.0, -0.3)
+
+var _halberd_pivot: Node3D
+var _greataxe_pivot: Node3D
+
+
+func _build_halberd_greataxe() -> void:
+	var wood := _flat_material(Color(0.42, 0.28, 0.16), 0.0, 0.85)
+	var steel := _flat_material(Color(0.72, 0.74, 0.78), 0.7, 0.35)
+	var dark := _flat_material(Color(0.3, 0.3, 0.34), 0.6, 0.5)
+	# Halberd: a long shaft with an axe blade on top, a hook below and a spike.
+	_halberd_pivot = _weapon_pivot(HALBERD_PIVOT, [
+		[Vector3(0.06, 0.06, 2.8), Vector3(0.0, 0.0, -0.6), wood],
+		[Vector3(0.04, 0.42, 0.34), Vector3(0.0, 0.22, -1.82), steel],
+		[Vector3(0.03, 0.2, 0.08), Vector3(0.0, -0.13, -1.85), dark],
+		[Vector3(0.08, 0.025, 0.36), Vector3(0.0, 0.0, -2.16), steel],
+	])
+	# Greataxe: a long handle with a big double-bit head.
+	_greataxe_pivot = _weapon_pivot(GREATAXE_PIVOT, [
+		[Vector3(0.07, 0.07, 1.5), Vector3(0.0, 0.0, -0.55), wood],
+		[Vector3(0.05, 0.58, 0.42), Vector3(0.0, 0.3, -1.12), steel],
+		[Vector3(0.05, 0.42, 0.32), Vector3(0.0, -0.24, -1.12), steel],
+		[Vector3(0.1, 0.1, 0.14), Vector3(0.0, 0.0, -1.12), dark],
+	])
+
+
+func _flat_material(color: Color, metallic: float, roughness: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.metallic = metallic
+	m.roughness = roughness
+	return m
+
+
+## A hidden weapon pivot under the body with box parts: [size, position, material].
+func _weapon_pivot(at: Vector3, parts: Array) -> Node3D:
+	var pivot := Node3D.new()
+	pivot.position = at
+	pivot.visible = false
+	_roll_pivot.add_child(pivot)
+	for part: Array in parts:
+		var mesh := BoxMesh.new()
+		mesh.size = part[0]
+		var instance := MeshInstance3D.new()
+		instance.mesh = mesh
+		instance.position = part[1]
+		instance.material_override = part[2]
+		pivot.add_child(instance)
+	return pivot
+
+
+## Shows the Halberd or Greataxe (hidden for other models) in its pose.
+func _show_halberd_greataxe(model: String, view: PlayerState, attack: AttackParams,
+		ability_id: String, attack_tick: float, lowered: float) -> void:
+	_halberd_pivot.visible = model == "halberd"
+	_greataxe_pivot.visible = model == "greataxe" and not _axe_thrown
+	var pivot := _halberd_pivot if model == "halberd" else _greataxe_pivot
+	if model != "halberd" and model != "greataxe":
+		return
+	var pose: Vector3
+	if model == "halberd":
+		pose = _halberd_pose(attack, view.attack_type, ability_id, attack_tick, view.blocking)
+	else:
+		pose = _greataxe_pose(attack, view.attack_type, ability_id, attack_tick, view.blocking)
+	var rest := HALBERD_PIVOT if model == "halberd" else GREATAXE_PIVOT
+	pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
+	pivot.position = rest + Vector3(0.0, 0.0, pose.z)
+
+
+static func _halberd_pose(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float, blocking: bool) -> Vector3:
+	if attack == null:
+		return HALBERD_GUARD if blocking else HALBERD_IDLE
+	match ability_id:
+		"hooking_pull":
+			return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_IDLE, HALBERD_HOOK_OUT)
+		"wide_reap":
+			return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_REAP_WOUND, HALBERD_REAP_STRUCK)
+		"crowd_sweep":
+			return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_LOW_WOUND, HALBERD_LOW_STRUCK)
+		"pole_vault", "brace":
+			return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_PLANTED, HALBERD_PLANTED)
+		"cleaving_arc":
+			return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_CHOP_WOUND, HALBERD_CHOP_STRUCK)
+	if attack_type == PlayerState.ATTACK_HEAVY:
+		return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_CHOP_WOUND, HALBERD_CHOP_STRUCK)
+	return _phase_pose3(attack, tick, HALBERD_IDLE, HALBERD_SWEEP_WOUND, HALBERD_SWEEP_STRUCK)
+
+
+static func _greataxe_pose(attack: AttackParams, attack_type: int, ability_id: String,
+		tick: float, blocking: bool) -> Vector3:
+	if attack == null:
+		return GREATAXE_GUARD if blocking else GREATAXE_IDLE
+	match ability_id:
+		"vortex":
+			return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_SPIN, GREATAXE_SPIN)
+		"iron_hide":
+			return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_GUARD, GREATAXE_GUARD)
+		"hurl":
+			return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_THROW_WOUND, GREATAXE_THROW_STRUCK)
+		"charging_chop", "grounding_blow", "executioners_swing":
+			return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_CHOP_WOUND, GREATAXE_CHOP_STRUCK)
+	if attack_type == PlayerState.ATTACK_HEAVY:
+		return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_CHOP_WOUND, GREATAXE_CHOP_STRUCK)
+	return _phase_pose3(attack, tick, GREATAXE_IDLE, GREATAXE_CLEAVE_WOUND, GREATAXE_CLEAVE_STRUCK)
 
 
 # --- Phoenix visuals (Wing abilities, Rebirth; placeholder, client) ---

@@ -44,7 +44,8 @@ game/
                      prediction, interpolation, hit display; test bot.
   world/build_service.gd  World/Builds node: class/weapon/mastery/Wing requests (RPCs), validation.
   player/player.gd   One player; server/local/remote roles (see below), health, visuals
-                     (incl. placeholder wings and the Rebirth fire).
+                     (incl. placeholder wings and the Rebirth fire; Halberd and Greataxe
+                     models built in code, `_build_halberd_greataxe`).
   player/player_movement.gd  Shared deterministic sim step: PlayerState + physics.
   player/player_state.gd     Stamina, dodge, attacks, abilities, cooldowns, weapon swap,
                              stagger, death, facing, Wing abilities, Ember, Rebirth.
@@ -89,7 +90,8 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
-                     weapon_<id> (broadsword, spear, dual_axes), class_<id> (fighter),
+                     weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
+                     greataxe), class_<id> (fighter, juggernaut),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, party, status_effects,
@@ -255,8 +257,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
   branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
-  low_health_damage, block_stamina, execute_damage, hold_the_line, none; Wing trees add
-  damage_taken, mantle_heal, surge_stagger). Respecs are free any time except
+  low_health_damage, block_stamina, execute_damage, hold_the_line, hook_stagger,
+  crit_staggered, ability_range, ramp_on_hit, none; Wing trees add
+  damage_taken, mantle_heal, surge_stagger). `MasteryTree.covers(applies_to, kind,
+  ability_id)` is the one "does this node apply to this attack" rule. Respecs are free any time except
   mid-attack/ability/swap. K opens the panel. A tree file may set its own `[tree] points`
   (the Wing tree does).
 - **Execute damage** (Spear capstone **Finishing Thrust**, `effect="execute_damage"`,
@@ -265,7 +269,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   Wing ability); `MasteryTree.execute_multiplier(bonus, target health fraction)` = 1 +
   amount × (1 − fraction / threshold) below the threshold. It's passed as the optional
   `execute` argument of `_strike_player` / `resolve_strike` / `strike_enemy`; a
-  projectile captures it at release (`Projectile.execute`) like `damage_scale`.
+  projectile captures it at release (`Projectile.execute`) like `damage_scale`. An
+  attack can have its own (`execute_damage` / `execute_threshold` keys →
+  `AttackParams.execute`: Executioner's Swing); `World._execute_scale` multiplies the two.
 - **Hold the Line** (Spear Lancer capstone, `effect="hold_the_line"`, `applies_to` = the
   internal ability `line_poke` in `weapon_spear.cfg`: its box, damage 40, Slow 2 s, and
   its `cooldown` (2 s) is **per target**). Server only (`World._hold_the_line`, every
@@ -348,6 +354,67 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - No lag compensation yet: hits use targets' current server positions, while the
   attacker sees them `interpolation_delay` in the past.
 
+## Juggernaut (Halberd, Greataxe)
+
+`data/class_juggernaut.cfg` (`--class=juggernaut`, `-Class juggernaut` for the run and
+smoke scripts). Heavier and slower than the Fighter's weapons (turn_speed 540, longer
+windups/recoveries, bigger numbers). Placeholder models are built in code in
+`player.gd` (`_build_halberd_greataxe`, poses in `_halberd_pose` / `_greataxe_pose`).
+Every new mechanic is server-only (no new `to_array()` fields); the `World` helpers sit
+in one block, "Juggernaut: Halberd and Greataxe mechanics", and the bot needs nothing
+special (it slots self-buffs, statuses and Hurl like any weapon).
+
+- **Halberd** (`weapon_halberd.cfg`, tree `mastery_halberd.cfg`: Warden / Headsman).
+  Light = reaching sweep (3 m × 2 m), heavy = overhead chop (3.4 m). Hooking Pull (5.5 m
+  line, `max_targets` 1, pull 4.5 m, marks **Hooked**), Wide Reap (3.6 × 6 m sweep),
+  Pole Vault (6 m dash + 1.6 m cosmetic leap, 2.3 m radial landing, knockback 2.5 m),
+  Brace (self-buff **Braced**), Cleaving Arc (overhead chop, Exposed), Crowd Sweep
+  (3 × 4.5 m box, push 4 m). Defaults: all six learned, Q/E/R = Hooking Pull, Wide Reap,
+  Crowd Sweep.
+- **Greataxe** (`weapon_greataxe.cfg`, tree `mastery_greataxe.cfg`: Maelstrom /
+  Bloodied). Light = wide diagonal cleave (2.2 × 2.8 m), heavy = big chop. Vortex (3
+  radial windows of 3.5 m, each pulling in; the body spins like Whirlwind Edge),
+  Charging Chop (6 m dash, chop at the end), Grounding Blow (3.2 m slam, Slow 3 s),
+  Executioner's Swing (attack-level execute: +150% at 0 health from 30%), Iron Hide
+  (self-buff), Hurl (`[projectile_greataxe]`, ~15 m, stops at the first target, Slow
+  5 s; the model leaves the hands in flight via `set_axe_thrown`). **Choice:** no
+  pickup: "slowed until you pick the axe up" is a fixed 5 s slow. Defaults: all six
+  learned, Q/E/R = Vortex, Charging Chop, Grounding Blow.
+- **Brace** (`charge_stagger` 1 s, `charge_window` 1 s on `status_braced`): a melee hit
+  (`_strike_player`, not projectiles) that lands on a Braced player (damaged, blocked or
+  guard broken) staggers the attacker if it's a **charge**: the attacking player was
+  mid-dash (`PlayerState.is_dashing`), or the hit landed within the first second of
+  Braced (`StatusEffects.charge_stagger_ticks`, using the entry's `elapsed`). Enemies
+  get `brain.stagger`; immunities apply. `World._brace_counter`.
+- **Iron Hide** (`status_iron_hide`: `crowd_damage_taken` −0.08 per hostile within
+  `crowd_radius` 5 m, at most `crowd_max` 5 → −40%, 6 s): `World._crowd_multiplier`
+  counts living enemies and non-allied players around the target and multiplies the
+  damage taken in `resolve_strike`, `_covered_hit` and damage over time
+  (`StatusEffects.crowd_damage_taken_multiplier`).
+- **Crits** (`[crit] damage_multiplier` 1.5 in combat.cfg, `PlayerParams.
+  crit_damage_multiplier`): the Headsman capstone **Headsman's Verdict**
+  (`effect="crit_staggered"`, `applies_to="heavy"`): a covered attack on a target that
+  was staggered *before* the hit crits (`Player.crit_multiplier` →
+  `MasteryTree.crit_multiplier`; `World._crit_multiplier` in `resolve_strike` /
+  `strike_enemy`). Clients get `HIT_CRITICAL` (8) instead of `HIT_DAMAGED` (only on the
+  wire; server results stay `HIT_DAMAGED`) and show "Critical! -N". Gear crit chance
+  can reuse the multiplier.
+- **Caught on the Hook** (Warden capstone, `effect="hook_stagger"`, `applies_to="hooked"`,
+  `amount` 0.8 s): Hooking Pull always applies **Hooked** (2.5 s debuff, no effect of its
+  own; `Entry.source` = the hooker). With the node (Halberd out), the hooker's next
+  damaging hit on that target staggers ≥ 0.8 s and removes the mark
+  (`World._with_hook_stagger`; players via `PlayerState.remove_status`, a server event).
+- **Maelstrom** (`effect="ability_range"`, `applies_to="vortex"`, `amount` 2): the
+  server tests the ability's hitbox with `range` × amount (`AttackParams.range_copy`,
+  `World._with_range_upgrade` in `_on_attack_stepped`), so Vortex hits and pulls from
+  7 m. F3 still draws the base 3.5 m.
+- **Red Tide** (Bloodied capstone, `effect="ramp_on_hit"`, `applies_to="bloodied"`): each
+  step a melee attack/ability connects (`_on_player_attack_connected`) gives the attacker
+  a stack of **Bloodied** (+3% damage dealt per stack, max 8, 2.5 s, refreshed per hit).
+  Projectile hits don't add stacks.
+- Counters: `SUMMARY juggernaut crits= hook_staggers= brace_staggers= bloodied_stacks=`
+  (server, no smoke check).
+
 ## Status effects
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
@@ -414,9 +481,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   crowd-control debuffs, `StatusDef.is_crowd_control`: slow, root, stun, taunt).
   `StatusEffects.apply` checks `refuses()` itself, so players and enemies both respect
   it. Prediction is safe: the statuses are synced, and stagger, force and applied
-  statuses only ever come from the server. Juggernaut buffs waiting for their
-  abilities (nothing applies them yet): **Braced** (force immune, 3 s), **Steadfast**
-  (force + stagger, 4 s), **Unbowed** (all three, 4 s).
+  statuses only ever come from the server. Juggernaut buffs: **Braced** (force immune,
+  3 s; Halberd Brace, see "Juggernaut"), **Steadfast** (force + stagger, 4 s),
+  **Unbowed** (all three, 4 s).
 - **Taunt**: `forces_target=true` (debuff only, `validate()` checks), status
   **Taunted** (4 s; Challenger's Roar will apply it). On an enemy,
   `Enemy.apply_status` calls `brain.taunt(source)` (threat to the top) and

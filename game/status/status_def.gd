@@ -60,6 +60,16 @@ var force_immune := false
 var stagger_immune := false
 ## ...refuses crowd-control debuffs (is_crowd_control: slow, root, stun, taunt).
 var cc_immune := false
+## Brace: an attacker whose melee hit lands on the owner while it charges (it
+## was dashing, or within charge_window_ticks of the status starting) is
+## staggered this many ticks. 0 = none.
+var charge_stagger_ticks := 0
+var charge_window_ticks := 0
+## Iron Hide: per stack, fraction more damage taken per hostile within
+## crowd_radius meters, counting at most crowd_max (negative = less).
+var crowd_damage_taken := 0.0
+var crowd_radius := 0.0
+var crowd_max := 0
 
 
 func is_debuff() -> bool:
@@ -111,4 +121,9 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.force_immune = Tuning.get_optional(file, section, "force_immune", false)
 	s.stagger_immune = Tuning.get_optional(file, section, "stagger_immune", false)
 	s.cc_immune = Tuning.get_optional(file, section, "cc_immune", false)
+	s.charge_stagger_ticks = roundi(float(Tuning.get_optional(file, section, "charge_stagger", 0.0)) * tps)
+	s.charge_window_ticks = roundi(float(Tuning.get_optional(file, section, "charge_window", 0.0)) * tps)
+	s.crowd_damage_taken = Tuning.get_optional(file, section, "crowd_damage_taken", 0.0)
+	s.crowd_radius = Tuning.get_optional(file, section, "crowd_radius", 0.0)
+	s.crowd_max = Tuning.get_optional(file, section, "crowd_max", 0)
 	return s

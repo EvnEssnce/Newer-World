@@ -36,6 +36,11 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 		World.HIT_DEFEATED:
 			label.text = "-%d  Defeated!" % damage
 			label.modulate = Color(1.0, 0.3, 0.2)
+		World.HIT_CRITICAL:
+			# A crit (Headsman): bigger, orange.
+			label.text = "Critical! -%d" % damage
+			label.font_size = 68
+			label.modulate = Color(1.0, 0.55, 0.1)
 		_:
 			label.text = "-%d" % damage
 			label.modulate = Color(1.0, 0.85, 0.3)
@@ -49,4 +54,5 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 
 ## Whether a result should flash the target red.
 static func flashes(result: int) -> bool:
-	return result in [World.HIT_DAMAGED, World.HIT_DEFEATED, World.HIT_GUARD_BROKEN]
+	return result in [World.HIT_DAMAGED, World.HIT_CRITICAL, World.HIT_DEFEATED,
+			World.HIT_GUARD_BROKEN]
