@@ -5,12 +5,13 @@
 # -NoBot makes both windows normal players (for two people, or one person
 # switching windows).
 # -Party makes the bot party up: it accepts your invite (T), or invites you (Y to join).
-param([switch]$NoBot, [switch]$Party)
+# -Class picks your class (default fighter; e.g. juggernaut). The bot plays a Fighter.
+param([switch]$NoBot, [switch]$Party, [string]$Class = 'fighter')
 . "$PSScriptRoot\find_godot.ps1"
 
 Start-Process $Godot -WorkingDirectory $ProjectRoot -ArgumentList '--headless', '--', '--server'
 Start-Sleep -Seconds 1
 
 $secondArgs = if ($NoBot) { @('--connect') } elseif ($Party) { @('--bot', '--bot-party') } else { @('--bot') }
-Start-Process $GodotGui -WorkingDirectory $ProjectRoot -ArgumentList '--resolution', '960x540', '--position', '0,40', '--', '--connect'
+Start-Process $GodotGui -WorkingDirectory $ProjectRoot -ArgumentList '--resolution', '960x540', '--position', '0,40', '--', '--connect', "--class=$Class"
 Start-Process $GodotGui -WorkingDirectory $ProjectRoot -ArgumentList (@('--resolution', '960x540', '--position', '960,40', '--') + $secondArgs)

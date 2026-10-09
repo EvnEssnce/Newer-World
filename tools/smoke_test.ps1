@@ -5,7 +5,8 @@
 # other; players and Husks must be moved by force (knockback) and the Spear's
 # abilities used; projectiles thrown and hitting; no unexpected prediction
 # corrections.
-#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party]
+#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID]
+# -Class picks the bots' class (default fighter; e.g. juggernaut).
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
 # deaths and blocks between the bots, the server must report a party formed,
 # 0 bot-on-bot hits and at least one bot swing ignored because they're allies
@@ -14,7 +15,7 @@
 # 32 s = four of the bot's 8 s cycles (see World._bot_input): the default loadout
 # (Broadsword out), then the Spear, the Dual Axes and the Broadsword as the focus
 # weapon, so each weapon's abilities (knockback, statuses, bleed) get a turn.
-param([int]$Port = 24599, [int]$Seconds = 32, [switch]$Party)
+param([int]$Port = 24599, [int]$Seconds = 32, [switch]$Party, [string]$Class = 'fighter')
 . "$PSScriptRoot\find_godot.ps1"
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
@@ -65,7 +66,7 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0')
 
-$botFlags = @('--bot', '--verbose')
+$botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
 
 $server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
@@ -171,7 +172,7 @@ if (-not $statusSummary) {
 # Forced movement (Husk knockback on the bots, the bots' Low Sweep on Husks) and
 # the Spear: the bots equip it after the first cycle and use its abilities. In a party, no bot may move the other.
 $forceSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY force players=(\d+) pvp=(\d+) enemies=(\d+) launches=(\d+)'
-$spearSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon .*spear=(\d+)'
+$weaponSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon'
 if (-not $forceSummary) {
     Write-Host "FAIL force: no summary" -ForegroundColor Red
     $failed = $true
@@ -187,11 +188,18 @@ if (-not $forceSummary) {
 } else {
     Write-Host "PASS force: $($forceSummary.Line)" -ForegroundColor Green
 }
-if (-not $spearSummary -or [int]$spearSummary.Matches[0].Groups[1].Value -lt 1) {
-    Write-Host "FAIL spear: no Spear ability used ($((Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon').Line))" -ForegroundColor Red
+# Every weapon of the class gets a focus cycle, so each one's abilities must be
+# used at least once (weapons from data/class_<Class>.cfg).
+$classWeapons = [regex]::Matches(
+    (Select-String -Path (Join-Path $ProjectRoot "data\class_$Class.cfg") -Pattern '^weapons=').Line,
+    '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+$unused = @($classWeapons | Where-Object {
+    -not ($weaponSummary -and $weaponSummary.Line -match " $_=([1-9]\d*)") })
+if (-not $weaponSummary -or $unused.Count -gt 0) {
+    Write-Host "FAIL weapons: no ability used with $($unused -join ', ') ($($weaponSummary.Line))" -ForegroundColor Red
     $failed = $true
 } else {
-    Write-Host "PASS spear: $($spearSummary.Line)" -ForegroundColor Green
+    Write-Host "PASS weapons: $($weaponSummary.Line)" -ForegroundColor Green
 }
 # Ember, Wings and Rebirth: the bots gain Ember by fighting, use Wing abilities
 # (keeping 50 Ember for a Rebirth while one is ready), and their first death
