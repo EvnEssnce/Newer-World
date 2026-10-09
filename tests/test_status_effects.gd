@@ -289,7 +289,8 @@ func test_summary_lists_names_and_stacks() -> void:
 func test_real_status_file_is_valid() -> void:
 	var real := StatusDefs.from_tuning()
 	assert_eq(real.validate(), "")
-	for id in ["bleed", "slow", "root", "stun", "exposed", "damage_up", "damage_reduction", "bloodlust"]:
+	for id in ["bleed", "slow", "root", "stun", "exposed", "damage_up", "damage_reduction", "bloodlust",
+			"rampage", "shield_wall"]:
 		assert_true(real.index_of(id) >= 0, "has %s" % id)
 
 
@@ -303,3 +304,44 @@ func test_validate_catches_a_sim_effect_marked_damage() -> void:
 	bad.stops_movement = true
 	defs.add(bad)
 	assert_true(defs.validate().contains("bad"))
+
+
+func test_validate_attack_speed() -> void:
+	var fast := _def("fast", StatusDef.CATEGORY_BUFF, 60, 1)
+	fast.attack_speed = 1.25
+	defs.add(fast)
+	assert_true(defs.validate().contains("fast"), "attack speed is a sim effect")
+	fast.affects = StatusDef.AFFECTS_SIM
+	assert_eq(defs.validate(), "")
+	fast.attack_speed = 2.5
+	assert_true(defs.validate().contains("fast"), "at most 2 (one skipped tick per tick)")
+	fast.attack_speed = 0.8
+	assert_true(defs.validate().contains("fast"), "can't slow attacks")
+
+
+# --- Attack speed (Rampage) and Shield Wall's cover ---
+
+func test_attack_speed_needs_its_stamina_fraction() -> void:
+	var fast := _def("fast", StatusDef.CATEGORY_BUFF, 60, 1)
+	fast.affects = StatusDef.AFFECTS_SIM
+	fast.attack_speed = 1.25
+	fast.attack_speed_min_stamina = 0.5
+	var index := defs.add(fast)
+	assert_almost(effects.attack_speed(defs, 1.0), 1.0, 0.0001, "no status")
+	effects.apply(defs, index)
+	assert_almost(effects.attack_speed(defs, 1.0), 1.25, 0.0001)
+	assert_almost(effects.attack_speed(defs, 0.5), 1.25, 0.0001, "at the threshold")
+	assert_almost(effects.attack_speed(defs, 0.49), 1.0, 0.0001, "below it")
+
+
+func test_cover_box_comes_from_cover_statuses() -> void:
+	assert_eq(effects.cover_box(defs), Vector2.ZERO)
+	var wall := _def("wall", StatusDef.CATEGORY_BUFF, 60, 1)
+	wall.cover_depth = 2.5
+	wall.cover_width = 1.8
+	var index := defs.add(wall)
+	effects.apply(defs, bleed)
+	assert_eq(effects.cover_box(defs), Vector2.ZERO, "bleed doesn't cover")
+	effects.apply(defs, index)
+	assert_almost(effects.cover_box(defs).x, 2.5, 0.0001)
+	assert_almost(effects.cover_box(defs).y, 1.8, 0.0001)

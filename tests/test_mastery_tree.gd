@@ -149,6 +149,29 @@ func test_all_and_low_health_damage() -> void:
 	assert_almost(tree.damage_multiplier(nodes, "heavy", "", 0.4), 1.3)
 
 
+func test_execute_bonus_from_nodes() -> void:
+	assert_eq(tree.execute_bonus(PackedStringArray(["a_pas"])), Vector2.ZERO)
+	tree.get_node("b_big").effect = "execute_damage"
+	tree.get_node("b_big").amount = 0.6
+	tree.get_node("b_big").threshold = 0.3
+	assert_eq(tree.execute_bonus(PackedStringArray(["a_pas"])), Vector2.ZERO, "not allocated")
+	var bonus := tree.execute_bonus(PackedStringArray(["a_pas", "b_big"]))
+	assert_almost(bonus.x, 0.6)
+	assert_almost(bonus.y, 0.3)
+	# It's a target-health bonus, not part of the attacker's damage multiplier.
+	assert_almost(tree.damage_multiplier(PackedStringArray(["b_big"]), "light", "", 0.1), 1.0)
+
+
+func test_execute_multiplier_ramps_below_the_threshold() -> void:
+	var bonus := Vector2(0.6, 0.3)
+	assert_almost(MasteryTree.execute_multiplier(bonus, 1.0), 1.0, 0.001, "full health")
+	assert_almost(MasteryTree.execute_multiplier(bonus, 0.3), 1.0, 0.001, "at the threshold")
+	assert_almost(MasteryTree.execute_multiplier(bonus, 0.15), 1.3, 0.001, "halfway down")
+	assert_almost(MasteryTree.execute_multiplier(bonus, 0.0), 1.6, 0.001, "at 0 health")
+	assert_almost(MasteryTree.execute_multiplier(bonus, -0.5), 1.6, 0.001, "clamped")
+	assert_almost(MasteryTree.execute_multiplier(Vector2.ZERO, 0.0), 1.0, 0.001, "no bonus")
+
+
 func test_block_stamina_modifier() -> void:
 	tree.get_node("a_pas").effect = "block_stamina"
 	tree.get_node("a_pas").amount = -0.15

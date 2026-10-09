@@ -194,6 +194,7 @@ func bot_respec(weapon_id: String, cycle: int) -> void:
 			if tree.unlocked_abilities(fewer) == abilities:
 				nodes = fewer
 				break
+		nodes = _bot_learn_capstones(tree, nodes)
 	else:
 		var learned := _bot_learn_new_actives(tree, nodes, slots)
 		nodes = learned[0]
@@ -205,10 +206,11 @@ func bot_respec(weapon_id: String, cycle: int) -> void:
 	request_mastery(weapon_id, nodes, slots)
 
 
-## Test bot: slots each of its class's weapons' unlocked status abilities (those
-## with applies_status or self_status) first, then its projectile abilities,
-## then its other slotted ones, so the bot applies statuses and throws
-## projectiles. Keeps the allocation.
+## Test bot: slots each of its class's weapons' unlocked status abilities
+## first (self-buffs like Bloodlust, Rampage and Shield Wall, then those with
+## applies_status), keeping one slot for a projectile ability if the weapon has
+## one, then its other slotted ones, so the bot applies statuses, buffs itself
+## and throws projectiles. Keeps the allocation.
 func bot_slot_status_abilities(params: PlayerParams) -> void:
 	if local_build == null:
 		return
@@ -217,13 +219,20 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 		var nodes := local_build.get_allocated(weapon_id)
 		var unlocked := tree.unlocked_abilities(nodes)
 		var slots := PackedStringArray()
+		var throws := PackedStringArray()
 		for ability in params.weapon(weapon_id).abilities:
-			if (ability.id in unlocked and not ability.internal
-					and not (ability.applies_status.is_empty() and ability.self_status.is_empty())):
-				slots.append(ability.id)
-		for ability in params.weapon(weapon_id).abilities:
-			if ability.id in unlocked and not ability.projectile.is_empty() and not ability.id in slots:
-				slots.append(ability.id)
+			if ability.id in unlocked and not ability.internal and not ability.projectile.is_empty():
+				throws.append(ability.id)
+		var status_room := PlayerState.ABILITY_SLOTS - mini(throws.size(), 1)
+		for key in ["self_status", "applies_status"]:
+			for ability in params.weapon(weapon_id).abilities:
+				if (ability.id in unlocked and not ability.internal and not ability.id in slots
+						and not ability.id in throws and not str(ability.get(key)).is_empty()
+						and slots.size() < status_room):
+					slots.append(ability.id)
+		for ability_id in throws:
+			if not ability_id in slots:
+				slots.append(ability_id)
 		for ability_id in local_build.get_slots(weapon_id):
 			if not ability_id.is_empty() and not ability_id in slots:
 				slots.append(ability_id)
@@ -231,6 +240,29 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 		while slots.size() < PlayerState.ABILITY_SLOTS:
 			slots.append("")
 		request_mastery(weapon_id, nodes, slots)
+## Test bot: `nodes` plus each built capstone (a last-tier passive whose effect
+## isn't "none": the Spear's Hold the Line and Finishing Thrust) that fits, with
+## the lower nodes of its branch (in file order) it needs, so the smoke test
+## exercises them. A capstone that doesn't fit is left out.
+static func _bot_learn_capstones(tree: MasteryTree, nodes: PackedStringArray) -> PackedStringArray:
+	for id in tree.node_order:
+		var cap := tree.get_node(id)
+		if (cap.tier != tree.tier_count() or cap.kind == MasteryTree.KIND_ACTIVE
+				or cap.effect == "none" or id in nodes):
+			continue
+		var trial := nodes.duplicate()
+		for other_id in tree.node_order:
+			if tree.can_add(trial, id):
+				break
+			var other := tree.get_node(other_id)
+			if other.branch == cap.branch and other.tier < cap.tier and tree.can_add(trial, other_id):
+				trial.append(other_id)
+		if tree.can_add(trial, id):
+			trial.append(id)
+			nodes = trial
+	return nodes
+
+
 ## Test bot: `nodes` plus every active node the rules allow that isn't learned
 ## yet, and `slots` with each new ability put in from Q onward, so the bot also
 ## uses abilities that aren't in a tree's default build (Rising Cut). Returns

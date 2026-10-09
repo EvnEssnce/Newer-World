@@ -11,6 +11,72 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-09 (24): Fighter leftovers and enemy threat (Wave 3, two agents)
+
+Skewer/Perforate were playtested ("looks great") and pushed. Then two agents built in
+parallel worktrees, merged on the `wave3-merge` branch (5 keep-both conflicts:
+SUMMARY lines, status_effects.cfg, status validation, smoke `--tune`s, CLAUDE.md).
+
+**Fighter leftovers** (the Fighter's ability list in `design/classes.md` is now
+complete):
+- **Finishing Thrust** (Spear Impaler capstone, `effect="execute_damage"`): Spear hits
+  on targets below 30% health get up to +60% (linear: 0 at 30%, full at 0). Per target,
+  through `_strike_player`/`resolve_strike`/`strike_enemy`; projectiles capture it at
+  release.
+- **Hold the Line** (Lancer capstone, `effect="hold_the_line"`): while blocking with the
+  Spear out, a hostile player or enemy that *enters* the reach box in front is poked by
+  the internal `[ability_line_poke]` (40 damage, Slow 2 s, 2 s per-target cooldown),
+  through the normal strike path. Server only (`World._hold_the_line`). No poke
+  animation yet (only the hit label).
+- **Rampage** (Dual Axes, Berserker tier 2): self-buff, 8 s, light/heavy attacks 1.25×
+  faster while stamina ≥ 50% (`status_rampage`, `affects="sim"`). Only windup and
+  recovery ticks are skipped (`attack_speed_carry`, new `to_array()` index 35), never
+  hit windows or a projectile release.
+- **Shield Wall** (Broadsword, Vanguard tier 2): self-buff, 6 s; while blocking, an ally
+  in the 2.5 × 1.8 m box behind you is covered against hits from within your block arc
+  (melee, Husks, projectiles): you take it as a blocked hit (your stamina, can break
+  your guard), they see "Blocked". `MeleeHitbox.is_behind`.
+- All three new abilities are in the default allocation, not the default slots.
+- Bots now slot self-buffs first, then status abilities, keeping one slot for a
+  projectile (Broadsword: Shield Wall, Opening Strike, Whirlwind Edge; Dual Axes:
+  Bloodlust, Rampage, Boomerang Axe), and learn built capstones on even-cycle respecs.
+
+**Enemy threat** (`game/enemy/threat_table.gd`, `[threat]` in `data/enemy_husk.cfg`):
+- Target = highest threat; a challenger must beat the current target × 1.1. Threat from
+  damage (1/pt, every path via `Enemy.take_hit`), healing (0.5/pt to the healer, from
+  enemies already fighting the healed player), first entering aggro range (10, so the
+  nearest still gets aggro). 2%/s decay. Empty table or leash = walk home (leash wipes
+  the table). **Change:** when its target dies, a Husk now goes after whoever else has
+  threat instead of going home.
+- **Taunt** (`status_taunted`, 4 s, `forces_target`): the enemy targets the taunter and
+  the taunter's threat jumps to 1.1× the top. Nothing applies it in real data yet (the
+  smoke test tunes Skewer to apply it).
+- **Immunities** for the Juggernaut: status keys `force_immune`, `stagger_immune`,
+  `cc_immune` and buffs Braced (force, 3 s), Steadfast (force + stagger/stun, 4 s),
+  Unbowed (everything incl. slow/root/taunt, 4 s). `apply_stagger(ticks, params)` and
+  `is_force_immune(params)` now take params. Nothing applies them yet.
+
+Tests: 393 passed after the merge. Smoke after merge: default and `-Party` passed, 0
+corrections (counters: `target_switches` 6/14, `taunts` 1/0, `heal_threat` 0/15,
+`line_pokes` 2/3, `shield_wall_covers` 0 in this `-Party` run, 1 in the agent's). The
+smoke test also tunes Hold the Line's reach to 6 m so pokes happen.
+
+**Needs a hand playtest** (`run_local_test.ps1 -Party` for Shield Wall):
+- Rampage's feel (1.25×); remote players' attacks may look a little jumpy.
+- Shield Wall box size and the "Blocked" feedback, two players in a party vs Husks.
+- Hold the Line's 2.6 m reach and 2 s cooldown; Finishing Thrust on low Husks.
+- Two players on one Husk: sensible target switches, no flicker; Pyre Heart drawing aggro.
+
+**Decisions to confirm:** Unbowed also refuses taunts; Steadfast refuses stuns as well
+as staggers; heal threat goes in full to every enemy fighting the healed player; one
+wide swing hitting both a Shield Wall holder and the covered ally costs the holder
+stamina twice; Rampage stops mid-attack if stamina drops below half.
+
+**Next: the Juggernaut** (`design/classes.md`): class file, Halberd, Greataxe, War
+Hammer (6 abilities each, trees, placeholder models), Juggernaut Wings (Gale Burst,
+Meteor Drop, Challenger's Roar = taunt, Unbowed). Threat, taunt and the immunity
+statuses are ready for it. Plan: two agents (weapons split), one window each pair.
+
 ### 2026-10-09 (23): Spear Skewer and Perforate (Wave 3, first part)
 
 Session 22's work was playtested by the developer ("these all look great") and

@@ -55,13 +55,18 @@ func validate() -> String:
 			return "%s: category must be \"buff\" or \"debuff\"" % def.id
 		if not def.affects in [StatusDef.AFFECTS_SIM, StatusDef.AFFECTS_DAMAGE]:
 			return "%s: affects must be \"sim\" or \"damage\"" % def.id
-		var sim_effect := def.move_multiplier != 1.0 or def.stops_movement or def.stuns
+		var sim_effect := (def.move_multiplier != 1.0 or def.stops_movement or def.stuns
+				or def.attack_speed != 1.0)
 		if sim_effect and def.affects != StatusDef.AFFECTS_SIM:
 			return "%s: changes movement or actions, so affects must be \"sim\"" % def.id
 		if def.move_multiplier < 0.0:
 			return "%s: move_multiplier can't be negative" % def.id
 		if def.forces_target and not def.is_debuff():
 			return "%s: forces_target (a taunt) must be a debuff" % def.id
+		if def.attack_speed < 1.0 or def.attack_speed > 2.0:
+			return "%s: attack_speed must be between 1 and 2" % def.id
+		if def.cover_depth < 0.0 or def.cover_width < 0.0:
+			return "%s: cover_depth and cover_width can't be negative" % def.id
 		if not def.on_hit_status.is_empty() and index_of(def.on_hit_status) < 0:
 			return "%s: on_hit_status \"%s\" doesn't exist" % [def.id, def.on_hit_status]
 	return ""

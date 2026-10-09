@@ -34,6 +34,18 @@ static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 	return Vector2(local_x, local_z).distance_to(closest) <= target_radius
 
 
+## Shield Wall: true if `other_pos` stands inside the box straight behind a
+## player at `pos` facing `yaw`: from their center back `depth` meters,
+## `width` meters wide (centered), ignoring height. Pure XZ math.
+static func is_behind(pos: Vector3, yaw: float, other_pos: Vector3, depth: float,
+		width: float) -> bool:
+	var offset := other_pos - pos
+	# Same frame as hits(): forward is local -Z, so behind is local +Z.
+	var local_x := offset.x * cos(yaw) - offset.z * sin(yaw)
+	var local_z := offset.x * sin(yaw) + offset.z * cos(yaw)
+	return local_z >= 0.0 and local_z <= depth and absf(local_x) <= width / 2.0
+
+
 ## True if `other_pos` is within the `arc` (full width, radians) in front of a
 ## player at `pos` facing `yaw`. Used for blocking: only frontal hits are blocked.
 static func is_in_front(pos: Vector3, yaw: float, other_pos: Vector3, arc: float) -> bool:

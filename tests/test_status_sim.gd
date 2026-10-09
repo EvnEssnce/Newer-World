@@ -19,6 +19,7 @@ var root: int
 var stun: int
 var exposed: int
 var bloodlust: int
+var rampage: int
 
 
 func before_each() -> void:
@@ -53,6 +54,10 @@ func before_each() -> void:
 	defs.get_def(bloodlust).on_hit_status = "bleed"
 	defs.get_def(bloodlust).on_hit_stacks = 1
 	defs.get_def(bloodlust).consume_on_hit = true
+	rampage = defs.add(_def("rampage", 600, 1, StatusDef.CATEGORY_BUFF))
+	defs.get_def(rampage).affects = StatusDef.AFFECTS_SIM
+	defs.get_def(rampage).attack_speed = 1.5
+	defs.get_def(rampage).attack_speed_min_stamina = 0.5
 	params.statuses = defs
 
 	var weapon := params.default_weapon
@@ -276,3 +281,62 @@ func test_movement_with_statuses_is_deterministic() -> void:
 	var b: Array = _run([slow, bleed] as Array[int], 40)
 	assert_eq(a[0], b[0])
 	assert_eq(a[1], b[1])
+
+
+# --- Attack speed (Rampage) ---
+
+## Starts an attack (a tap = light, or an ability press) and steps until it
+## ends. Returns [steps it lasted after starting, the attack ticks seen inside
+## a hit window].
+func _time_attack(press: int) -> Array:
+	if press == ATTACK:
+		_step(ATTACK)
+	_step(press if press != ATTACK else 0)
+	assert_true(state.is_attacking(), "started")
+	var steps := 0
+	var active: Array[int] = []
+	while state.is_attacking() and steps < 100:
+		_step()
+		steps += 1
+		if state.attack_window(params) >= 0:
+			active.append(state.attack_tick)
+	return [steps, active]
+
+
+func test_rampage_shortens_light_attacks_but_keeps_every_active_tick() -> void:
+	# Light: windup 3, active 2, recovery 4 = 9 ticks.
+	var normal := _time_attack(ATTACK)
+	assert_eq(normal[0], 9)
+	assert_eq(normal[1], [3, 4] as Array[int])
+	state.statuses.apply(params.statuses, rampage)
+	var fast := _time_attack(ATTACK)
+	# 1.5x: half a tick gained per tick; whole ones skip windup/recovery ticks.
+	assert_eq(fast[0], 6, "9 ticks / 1.5")
+	assert_eq(fast[1], [3, 4] as Array[int], "both hit-window ticks still happen")
+	assert_almost(state.attack_speed_carry, 0.0, 0.0001, "reset when the attack ends")
+
+
+func test_rampage_needs_stamina_above_its_threshold() -> void:
+	state.statuses.apply(params.statuses, rampage)
+	state.stamina = params.max_stamina * 0.4
+	assert_eq(_time_attack(ATTACK)[0], 9, "below half stamina: normal speed")
+
+
+func test_rampage_does_not_speed_up_abilities() -> void:
+	state.statuses.apply(params.statuses, rampage)
+	assert_eq(_time_attack(E)[0], 9, "the opener ability (3 + 2 + 4) keeps its length")
+
+
+func test_attack_speed_carry_round_trips_through_to_array() -> void:
+	state.statuses.apply(params.statuses, rampage)
+	_step(ATTACK)
+	_step()
+	_step()
+	assert_almost(state.attack_speed_carry, 0.5, 0.0001)
+	var data := state.to_array()
+	assert_almost(data[35], 0.5, 0.0001, "appended at index 35")
+	var copy := PlayerState.from_array(data)
+	assert_almost(copy.attack_speed_carry, 0.5, 0.0001)
+	assert_true(copy.matches(state))
+	copy.attack_speed_carry = 0.0
+	assert_false(copy.matches(state), "a different carry is a mismatch")

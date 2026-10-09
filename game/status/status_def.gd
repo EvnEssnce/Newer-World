@@ -25,6 +25,10 @@ var move_multiplier := 1.0
 var stops_movement := false
 ## Stun: staggers for the whole duration.
 var stuns := false
+## Light and heavy attacks play this many times faster (1 = none; Rampage)...
+var attack_speed := 1.0
+## ...while stamina is at least this fraction of max.
+var attack_speed_min_stamina := 0.0
 
 # Damage effects (server)
 ## Per stack: fraction more damage taken / dealt.
@@ -40,6 +44,11 @@ var on_hit_status := ""
 var on_hit_stacks := 0
 ## Each such hit uses up one stack of this status.
 var consume_on_hit := false
+## Shield Wall: while the owner blocks, allies inside a box this deep (m,
+## straight behind them) and cover_width wide (m) are covered: hits on them
+## from within the owner's block arc are blocked by the owner. 0 = none.
+var cover_depth := 0.0
+var cover_width := 0.0
 
 # Server-decided effects
 ## Taunt: an enemy with it targets the status's source (players: no effect).
@@ -83,6 +92,10 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.move_multiplier = Tuning.get_optional(file, section, "move_multiplier", 1.0)
 	s.stops_movement = Tuning.get_optional(file, section, "stops_movement", false)
 	s.stuns = Tuning.get_optional(file, section, "stuns", false)
+	s.attack_speed = Tuning.get_optional(file, section, "attack_speed", 1.0)
+	s.attack_speed_min_stamina = Tuning.get_optional(file, section, "attack_speed_min_stamina", 0.0)
+	s.cover_depth = Tuning.get_optional(file, section, "cover_depth", 0.0)
+	s.cover_width = Tuning.get_optional(file, section, "cover_width", 0.0)
 	s.damage_taken = Tuning.get_optional(file, section, "damage_taken", 0.0)
 	s.damage_dealt = Tuning.get_optional(file, section, "damage_dealt", 0.0)
 	var per_second: float = Tuning.get_optional(file, section, "damage_per_second", 0.0)

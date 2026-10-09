@@ -77,6 +77,11 @@ var air_dodges_used := 0
 var attack_type := ATTACK_NONE
 ## Ticks since the current attack started, or -1 when not attacking.
 var attack_tick := -1
+## Attack speed buffs (Rampage, StatusEffects.attack_speed): the fraction of a
+## tick a light or heavy attack has gained so far (speed - 1 per tick). Each
+## whole tick gained skips one windup or recovery tick (never a hit-window or
+## projectile-release tick). Reset when the attack ends.
+var attack_speed_carry := 0.0
 ## Counts attacks and abilities started, so a new one is told apart from the
 ## last even when both are the same kind (hit tracking, interpolation).
 var attack_serial := 0
@@ -217,6 +222,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 			swap_tick = -1
 	if attack_tick >= 0:
 		attack_tick += 1
+		_step_attack_speed(params)
 		if attack_tick >= attack_params(params).total_ticks():
 			_end_attack()
 	if stagger_ticks > 0:
@@ -907,6 +913,33 @@ func _end_attack() -> void:
 	attack_tick = -1
 	attack_type = ATTACK_NONE
 	ability = -1
+	attack_speed_carry = 0.0
+
+
+## Attack speed buffs (Rampage): a light or heavy attack (not abilities) gains
+## (speed - 1) of a tick per tick while the buff's stamina condition holds; a
+## whole tick gained skips the tick just reached, but only if it's a windup or
+## recovery tick (not from the first hit window to the last, not a projectile
+## release), so every hit window tick still happens and only the phases around
+## them get shorter. Otherwise
+## the gain waits for the next such tick.
+func _step_attack_speed(params: PlayerParams) -> void:
+	if attack_type != ATTACK_LIGHT and attack_type != ATTACK_HEAVY:
+		return
+	var max_stamina := maxf(params.max_stamina, 0.001)
+	var speed := statuses.attack_speed(params.statuses, stamina / max_stamina)
+	if speed <= 1.0:
+		return
+	attack_speed_carry += speed - 1.0
+	if attack_speed_carry < 1.0:
+		return
+	var attack := attack_params(params)
+	var windup_or_recovery := (attack_tick < attack.windup_ticks
+			or attack_tick >= attack.recovery_start_tick())
+	if not windup_or_recovery or attack.releases_projectile_at(attack_tick):
+		return
+	attack_speed_carry -= 1.0
+	attack_tick += 1
 
 
 ## The yaw that faces a world-space XZ direction.
@@ -929,7 +962,7 @@ func to_array() -> Array:
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
 			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
 			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown,
-			ember, wing_set, _pack_ember_wings()]
+			ember, wing_set, _pack_ember_wings(), attack_speed_carry]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -969,6 +1002,7 @@ static func from_array(data: Array) -> PlayerState:
 	s.ember = data[32]
 	s.wing_set = data[33]
 	s._unpack_ember_wings(data[34])
+	s.attack_speed_carry = data[35]
 	return s
 
 
@@ -1014,6 +1048,7 @@ func matches(other: PlayerState) -> bool:
 			and air_dodges_used == other.air_dodges_used
 			and attack_type == other.attack_type
 			and attack_tick == other.attack_tick
+			and absf(attack_speed_carry - other.attack_speed_carry) < 0.001
 			and queued_attack == other.queued_attack
 			and queued_attack_ticks == other.queued_attack_ticks
 			and stagger_ticks == other.stagger_ticks

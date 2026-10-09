@@ -51,6 +51,9 @@ var results: Dictionary[int, bool] = {}
 # (Bloodlust), taken on its first damaging hit and shared by the rest.
 var attack: AttackParams
 var damage_scale := 1.0
+## The thrower's execute bonus at release (Finishing Thrust; see
+## MasteryTree.execute_multiplier), so a later weapon swap doesn't change it.
+var execute := Vector2.ZERO
 var on_hit: Array[Vector2i] = []
 var on_hit_taken := false
 

@@ -76,6 +76,21 @@ func test_no_shape_never_hits() -> void:
 	assert_false(_hits(Vector3.ZERO))
 
 
+func test_is_behind_shield_wall_box() -> void:
+	# Facing -Z (yaw 0): behind is +Z. Box 2.5 m deep, 1.8 m wide.
+	var at := Vector3(10.0, 0.0, 5.0)
+	assert_true(MeleeHitbox.is_behind(at, 0.0, at + Vector3(0.0, 0.0, 1.0), 2.5, 1.8))
+	assert_true(MeleeHitbox.is_behind(at, 0.0, at + Vector3(0.85, 0.0, 2.4), 2.5, 1.8), "corner")
+	assert_false(MeleeHitbox.is_behind(at, 0.0, at + Vector3(0.0, 0.0, -1.0), 2.5, 1.8), "in front")
+	assert_false(MeleeHitbox.is_behind(at, 0.0, at + Vector3(0.0, 0.0, 2.6), 2.5, 1.8), "too far back")
+	assert_false(MeleeHitbox.is_behind(at, 0.0, at + Vector3(1.0, 0.0, 1.0), 2.5, 1.8), "off to the side")
+	# Facing +X (yaw -90 deg): behind is -X.
+	var yaw := -PI / 2.0
+	assert_true(MeleeHitbox.is_behind(at, yaw, at + Vector3(-1.5, 0.0, 0.0), 2.5, 1.8))
+	assert_false(MeleeHitbox.is_behind(at, yaw, at + Vector3(1.5, 0.0, 0.0), 2.5, 1.8))
+	assert_false(MeleeHitbox.is_behind(at, yaw, at + Vector3(0.0, 0.0, 1.5), 2.5, 1.8))
+
+
 func test_vertical_overlap() -> void:
 	assert_true(_hits(Vector3(0.0, 1.5, -1.0)), "feet below the box top")
 	assert_false(_hits(Vector3(0.0, 2.5, -1.0)), "entirely above")

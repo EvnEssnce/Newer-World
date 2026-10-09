@@ -174,7 +174,7 @@ func test_ember_and_rebirth_fields_round_trip() -> void:
 	state.rebirth_charges = 2
 	state.wing_cooldowns[1] = 9
 	var data := state.to_array()
-	assert_eq(data.size(), 35)
+	assert_eq(data.size(), 36, "35 = attack_speed_carry")
 	assert_eq(data[32], 63.5)
 	assert_eq(data[33], "test")
 	# combat, rebirth left/cooldown/charges, Z and C slots, cooldowns without

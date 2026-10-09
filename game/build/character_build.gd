@@ -146,6 +146,21 @@ func damage_multiplier(weapon_id: String, attack_kind: String, ability_id: Strin
 	return result
 
 
+## The weapon tree's execute bonus (amount, threshold) for that weapon's
+## attacks (MasteryTree.execute_bonus / execute_multiplier); zero for a Wing
+## ability (weapon_id "") or without one.
+func execute_bonus(weapon_id: String) -> Vector2:
+	var tree: MasteryTree = trees.get(weapon_id)
+	return tree.execute_bonus(get_allocated(weapon_id)) if tree else Vector2.ZERO
+
+
+## The allocated passive/upgrade node with this effect in a weapon's tree
+## (Hold the Line), or null.
+func weapon_effect(weapon_id: String, effect: String) -> MasteryTree.MasteryNode:
+	var tree: MasteryTree = trees.get(weapon_id)
+	return tree.effect_node(get_allocated(weapon_id), effect) if tree else null
+
+
 func block_stamina_multiplier(weapon_id: String) -> float:
 	var tree: MasteryTree = trees.get(weapon_id)
 	var result := tree.block_stamina_multiplier(get_allocated(weapon_id)) if tree else 1.0
