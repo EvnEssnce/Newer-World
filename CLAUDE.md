@@ -79,6 +79,7 @@ game/
   enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
   enemy/threat_table.gd      Threat per player, target choice, taunts. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
+  enemy/damage_meter.gd      Damage/DPS of one fight (the training dummy's readout). Unit tested.
   items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
   items/item.gd              One rolled item (plain data, to_dict/from_dict).
   items/loot_roller.gd       Rolls loot tables and items. Pure logic, unit tested.
@@ -93,7 +94,7 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code).
-data/                Tuning files: network, movement, combat, camera, enemy_husk,
+data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer), class_<id> (fighter, juggernaut),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
@@ -620,6 +621,14 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
+- **Training dummy** (`data/enemy_dummy.cfg`, marker `TrainingDummy` at z = +18, the far
+  side from the Husks): `[ai] stationary=true` makes `EnemyBrain.step` only count down
+  staggers (never moves, turns, swings or keeps threat); hits, statuses and forced movement
+  still work. `[stats] reset_time` (any enemy; 0 for the Husk): that long without damage
+  → `Enemy._reset` heals to full and puts it back home. Clients show the local player's
+  damage on it (`DamageMeter`, fed by `Enemy.record_my_damage` from `_receive_hit`):
+  "You: N dmg  N DPS  N s", a pause of `reset_time` ends the fight. Bots ignore it
+  (`World._nearest_enemy`). Iron Hide counts it as a hostile nearby.
 - Abilities hit enemies through the same path (`max_targets` and modifiers apply); a
   Husk swing into a Riposte is parried like a player's.
 - Forced movement works on enemies too (server only, `Enemy.start_force`, same

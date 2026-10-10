@@ -11,6 +11,30 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-10 (27): Training dummy (item 1 of session 26's list)
+
+- `data/enemy_dummy.cfg`: 6,000 HP, `[ai] stationary=true` (new key, `false` in
+  `enemy_husk.cfg`): `EnemyBrain._stand` only counts down staggers; no moving, turning,
+  swinging or threat. Hits, statuses, knockback/pull/launch all work on it.
+- `[stats] reset_time` (new key for every enemy; Husk 0 = off, dummy 4 s): no damage for
+  that long → full health and back to its spot (`Enemy._reset`; statuses run out on
+  their own). Dies like any enemy (3 s respawn).
+- Marker `TrainingDummy` at (0, 0, 18), facing the centre. Straw-colored, no club.
+- DPS readout above it, **per viewer** (your own damage, incl. bleed ticks):
+  "You: 4210 dmg  843 DPS  5.0 s", "(done)" after a 4 s pause; the next hit starts a new
+  fight. `DamageMeter` (pure, `tests/test_damage_meter.gd`), fed client-side from hit
+  events (`World._receive_hit` → `Enemy.record_my_damage`): no wire changes.
+- Bots skip it (`World._nearest_enemy`), so smoke checks are unaffected (`SUMMARY enemies
+  count=` is now 3).
+- Tests: `test_damage_meter.gd` (6), two stationary cases in `test_enemy_brain.gd`.
+- **Not run**: this session ran in a Linux cloud container without Godot. Before
+  committing more on top: run `<godot_console.exe> --headless --import` once (new
+  `class_name DamageMeter`), then `run_tests.ps1`, `smoke_test.ps1`, `smoke_test.ps1 -Party`,
+  and walk to the dummy (z = +18, past Crate3) to check the readout.
+
+Next: item 2, **Juggernaut weight** (hyper armor on Greataxe/War Hammer heavies and big
+abilities).
+
 ### 2026-10-09 (26): Wave 3 playtest feedback (plan; nothing built yet)
 
 The developer playtested sessions 24–25 (`PLAYTEST.md` has the ticked list and notes).
@@ -21,7 +45,7 @@ seen: Breaker breaking a guard. Every design call in session 24/25 is **kept**, 
 Hooked (below). Defiant stays Roar-only.
 
 To do (in this order; the dummy first, it helps test the rest):
-1. **Training dummy**: a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
+1. **Done (session 27).** **Training dummy**: a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
    or attacks, respawns/heals after a few seconds idle; one marker on the far side of
    the test map from the Husk spawns. A DPS readout above it would help tuning.
 2. **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light

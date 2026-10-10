@@ -1,5 +1,6 @@
 extends TestCase
-## EnemyBrain: aggro, chase, swing, cooldown, stagger, leash and wander.
+## EnemyBrain: aggro, chase, swing, cooldown, stagger, leash, wander, and a
+## stationary enemy (the training dummy).
 ## Fixed params, not data/enemy_husk.cfg. The camp is at the origin.
 
 const DELTA := 1.0 / 60.0
@@ -207,3 +208,26 @@ func test_wanders_near_its_camp() -> void:
 		farthest = maxf(farthest, pos.length())
 	assert_true(farthest > 0.5, "it actually moves")
 	assert_true(farthest <= params.wander_radius + 0.1, "stays within wander_radius")
+
+
+func test_stationary_never_moves_turns_or_swings() -> void:
+	params.stationary = true
+	brain.add_threat(1, 100.0, params)
+	for i in 120:
+		var velocity := _step(HOME, {1: Vector3(1, 0, 1)})
+		assert_true(velocity.is_zero_approx(), "never walks")
+	assert_eq(brain.mode, EnemyBrain.Mode.IDLE)
+	assert_eq(brain.attack_tick, -1, "never swings at a player in range")
+	assert_eq(brain.yaw, 0.0, "never turns")
+	assert_eq(brain.target_id, 0)
+	assert_false(brain.threat.has(1), "keeps no threat")
+
+
+func test_stationary_is_still_staggered() -> void:
+	params.stationary = true
+	brain.stagger(3)
+	_step(HOME, {})
+	_step(HOME, {})
+	assert_eq(brain.mode, EnemyBrain.Mode.STAGGERED)
+	_step(HOME, {})
+	assert_eq(brain.mode, EnemyBrain.Mode.IDLE)

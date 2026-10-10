@@ -15,6 +15,8 @@ const MAX_SNAPSHOTS := 30
 
 # Placeholder visuals (cosmetic only; replaced by real models later).
 const BASE_COLOR := Color(0.42, 0.3, 0.48)
+## A stationary enemy (the training dummy): straw-colored, no club.
+const DUMMY_COLOR := Color(0.78, 0.66, 0.4)
 ## The windup telegraph: the body glows toward this color as the swing winds up.
 const TELEGRAPH_COLOR := Color(1.0, 0.15, 0.05)
 const HIT_COLOR := Color(1.0, 1.0, 1.0)
@@ -47,6 +49,8 @@ var force := ForcedMotion.new()
 ## Server: the player whose knockback is moving it and who has the Tempest
 ## Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
+## Ticks since it last took damage, up to params.reset_ticks (see _reset).
+var _ticks_since_damage := 0
 var _rng := RandomNumberGenerator.new()
 var _gravity := 0.0
 
@@ -65,6 +69,9 @@ var _status_text := ""
 var _material: StandardMaterial3D
 var _hitbox_material: StandardMaterial3D
 var _hit_flash_until := 0
+## The local player's damage on it (the dummy's readout; params.reset_ticks > 0).
+var _meter: DamageMeter
+var _meter_text := ""
 
 @onready var _model: Node3D = $Model
 @onready var _body_pivot: Node3D = $Model/BodyPivot
@@ -89,6 +96,9 @@ func _ready() -> void:
 	_hitbox_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_hitbox_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hitbox_debug.material_override = _hitbox_material
+	_club_pivot.visible = not params.stationary
+	if params.reset_ticks > 0:
+		_meter = DamageMeter.new(params.reset_ticks / float(Engine.physics_ticks_per_second))
 	_update_label()
 
 
@@ -111,6 +121,10 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	move_and_slide()
 	if brain.arrived_home:
 		health = params.max_health
+	if params.reset_ticks > 0 and _ticks_since_damage < params.reset_ticks:
+		_ticks_since_damage += 1
+		if _ticks_since_damage == params.reset_ticks:
+			_reset()
 	if brain.is_attack_active(params):
 		attack_stepped.emit(self)
 
@@ -120,6 +134,7 @@ func server_step(targets: Dictionary, delta: float) -> void:
 ## (a stagger_immune status). Returns true if it killed the enemy.
 func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
 	health = maxf(0.0, health - damage)
+	_ticks_since_damage = 0
 	if health <= 0.0:
 		dead = true
 		velocity = Vector3.ZERO
@@ -174,6 +189,17 @@ func respawn() -> void:
 	brain.target_switches = switches
 	brain.wander_point = home
 	respawn_at_tick = -1
+	_ticks_since_damage = 0
+
+
+## Server: params.reset_ticks without taking damage (the training dummy):
+## back to full health and its spot. Statuses run out on their own.
+func _reset() -> void:
+	health = params.max_health
+	global_position = home
+	velocity = Vector3.ZERO
+	force.stop()
+	wall_stun_source = 0
 
 
 # --- Forced movement (server) ---
@@ -244,6 +270,20 @@ func interpolate(render_time: float) -> void:
 	global_position = pos
 	dead = from[5]
 	_show(yaw, from[3] == EnemyBrain.Mode.STAGGERED, attack_tick)
+	_update_meter()
+
+
+## Client: the DPS line, refreshed every frame while a fight runs (its length
+## grows), only rebuilding the label when the text changes.
+func _update_meter() -> void:
+	if _meter == null or not _meter.has_fight():
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	var text: String = "You: %d dmg  %d DPS  %.1f s%s" % [roundi(_meter.total), roundi(_meter.dps(now)),
+			_meter.duration(now), "" if _meter.is_active(now) else "  (done)"]
+	if text != _meter_text:
+		_meter_text = text
+		_update_label()
 
 
 func set_health(value: float) -> void:
@@ -251,6 +291,14 @@ func set_health(value: float) -> void:
 		return
 	health = value
 	_update_label()
+
+
+## Client: the local player dealt `damage` to it (result: World.HIT_*).
+## Counted on the DPS readout, if it has one.
+func record_my_damage(damage: float, result: int) -> void:
+	if _meter and result in [World.HIT_DAMAGED, World.HIT_CRITICAL, World.HIT_DEFEATED,
+			World.HIT_STATUS_DAMAGE]:
+		_meter.add(damage, Time.get_ticks_msec() / 1000.0)
 
 
 func show_hit(damage: float, result: int) -> void:
@@ -274,6 +322,8 @@ func _update_label() -> void:
 	_name_label.text = "%s\n%s" % [kind.capitalize(), status]
 	if not _status_text.is_empty():
 		_name_label.text += "\n" + _status_text
+	if not _meter_text.is_empty():
+		_name_label.text += "\n" + _meter_text
 
 
 ## attack_tick is fractional for smooth swings; -1 when not swinging.
@@ -315,4 +365,5 @@ func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
 	elif Time.get_ticks_msec() < _hit_flash_until:
 		_material.albedo_color = HIT_COLOR
 	else:
-		_material.albedo_color = BASE_COLOR.lerp(TELEGRAPH_COLOR, telegraph)
+		var base: Color = DUMMY_COLOR if params.stationary else BASE_COLOR
+		_material.albedo_color = base.lerp(TELEGRAPH_COLOR, telegraph)

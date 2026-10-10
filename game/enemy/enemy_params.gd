@@ -11,6 +11,9 @@ var return_speed := 0.0
 var turn_speed := 0.0
 var stagger_multiplier := 0.0
 var respawn_ticks := 0
+## Ticks without taking damage before it heals to full and goes back to its
+## spot (0 = never). Also ends a fight on its DPS readout.
+var reset_ticks := 0
 
 var aggro_range := 0.0
 var leash_range := 0.0
@@ -18,6 +21,9 @@ var attack_range := 0.0
 var attack_cooldown_ticks := 0
 var wander_radius := 0.0
 var wander_pause_ticks := 0
+## Never moves, turns or swings (training dummy); hits still stagger it and
+## forces still move it.
+var stationary := false
 
 # Threat ([threat]; see ThreatTable)
 ## Per point of damage it takes from a player (hits, projectiles, damage over time).
@@ -53,6 +59,7 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.turn_speed = deg_to_rad(Tuning.get_value(file, "stats", "turn_speed"))
 	p.stagger_multiplier = Tuning.get_value(file, "stats", "stagger_multiplier")
 	p.respawn_ticks = roundi(Tuning.get_value(file, "stats", "respawn_time") * tps)
+	p.reset_ticks = roundi(Tuning.get_value(file, "stats", "reset_time") * tps)
 
 	p.aggro_range = Tuning.get_value(file, "ai", "aggro_range")
 	p.leash_range = Tuning.get_value(file, "ai", "leash_range")
@@ -60,6 +67,7 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.attack_cooldown_ticks = roundi(Tuning.get_value(file, "ai", "attack_cooldown") * tps)
 	p.wander_radius = Tuning.get_value(file, "ai", "wander_radius")
 	p.wander_pause_ticks = roundi(Tuning.get_value(file, "ai", "wander_pause") * tps)
+	p.stationary = Tuning.get_value(file, "ai", "stationary")
 
 	p.threat_per_damage = Tuning.get_value(file, "threat", "per_damage")
 	p.threat_per_heal = Tuning.get_value(file, "threat", "per_heal")

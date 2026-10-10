@@ -11,6 +11,9 @@ extends RefCounted
 ## (ThreatTable.pick_target); a swing keeps its target. An empty table (the
 ## target died or left, nobody else has threat) sends it home, like leashing;
 ## walking home wipes the table and ignores new threat until it's back.
+##
+## A stationary enemy (params.stationary: the training dummy) never moves,
+## turns or swings: it only goes through staggers.
 
 enum Mode { IDLE, CHASE, ATTACK, STAGGERED, RETURN }
 
@@ -41,6 +44,8 @@ var target_switches := 0
 func step(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParams,
 		delta: float, rng: RandomNumberGenerator) -> Vector2:
 	arrived_home = false
+	if params.stationary:
+		return _stand()
 	cooldown_ticks = maxi(0, cooldown_ticks - 1)
 	if mode != Mode.RETURN:
 		_update_threat(pos, targets, params)
@@ -131,6 +136,20 @@ func _set_target(peer_id: int) -> void:
 	if peer_id != target_id and peer_id != 0 and target_id != 0:
 		target_switches += 1
 	target_id = peer_id
+
+
+## A stationary enemy's step: staggers count down, nothing else happens. It
+## keeps no threat, so it never counts as fighting anyone (heals draw no aggro).
+func _stand() -> Vector2:
+	target_id = 0
+	threat.clear()
+	if mode == Mode.STAGGERED:
+		stagger_ticks -= 1
+		if stagger_ticks <= 0:
+			mode = Mode.IDLE
+	else:
+		mode = Mode.IDLE
+	return Vector2.ZERO
 
 
 func _wander(pos: Vector3, home: Vector3, params: EnemyParams, delta: float,

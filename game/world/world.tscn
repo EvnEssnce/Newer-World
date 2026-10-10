@@ -91,3 +91,7 @@ metadata/kind = "husk"
 [node name="HuskCamp2" type="Marker3D" parent="EnemySpawns"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, -15.5)
 metadata/kind = "husk"
+
+[node name="TrainingDummy" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 18)
+metadata/kind = "dummy"

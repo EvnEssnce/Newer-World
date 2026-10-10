@@ -1681,12 +1681,13 @@ func _bot_sync_weapons(cycle: int) -> void:
 		_bot_next_weapon_msec = now + 500
 
 
+## Skips the training dummy (stationary), so bots fight Husks and each other.
 func _nearest_enemy(max_distance: float) -> Enemy:
 	var nearest: Enemy
 	var best := max_distance
 	for enemy: Enemy in _enemies.get_children():
 		var distance := enemy.global_position.distance_to(_local_player.global_position)
-		if not enemy.dead and distance < best:
+		if not enemy.dead and not enemy.params.stationary and distance < best:
 			best = distance
 			nearest = enemy
 	return nearest
@@ -1770,6 +1771,8 @@ func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) 
 	var target := container.get_node_or_null(str(target_id))
 	if target:
 		target.show_hit(damage, result)
+		if target_id < 0 and attacker_id == my_id:
+			(target as Enemy).record_my_damage(damage, result)
 
 
 func _spawn_client_player(peer_id: int, local: bool, pos: Vector3) -> Player:
