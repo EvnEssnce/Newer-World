@@ -479,6 +479,8 @@ func _target_limit_reached(attacker: Player, attack: AttackParams) -> bool:
 
 ## Server: an enemy's swing is live this tick.
 func _on_enemy_attack_stepped(enemy: Enemy) -> void:
+	if enemy.swing_misses:
+		return
 	var damage_scale := enemy.statuses.damage_dealt_multiplier(enemy.status_defs)
 	for target: Player in _players.get_children():
 		var result := _strike_player(enemy.enemy_id, enemy.global_position, enemy.brain.yaw,
@@ -2097,6 +2099,7 @@ func _update_status_hud() -> void:
 		if def:
 			entries.append([def.display_name, e.stacks, e.ticks_left / tps, def.is_debuff()])
 	_hud.set_statuses(entries)
+	_hud.set_blind(_local_player.state.statuses.blind_amount(defs))
 
 
 ## Debug: with --screenshot-dir=PATH, saves this game window's image every 0.25 s

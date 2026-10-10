@@ -50,6 +50,10 @@ var next_hit_crits := false
 ## Marked: the applier's next melee hit on the owner deals this fraction more
 ## damage and uses the status up. 0 = none.
 var marked_bonus := 0.0
+## Blind (0..1): a player sees a white haze this strong over the screen
+## (fading out at the end); an enemy's swings miss with this chance (Dazzled,
+## Flare). 0 = none.
+var blind := 0.0
 ## Shield Wall: while the owner blocks, allies inside a box this deep (m,
 ## straight behind them) and cover_width wide (m) are covered: hits on them
 ## from within the owner's block arc are blocked by the owner. 0 = none.
@@ -125,6 +129,7 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.consume_on_hit = Tuning.get_optional(file, section, "consume_on_hit", false)
 	s.next_hit_crits = Tuning.get_optional(file, section, "next_hit_crits", false)
 	s.marked_bonus = Tuning.get_optional(file, section, "marked_bonus", 0.0)
+	s.blind = clampf(Tuning.get_optional(file, section, "blind", 0.0), 0.0, 1.0)
 	s.forces_target = Tuning.get_optional(file, section, "forces_target", false)
 	s.force_immune = Tuning.get_optional(file, section, "force_immune", false)
 	s.stagger_immune = Tuning.get_optional(file, section, "stagger_immune", false)

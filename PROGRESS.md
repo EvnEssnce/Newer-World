@@ -238,7 +238,8 @@ it heal and stand back up 4 s after you stop? It drops nothing.
 - Talon Storm (Tempest capstone): a long combo of lights should visibly speed up.
 - Knives: light/heavy throws, Fan of Knives, Pinning Knife slow, Venom Coat poison
   ticks; Marked Blade then a Talon hit (+50%); Endless Flurry (every 5th throw fans).
-- Wings: Ashstep distance and feel; Plumage Flash's cone and Dazzled.
+- Wings: Ashstep distance and feel; Plumage Flash's cone and Dazzled. With `-NoBot`, Flash the
+  other window: its screen should go 60% white and clear over the last ~1 s.
 - Models: claws on the fists, knives in the hands (no throw animation beyond the swing).
 
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
@@ -264,11 +265,9 @@ Loot and gear:
   Rage (stamina) are off until stamina is synced.
 - The bot never equips weapons (it picks weapons per cycle in the K panel).
 
-Assassin (session 32):
-- Backstab = from the rear 180°, **or any hit on an enemy that isn't targeting you**
-  (idle or fighting someone else): in a party the non-tank backstabs constantly.
-- The Predator capstone crits backstabs instead of "hits from behind ignore block"
-  (blocks only cover the front 120°, so that was already true).
+Assassin (session 32; the developer confirmed: unaware enemies count as backstabs,
+the Predator capstone crits backstabs, and Plumage Flash must partly blind players in
+PvP: built in session 33 as `blind` on Dazzled):
 - Feint reads blocks, guard breaks and dodges (players) or an enemy mid-swing (Husks
   never block or dodge); Primed lasts 4 s and is used by the next hit even if that hit
   is blocked.
@@ -276,8 +275,9 @@ Assassin (session 32):
   rides on Talon hits (it's "your next 5 hits", like Bloodlust).
 - Festering Wounds cuts healing on players only (Husks don't heal from anything it
   covers); Endless Flurry's free fan uses no cooldown.
-- Plumage Flash: Dazzled is −25% damage dealt (the design's "aim and turn speed
-  reduced" has no equivalent on enemies yet) plus a Slow.
+- Plumage Flash: Dazzled is −25% damage dealt plus `blind` 0.6: blinded players see a
+  60% white haze (fading over the last 30%), a blinded Husk's swings miss 60% of the
+  time; plus a Slow. Turn speed isn't reduced.
 - Both Wing capstones and two Wing abilities wait for decoys/stealth (`effect="none"`).
 
 Open questions for coming steps:

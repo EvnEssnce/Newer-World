@@ -44,6 +44,8 @@ const PACKED_FIELDS := 4
 ## Fastest attack speed any statuses give (PlayerState skips at most one tick
 ## per tick).
 const MAX_ATTACK_SPEED := 2.0
+## A blind fades out over this last fraction of its duration.
+const BLIND_FADE := 0.3
 
 var entries: Array[Entry] = []
 ## Set by tick(): the source of the last status that dealt damage this tick.
@@ -246,6 +248,19 @@ func attack_speed(defs: StatusDefs, stamina_fraction: float) -> float:
 		if def and stamina_fraction >= def.attack_speed_min_stamina:
 			result = maxf(result, 1.0 + (def.attack_speed - 1.0) * e.stacks)
 	return minf(result, MAX_ATTACK_SPEED)
+
+
+## How blind the owner is (0..1): the strongest blind status, fading linearly
+## over the last BLIND_FADE of its duration. A player's screen haze; an enemy's
+## chance to miss a swing.
+func blind_amount(defs: StatusDefs) -> float:
+	var result := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.blind > 0.0:
+			var fade := maxf(1.0, def.duration_ticks * BLIND_FADE)
+			result = maxf(result, def.blind * minf(1.0, e.ticks_left / fade))
+	return result
 
 
 ## The index of a mark (marked_bonus > 0: Marked) that source_id applied, or -1.

@@ -40,6 +40,8 @@ var _wing_costs: Array[Label] = []
 var _ember_bar: ProgressBar
 var _ember_marker: ColorRect
 var _ember_label: Label
+## Blind statuses (Dazzled): a white haze over the whole screen.
+var _blind_overlay: ColorRect
 
 
 func _ready() -> void:
@@ -47,6 +49,12 @@ func _ready() -> void:
 	_build_wing_bar()
 	_build_ember_bar()
 	_build_status_row()
+	_blind_overlay = ColorRect.new()
+	_blind_overlay.color = Color(1.0, 0.97, 0.9, 0.0)
+	_blind_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_blind_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_blind_overlay)
+	move_child(_blind_overlay, 0)
 
 
 func set_info(text: String) -> void:
@@ -125,6 +133,13 @@ func set_ember(value: float, cap: float, threshold: float, rebirth_text: String,
 	_ember_marker.anchor_right = _ember_marker.anchor_left
 	_ember_marker.color = EMBER_MARKER if rebirth_ready else Color(EMBER_MARKER, 0.4)
 	_ember_label.text = "Ember %d   %s" % [floori(value), rebirth_text]
+
+
+## How blind the local player is (0..1, StatusEffects.blind_amount): the haze's
+## opacity. Drawn under the HUD's own widgets, so bars stay readable.
+func set_blind(amount: float) -> void:
+	_blind_overlay.color.a = clampf(amount, 0.0, 1.0)
+	_blind_overlay.visible = amount > 0.0
 
 
 ## The local player's statuses, one chip each: [name, stacks, seconds left,

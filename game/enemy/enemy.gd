@@ -44,6 +44,8 @@ var brain := EnemyBrain.new()
 var respawn_at_tick := -1
 ## Players the current swing has already been resolved against (see Player).
 var attack_results: Dictionary[int, bool] = {}
+## Server: the current swing misses (decided as it starts, from blind statuses).
+var swing_misses := false
 ## Peer ids of the players who damaged it since it (re)spawned or healed at
 ## home: they each get a loot roll when it dies.
 var damaged_by: Dictionary[int, bool] = {}
@@ -116,6 +118,8 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	var desired := brain.step(global_position, home, targets, params, delta, _rng)
 	if brain.attack_tick == 0:
 		attack_results.clear()
+		# Blinded (Dazzled, Flare): this swing may miss everyone.
+		swing_misses = randf() < statuses.blind_amount(status_defs)
 	desired = _apply_status_movement(desired)
 	velocity.x = desired.x
 	velocity.z = desired.y

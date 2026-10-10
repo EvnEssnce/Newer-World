@@ -9,6 +9,7 @@ var rampage: int
 var storm: int
 var primed: int
 var marked: int
+var dazzled: int
 
 
 func before_each() -> void:
@@ -56,6 +57,11 @@ func before_each() -> void:
 	d.duration_ticks = 360
 	d.marked_bonus = 0.5
 	marked = defs.add(d)
+	d = StatusDef.new()
+	d.id = "dazzled"
+	d.duration_ticks = 100
+	d.blind = 0.6
+	dazzled = defs.add(d)
 
 
 # --- Backstabs (Predator) ---
@@ -138,6 +144,22 @@ func test_feint_reads_into_primed() -> void:
 	var feint := AttackParams.new()
 	feint.read_status = "primed"
 	assert_eq(defs.index_of(feint.read_status), primed)
+
+
+# --- Blind (Plumage Flash's Dazzled) ---
+
+func test_blind_holds_then_fades_out() -> void:
+	var s := StatusEffects.new()
+	assert_almost(s.blind_amount(defs), 0.0, 0.001, "none")
+	s.apply(defs, dazzled)
+	assert_almost(s.blind_amount(defs), 0.6, 0.001, "full strength")
+	for i in 85:
+		s.tick(defs)
+	# 15 of 100 ticks left: halfway through the last 30.
+	assert_almost(s.blind_amount(defs), 0.3)
+	for i in 15:
+		s.tick(defs)
+	assert_almost(s.blind_amount(defs), 0.0, 0.001, "gone")
 
 
 # --- Data ---
