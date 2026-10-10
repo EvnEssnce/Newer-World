@@ -174,13 +174,14 @@ func test_ember_and_rebirth_fields_round_trip() -> void:
 	state.rebirth_charges = 2
 	state.wing_cooldowns[1] = 9
 	state.equip_left = 4
+	state.free_move_mask = 2
 	var data := state.to_array()
 	assert_eq(data.size(), 36, "35 = attack_speed_carry")
 	assert_eq(data[32], 63.5)
 	assert_eq(data[33], "test")
 	# combat, rebirth left/cooldown/charges, Z and C slots, equip time left,
-	# cooldowns without trailing zeros.
-	assert_eq(data[34], PackedInt32Array([12, -1, 40, 2, 0, 1, 4, 0, 9]))
+	# free-move mask, cooldowns without trailing zeros.
+	assert_eq(data[34], PackedInt32Array([12, -1, 40, 2, 0, 1, 4, 2, 0, 9]))
 	var copy := PlayerState.from_array(data)
 	assert_true(copy.matches(state))
 	assert_eq(copy.wing_cooldowns.size(), state.wing_cooldowns.size())

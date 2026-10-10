@@ -98,8 +98,10 @@ func server_fire_attack(player: Player, attack: AttackParams) -> void:
 	var p := ProjectileParams.get_kind(attack.projectile) if attack else null
 	if p == null:
 		return
+	# Longbow / Crossbow capstones: [damage factor, pierce at least].
+	var mods := world.release_mods(player, attack)
 	var scale := (player.damage_multiplier(attack)
-			* player.state.statuses.damage_dealt_multiplier(player.params.statuses))
+			* player.state.statuses.damage_dealt_multiplier(player.params.statuses) * mods.x)
 	var yaw := player.state.yaw
 	var from := Projectile.release_point(p, player.global_position, yaw)
 	for i in attack.projectile_count:
@@ -110,6 +112,7 @@ func server_fire_attack(player: Player, attack: AttackParams) -> void:
 		proj.owner_id = player.peer_id
 		proj.attack = attack
 		proj.damage_scale = scale
+		proj.pierce_left = maxi(proj.pierce_left, roundi(mods.y))
 		proj.execute = player.execute_bonus()
 		_active.append(proj)
 		_fired += 1

@@ -60,7 +60,7 @@ var last_heal_source := 0
 ## duration_ticks (-1 = the status's own duration). Returns false if the index
 ## isn't a status or the owner is immune to it (refuses).
 func apply(defs: StatusDefs, index: int, stacks: int = 1, duration_ticks: int = -1,
-		source: int = 0) -> bool:
+		source: int = 0, max_stacks: int = 0) -> bool:
 	var def := defs.get_def(index)
 	if def == null or stacks <= 0 or refuses(defs, index):
 		return false
@@ -71,7 +71,7 @@ func apply(defs: StatusDefs, index: int, stacks: int = 1, duration_ticks: int = 
 		e.status = index
 		e.stacks = 0
 		entries.append(e)
-	e.stacks = mini(def.max_stacks, e.stacks + stacks)
+	e.stacks = mini(max_stacks if max_stacks > 0 else def.max_stacks, e.stacks + stacks)
 	e.ticks_left = maxi(e.ticks_left, duration)
 	e.source = source
 	return true
@@ -97,6 +97,12 @@ func tick(defs: StatusDefs) -> float:
 			last_heal_source = e.source
 	_remove_where(func(e: Entry) -> bool: return e.ticks_left <= 0)
 	return damage
+
+
+## Stacks of one status the owner has (0 = none).
+func stacks_of(index: int) -> int:
+	var e := find(index)
+	return e.stacks if e else 0
 
 
 func find(index: int) -> Entry:
@@ -126,14 +132,59 @@ func is_empty() -> bool:
 
 # --- Effects ---
 
-## Walking speed multiplier: the strongest slow (1.0 = none).
+## Walking speed multiplier: the strongest slow times the strongest haste
+## (1.0 = none).
 func move_multiplier(defs: StatusDefs) -> float:
+	var slow := 1.0
+	var haste := 1.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def:
+			slow = minf(slow, def.move_multiplier)
+			haste = maxf(haste, def.move_multiplier)
+	return slow * haste
+
+
+## Roll speed multiplier: the strongest (Gust Roll). 1 = none.
+func dodge_speed_multiplier(defs: StatusDefs) -> float:
 	var result := 1.0
 	for e in entries:
 		var def := defs.get_def(e.status)
 		if def:
-			result = minf(result, def.move_multiplier)
+			result = maxf(result, def.dodge_speed_multiplier)
 	return result
+
+
+## Roll stamina cost multiplier: the cheapest (Tailwind). 1 = none.
+func dodge_cost_multiplier(defs: StatusDefs) -> float:
+	var result := 1.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def:
+			result = minf(result, def.dodge_cost_multiplier)
+	return result
+
+
+## Gravity multiplier while falling: the gentlest (Updraft). 1 = none.
+func fall_gravity_multiplier(defs: StatusDefs) -> float:
+	var result := 1.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def:
+			result = minf(result, def.fall_gravity_multiplier)
+	return result
+
+
+## Multiplier on damage the owner takes from source_id: 1 + the sum of
+## damage_taken_from_source x stacks of statuses that source applied
+## (Hunter's Mark).
+func damage_taken_from(defs: StatusDefs, source_id: int) -> float:
+	var bonus := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.damage_taken_from_source != 0.0 and e.source == source_id:
+			bonus += def.damage_taken_from_source * e.stacks
+	return maxf(0.0, 1.0 + bonus)
 
 
 ## False while rooted (or anything else that stops movement).
@@ -308,7 +359,12 @@ func take_on_hit_statuses(defs: StatusDefs) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	for e in entries:
 		var def := defs.get_def(e.status)
-		if def == null or def.on_hit_status.is_empty():
+		if def == null:
+			continue
+		if def.on_hit_status.is_empty():
+			# A one-hit buff (Parting Shot): its bonus is already in this hit.
+			if def.consume_on_hit:
+				e.stacks -= 1
 			continue
 		var index := defs.index_of(def.on_hit_status)
 		if index < 0:

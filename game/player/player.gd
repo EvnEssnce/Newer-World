@@ -28,6 +28,8 @@ signal equip_finished(player: Player)
 ## sim step an attack releases its projectiles (AttackParams.projectile_tick).
 ## The server throws the real ones; the local client shows a cosmetic copy.
 signal projectile_released(player: Player)
+## Server: a roll started this step (the Ranger's Parting Shot capstone).
+signal dodged(player: Player)
 
 const MAX_PENDING_INPUTS := 120
 const MAX_SNAPSHOTS := 30
@@ -162,6 +164,9 @@ var heavy_counter := HeavyCounter.new()
 ## Server: counts this player's knife throws (light and heavy) for the Throwing
 ## Knives' Flurry capstone ("knife_flurry").
 var throw_counter := HeavyCounter.new()
+## Server: server_tick of this player's last light or heavy projectile release
+## (the Crossbow's Siege capstone, "loaded_chamber"); -1 = none yet.
+var last_release_tick := -1
 ## Server: the player whose knockback is moving this one and who has the
 ## Tempest Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
@@ -236,6 +241,7 @@ func _ready() -> void:
 	_build_halberd_greataxe()
 	_build_hammer_model()
 	_build_assassin_models()
+	_build_ranger_models()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -252,6 +258,8 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, de
 	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta, aim_pitch)
 	if state.dodge_tick == 0:
 		dodges += 1
+		if multiplayer.is_server():
+			dodged.emit(self)
 		if not was_on_floor:
 			air_dodges += 1
 	var server := multiplayer.is_server()
@@ -362,6 +370,12 @@ func attack_gear_score(base: int) -> int:
 	if state.is_using_wing():
 		return gear.wing_gear_score if gear.wing_gear_score > 0 else base
 	return gear.weapon_gear_score_for(state.weapon_id(), base)
+
+
+## "light", "heavy" or "ability": what kind of attack this is for this
+## player's weapon out (as the mastery trees name them).
+func attack_kind(attack: AttackParams) -> String:
+	return _attack_kind(attack)[0]
 
 
 ## [attack kind ("light", "heavy" or "ability"), ability id] of one of this
@@ -668,7 +682,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var axes := model == "dual_axes"
 	var spear := model == "spear"
 	var polearm_or_greataxe := model in ["halberd", "greataxe"]
-	var own_model := polearm_or_greataxe or model in ASSASSIN_MODELS
+	var own_model := polearm_or_greataxe or model in ASSASSIN_MODELS or model in RANGER_MODELS
 	_sword_pivot.visible = not axes and not spear and not own_model
 	_shield_pivot.visible = not axes and not spear and not own_model
 	_axe_right_pivot.visible = axes and not _axe_thrown
@@ -694,6 +708,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_show_halberd_greataxe(model, view, attack, ability_id, attack_tick, lowered)
 	_show_hammer(model == "war_hammer", attack, view.attack_type, ability_id, attack_tick, lowered)
 	_show_assassin(model, attack, view.attack_type, ability_id, attack_tick, lowered)
+	_show_ranger(model, attack, attack_tick, lowered)
 
 	_show_hitbox(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
@@ -912,6 +927,68 @@ func _show_assassin(model: String, attack: AttackParams, attack_type: int, abili
 	var left := _talon_left if talons else _knife_left
 	right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
 	left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
+
+
+# --- Ranger: Longbow, Crossbow and Firebolts models (placeholder, client) ---
+# Built in code. The bow and crossbow are carried pointing down and raised
+# level while attacking; the Firebolts' ember wraps glow on both hands and
+# swing like the axes.
+
+const RANGER_MODELS := ["longbow", "crossbow", "firebolts"]
+const BOW_PIVOT := Vector3(-0.4, 0.3, -0.25)
+const CROSSBOW_PIVOT := Vector3(0.3, 0.3, -0.2)
+## Pitch while carried; level (0) while shooting.
+const RANGED_CARRY_PITCH := -0.9
+
+var _bow: Node3D
+var _crossbow: Node3D
+var _wrap_right: Node3D
+var _wrap_left: Node3D
+
+
+func _build_ranger_models() -> void:
+	var wood := _flat_material(Color(0.5, 0.33, 0.18), 0.0, 0.8)
+	var string := _flat_material(Color(0.9, 0.88, 0.8), 0.0, 0.9)
+	var steel := _flat_material(Color(0.62, 0.65, 0.7), 0.7, 0.35)
+	var ember := _flat_material(Color(1.0, 0.45, 0.1), 0.0, 0.6)
+	ember.emission_enabled = true
+	ember.emission = Color(1.0, 0.4, 0.05)
+	# Longbow: a tall limb bent forward in three pieces, and its string.
+	_bow = _weapon_pivot(BOW_PIVOT, [
+		[Vector3(0.05, 0.6, 0.05), Vector3(0.0, 0.0, -0.12), wood],
+		[Vector3(0.05, 0.5, 0.05), Vector3(0.0, 0.5, -0.02), wood],
+		[Vector3(0.05, 0.5, 0.05), Vector3(0.0, -0.5, -0.02), wood],
+		[Vector3(0.012, 1.45, 0.012), Vector3(0.0, 0.0, 0.08), string],
+	])
+	# Crossbow: a stock with a bow across its front.
+	_crossbow = _weapon_pivot(CROSSBOW_PIVOT, [
+		[Vector3(0.08, 0.08, 0.7), Vector3(0.0, 0.0, -0.25), wood],
+		[Vector3(0.7, 0.05, 0.06), Vector3(0.0, 0.03, -0.55), steel],
+		[Vector3(0.04, 0.12, 0.08), Vector3(0.0, -0.08, -0.05), steel],
+	])
+	_wrap_right = _weapon_pivot(TALON_RIGHT_PIVOT, [
+		[Vector3(0.14, 0.12, 0.16), Vector3.ZERO, ember],
+		[Vector3(0.05, 0.05, 0.2), Vector3(0.0, 0.0, -0.15), ember],
+	])
+	_wrap_left = _weapon_pivot(TALON_LEFT_PIVOT, [
+		[Vector3(0.14, 0.12, 0.16), Vector3.ZERO, ember],
+		[Vector3(0.05, 0.05, 0.2), Vector3(0.0, 0.0, -0.15), ember],
+	])
+
+
+## Shows the Longbow, Crossbow or Firebolts (hidden for other models).
+func _show_ranger(model: String, attack: AttackParams, attack_tick: float, lowered: float) -> void:
+	_bow.visible = model == "longbow"
+	_crossbow.visible = model == "crossbow"
+	_wrap_right.visible = model == "firebolts"
+	_wrap_left.visible = model == "firebolts"
+	var aiming := 0.0 if attack != null and attack_tick >= 0.0 else RANGED_CARRY_PITCH
+	_bow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
+	_crossbow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
+	if model == "firebolts":
+		var pitches := _axe_pitches(attack, PlayerState.ATTACK_LIGHT, "", attack_tick)
+		_wrap_right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
+		_wrap_left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
 
 
 # --- Juggernaut: Halberd and Greataxe models (placeholder, client) ---

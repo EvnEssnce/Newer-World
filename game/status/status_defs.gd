@@ -56,11 +56,15 @@ func validate() -> String:
 		if not def.affects in [StatusDef.AFFECTS_SIM, StatusDef.AFFECTS_DAMAGE]:
 			return "%s: affects must be \"sim\" or \"damage\"" % def.id
 		var sim_effect := (def.move_multiplier != 1.0 or def.stops_movement or def.stuns
-				or def.attack_speed != 1.0)
+				or def.attack_speed != 1.0 or def.dodge_speed_multiplier != 1.0
+				or def.dodge_cost_multiplier != 1.0 or def.fall_gravity_multiplier != 1.0)
 		if sim_effect and def.affects != StatusDef.AFFECTS_SIM:
 			return "%s: changes movement or actions, so affects must be \"sim\"" % def.id
 		if def.move_multiplier < 0.0:
 			return "%s: move_multiplier can't be negative" % def.id
+		if (def.dodge_speed_multiplier <= 0.0 or def.dodge_cost_multiplier < 0.0
+				or def.fall_gravity_multiplier < 0.0):
+			return "%s: dodge and gravity multipliers must be positive" % def.id
 		if def.forces_target and not def.is_debuff():
 			return "%s: forces_target (a taunt) must be a debuff" % def.id
 		if def.attack_speed < 1.0 or def.attack_speed > 2.0:

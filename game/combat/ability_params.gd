@@ -38,6 +38,10 @@ var iframe_end_tick := 0
 var leap_height := 0.0
 ## Fraction of the dash at which the leap is highest (0.5 = a symmetric arc).
 var leap_peak := 0.5
+## A real jump (sim, unlike leap_height): launch_tick after the start the user
+## is thrown upward fast enough to rise launch_height meters (Updraft). 0 = none.
+var launch_height := 0.0
+var launch_tick := 0
 ## Parry: during the hit windows, a hit from within parry_arc (full width,
 ## radians) in front is negated and answered with the `counter` ability.
 var parry_arc := 0.0
@@ -120,6 +124,8 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 			a.aim_zero_pitch = deg_to_rad(Tuning.get_value(file, section, "aim_zero_pitch"))
 	a.leap_height = Tuning.get_optional(file, section, "leap_height", 0.0)
 	a.leap_peak = Tuning.get_optional(file, section, "leap_peak", 0.5)
+	a.launch_height = Tuning.get_optional(file, section, "launch_height", 0.0)
+	a.launch_tick = roundi(float(Tuning.get_optional(file, section, "launch_time", 0.0)) * tps)
 	a.iframe_start_tick = roundi(float(Tuning.get_optional(file, section, "iframe_start", 0.0)) * tps)
 	a.iframe_end_tick = roundi(float(Tuning.get_optional(file, section, "iframe_end", 0.0)) * tps)
 	a.parry_arc = deg_to_rad(Tuning.get_optional(file, section, "parry_arc", 0.0))

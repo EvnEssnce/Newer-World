@@ -5,7 +5,7 @@
 # -NoBot makes both windows normal players (for two people, or one person
 # switching windows).
 # -Party makes the bot party up: it accepts your invite (T), or invites you (Y to join).
-# -Class picks your class (default fighter; e.g. juggernaut, assassin). The bot plays a Fighter.
+# -Class picks your class (default fighter; e.g. juggernaut, assassin, ranger). The bot plays a Fighter.
 param([switch]$NoBot, [switch]$Party, [string]$Class = 'fighter')
 . "$PSScriptRoot\find_godot.ps1"
 

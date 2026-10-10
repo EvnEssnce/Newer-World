@@ -29,7 +29,8 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	# A dodge only sets horizontal velocity; vertical (jumps, gravity) carries on as
 	# normal, so an air dodge keeps its arc.
 	elif state.is_dodging():
-		horizontal = Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
+		horizontal = (Vector3(state.dodge_dir.x, 0.0, state.dodge_dir.y) * params.dodge_speed
+				* state.statuses.dodge_speed_multiplier(params.statuses))
 	elif rooted:
 		horizontal = horizontal.move_toward(Vector3.ZERO, params.ground_deceleration * delta)
 	elif state.is_dashing(params):
@@ -40,7 +41,7 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	else:
 		var speed := params.move_speed * state.status_move_multiplier(params)
 		var attack := state.current_attack(params)
-		if attack:
+		if attack and not state.moves_freely():
 			speed *= attack.move_multiplier
 		elif state.blocking:
 			speed *= params.block_move_multiplier
@@ -54,13 +55,28 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	var vertical := body.velocity.y
 	var can_jump := not state.is_dodging() and not state.is_attacking()
 	var launch := state.force.take_launch()
+	var self_launch := _self_launch_speed(state, params)
 	if launch > 0.0:
 		vertical = launch
+	elif self_launch > 0.0:
+		vertical = self_launch
 	elif on_floor and buttons & PlayerState.BUTTON_JUMP and can_jump:
 		vertical = params.jump_velocity
 	elif not on_floor:
-		vertical -= params.gravity * delta
+		var gravity := params.gravity
+		if vertical < 0.0:
+			gravity *= state.statuses.fall_gravity_multiplier(params.statuses)  # Updraft
+		vertical -= gravity * delta
 
 	body.velocity = Vector3(horizontal.x, vertical, horizontal.z)
 	body.move_and_slide()
 	state.on_floor = body.is_on_floor()
+
+
+## An ability that launches its user (launch_height, Updraft) on its
+## launch_tick: the upward speed that reaches that height; else 0.
+static func _self_launch_speed(state: PlayerState, params: PlayerParams) -> float:
+	var ability := state.current_ability(params)
+	if ability == null or ability.launch_height <= 0.0 or state.attack_tick != ability.launch_tick:
+		return 0.0
+	return sqrt(2.0 * params.gravity * ability.launch_height)

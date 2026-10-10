@@ -143,6 +143,15 @@ var _feint_reads := 0
 var _marked_hits := 0
 var _flurry_fans := 0
 var _heal_cuts := 0
+## Ranger (server): Ignites that detonated stacks (and stacks used), loaded
+## chamber shots (Siege), heavy shots that pierce (Marksman), Parting Shot
+## buffs from rolls, hits on a Hunter's Mark target by its marker.
+var _ignites := 0
+var _ignited_stacks := 0
+var _loaded_shots := 0
+var _piercing_heavies := 0
+var _parting_shots := 0
+var _hunted_hits := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -327,6 +336,7 @@ func _client_ready(class_id: String) -> void:
 	player.weapon_swapped.connect(func(_p: Player) -> void: _swaps += 1)
 	player.projectile_released.connect(_projectiles.server_fire)
 	player.projectile_released.connect(_knife_flurry)
+	player.dodged.connect(_parting_shot)
 	player.equip_finished.connect(loot.finish_equip)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
@@ -426,9 +436,11 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 	var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
 	var backstab := _is_backstab(attacker_id, attacker_pos, enemy)
 	var crit := _crit_multiplier(attacker_id, attack, was_staggered, backstab)
-	var damage := (attack.damage * damage_scale * crit
+	var base := attack.damage + _detonate(attacker_id, attack, enemy.statuses, enemy.status_defs, null)
+	var damage := (base * damage_scale * crit
 			* _backstab_scale(attacker_id, attack, backstab)
 			* _marked_scale(attacker_id, attack, enemy.statuses, enemy.status_defs, null)
+			* _hunted_scale(attacker_id, enemy.statuses, enemy.status_defs)
 			* _execute_scale(execute, attack, enemy.health / enemy.params.max_health)
 			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 	_enemy_damaged += 1
@@ -548,9 +560,12 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	var was_staggered := target.state.is_staggered()
 	var backstab := _is_backstab(attacker_id, attacker_pos, target)
 	var crit := _crit_multiplier(attacker_id, attack, was_staggered, backstab)
-	var base_damage := (attack.damage * damage_scale * crit
+	var base_damage := ((attack.damage
+			+ _detonate(attacker_id, attack, target.state.statuses, target.params.statuses, target))
+			* damage_scale * crit
 			* _backstab_scale(attacker_id, attack, backstab)
 			* _marked_scale(attacker_id, attack, target.state.statuses, target.params.statuses, target)
+			* _hunted_scale(attacker_id, target.state.statuses, target.params.statuses)
 			* _execute_scale(execute, attack, target.health / target.max_health()))
 	var damage := _after_armor(base_damage
 			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
@@ -984,6 +999,98 @@ func _knife_flurry(player: Player) -> void:
 		_projectiles.server_fire_attack(player, fan)
 
 
+# --- Ranger: Longbow, Crossbow and Firebolts mechanics (server only) ---
+
+## Hunter's Mark: the target's damage_taken_from_source statuses applied by
+## this attacker (StatusEffects.damage_taken_from). 1 without one.
+func _hunted_scale(attacker_id: int, statuses: StatusEffects, defs: StatusDefs) -> float:
+	if attacker_id <= 0:
+		return 1.0
+	var scale := statuses.damage_taken_from(defs, attacker_id)
+	if scale != 1.0:
+		_hunted_hits += 1
+	return scale
+
+
+## Ignite ("detonates_status"): uses up every stack of that status on the
+## target and returns detonate_damage per stack (added to the hit's base
+## damage). The Flashfire capstone ("ignite_ember", the weapon tree that's
+## out) gives the attacker amount Ember per stack. target_player: the target if
+## it's a player (removing is a server event), null for an enemy.
+func _detonate(attacker_id: int, attack: AttackParams, statuses: StatusEffects,
+		defs: StatusDefs, target_player: Player) -> float:
+	if attack.detonates_status.is_empty():
+		return 0.0
+	var index := defs.index_of(attack.detonates_status)
+	var stacks := statuses.stacks_of(index) if index >= 0 else 0
+	if stacks <= 0:
+		return 0.0
+	if target_player:
+		target_player.state.remove_status(index)
+	else:
+		statuses.remove(index)
+	_ignites += 1
+	_ignited_stacks += stacks
+	var attacker := _player_by_id(attacker_id)
+	if attacker and attacker.build:
+		var refund := attacker.build.weapon_effect(attacker.state.weapon_id(), "ignite_ember")
+		if refund:
+			_give_ember(attacker, refund.amount * stacks, true)
+	return attack.detonate_damage * stacks
+
+
+## The most stacks source_id's application of `def` may reach: the Kindling
+## capstone ("status_cap" with applies_to = the status, in the tree of one of
+## the source's equipped weapons) multiplies max_stacks by its amount. 0 = the
+## status's own.
+func _stack_cap(source_id: int, def: StatusDef) -> int:
+	var source := _player_by_id(source_id) if source_id > 0 else null
+	if source == null or source.build == null:
+		return 0
+	for weapon_id in source.build.weapons:
+		var node := source.build.weapon_effect(weapon_id, "status_cap")
+		if node and node.applies_to == def.id:
+			return roundi(def.max_stacks * node.amount)
+	return 0
+
+
+## Server, as a player's projectiles are thrown (ProjectileSystem.server_fire_attack):
+## [damage factor, pierce at least] from the weapon tree that's out. Marksman
+## ("heavy_pierce"): heavy shots pierce amount targets. Siege
+## ("loaded_chamber"): a light or heavy shot released at least `threshold`
+## seconds after this player's previous one deals 1 + amount as much (a
+## reloaded crossbow). Abilities and server-side throws get [1, 0].
+func release_mods(player: Player, attack: AttackParams) -> Vector2:
+	var kind := player.attack_kind(attack)
+	if player.build == null or kind == "ability" or player.state.is_using_ability():
+		return Vector2(1.0, 0.0)
+	var weapon_id := player.state.weapon_id()
+	var result := Vector2(1.0, 0.0)
+	var pierce := player.build.weapon_effect(weapon_id, "heavy_pierce")
+	if pierce and kind == "heavy":
+		result.y = pierce.amount
+		_piercing_heavies += 1
+	var chamber := player.build.weapon_effect(weapon_id, "loaded_chamber")
+	var now := server_tick()
+	if chamber and (player.last_release_tick < 0 or now - player.last_release_tick
+			>= chamber.threshold * Engine.physics_ticks_per_second):
+		result.x = 1.0 + chamber.amount
+		_loaded_shots += 1
+	player.last_release_tick = now
+	return result
+
+
+## The Ranger Wings' Parting Shot capstone ("roll_empower"): every roll gives the
+## player the node's status (Parting Shot: more damage on the next hit).
+func _parting_shot(player: Player) -> void:
+	if player.build == null:
+		return
+	var node := player.build.wing_effect("roll_empower")
+	if node and _give_status(player.peer_id, player,
+			player.params.statuses.index_of(node.status), 1, -1):
+		_parting_shots += 1
+
+
 # --- Juggernaut: War Hammer capstones, Wing tree effects (server only) ---
 
 ## Server, every live tick of a player's attack: the War Hammer capstones of
@@ -1092,6 +1199,8 @@ func _print_juggernaut_summary() -> void:
 	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d wall_stuns=%d roar_guards=%d" % [
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
 			_roar_guards])
+	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
+			_ignites, _ignited_stacks, _loaded_shots, _piercing_heavies, _parting_shots, _hunted_hits])
 	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d" % [
 			_backstabs, _primed_crits, _feint_reads, _marked_hits, _flurry_fans, _heal_cuts])
 
@@ -1278,10 +1387,12 @@ func _give_status(source_id: int, target: Node3D, index: int, stacks: int,
 		_ally_statuses_refused += 1
 		return false
 	var applied := false
+	var cap := _stack_cap(source_id, def)
 	if player:
-		applied = player.state.apply_status(player.params, index, stacks, duration_ticks, source_id)
+		applied = player.state.apply_status(player.params, index, stacks, duration_ticks, source_id,
+				cap)
 	else:
-		applied = enemy.apply_status(index, stacks, duration_ticks, source_id)
+		applied = enemy.apply_status(index, stacks, duration_ticks, source_id, cap)
 	if not applied:
 		return false
 	_statuses_applied += 1

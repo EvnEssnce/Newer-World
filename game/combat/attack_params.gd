@@ -68,6 +68,10 @@ var self_status_stacks := 1
 ## Given to the attacker (server) when this attack "reads" a target: a player
 ## blocks or evades it, or an enemy is mid-swing when it lands (Feint).
 var read_status := ""
+## On a damaging hit, every stack of detonates_status on the target is used up
+## for detonate_damage more damage each (server; Ignite on burn).
+var detonates_status := ""
+var detonate_damage := 0.0
 
 # Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
 ## Thrown at projectile_tick (from the attack's start), projectile_count of
@@ -155,6 +159,8 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	self_status = Tuning.get_optional(file, section, "self_status", "")
 	self_status_stacks = Tuning.get_optional(file, section, "self_status_stacks", 1)
 	read_status = Tuning.get_optional(file, section, "read_status", "")
+	detonates_status = Tuning.get_optional(file, section, "detonates_status", "")
+	detonate_damage = Tuning.get_optional(file, section, "detonate_damage", 0.0)
 
 
 ## The statuses this gives whoever it damages, as [id, stacks, duration ticks

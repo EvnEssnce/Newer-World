@@ -169,8 +169,9 @@ func on_heal(target_id: int, healer_id: int, amount: float) -> void:
 ## stagger); a taunt (forces_target) puts the source at the top of its threat
 ## (the target itself is forced in server_step while it lasts). Refused
 ## (false) while dead or immune (StatusEffects.refuses).
-func apply_status(index: int, stacks: int, duration_ticks: int, source: int) -> bool:
-	if dead or not statuses.apply(status_defs, index, stacks, duration_ticks, source):
+func apply_status(index: int, stacks: int, duration_ticks: int, source: int,
+		max_stacks: int = 0) -> bool:
+	if dead or not statuses.apply(status_defs, index, stacks, duration_ticks, source, max_stacks):
 		return false
 	var def := status_defs.get_def(index)
 	if def.stuns:

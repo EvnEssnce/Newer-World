@@ -129,6 +129,18 @@ func state_slots(params: PlayerParams) -> PackedInt32Array:
 func apply_to_state(state: PlayerState, params: PlayerParams) -> void:
 	state.set_loadout(weapons, state_slots(params))
 	state.set_wings(wing_set_id(), wing_state_slots(params))
+	state.set_free_move(free_move_mask())
+
+
+## Bit per weapon slot whose tree has a "free_draw" node (the Longbow's
+## Skirmisher capstone: its light and heavy attacks don't slow walking). The
+## one tree effect that reaches the sim, through apply_to_state like slots.
+func free_move_mask() -> int:
+	var mask := 0
+	for slot in mini(weapons.size(), PlayerState.WEAPON_SLOTS):
+		if weapon_effect(weapons[slot], "free_draw"):
+			mask |= 1 << slot
+	return mask
 
 
 ## Weapon (or Wing) damage modifiers from the trees, for one of the player's

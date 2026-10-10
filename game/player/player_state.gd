@@ -133,6 +133,11 @@ var swap_buffer := 0
 ## Like a swap: you can walk, but not attack, block, dodge, swap or use abilities.
 var equip_left := 0
 
+# Build flags the server puts into the sim (CharacterBuild.apply_to_state)
+## Bit per weapon slot: with that weapon out, light and heavy attacks don't
+## slow walking (the Longbow's Skirmisher capstone, "free_draw").
+var free_move_mask := 0
+
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
 var ability := -1
@@ -383,8 +388,9 @@ func end_active_window(params: PlayerParams) -> void:
 ## a stun while stagger immune or any crowd control while CC immune). A taunt
 ## (forces_target) only does something on enemies.
 func apply_status(params: PlayerParams, index: int, stacks: int = 1, duration_ticks: int = -1,
-		source: int = 0) -> bool:
-	if dead or not statuses.apply(params.statuses, index, stacks, duration_ticks, source):
+		source: int = 0, max_stacks: int = 0) -> bool:
+	if dead or not statuses.apply(params.statuses, index, stacks, duration_ticks, source,
+			max_stacks):
 		return false
 	server_events += 1
 	var def := params.statuses.get_def(index)
@@ -718,9 +724,31 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
 	return (can_act() and can_move(params) and dodge_tick < 0 and dodge_cooldown == 0
 			and swap_tick < 0 and equip_left == 0
-			and stamina >= params.dodge_stamina_cost
+			and stamina >= dodge_cost(params)
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
+
+
+## Stamina a roll costs now: [dodge] stamina_cost times the cheapest roll
+## status (Tailwind).
+func dodge_cost(params: PlayerParams) -> float:
+	return params.dodge_stamina_cost * statuses.dodge_cost_multiplier(params.statuses)
+
+
+## Server: which weapon slots' light and heavy attacks don't slow walking
+## (bit per slot). A server event when it changes.
+func set_free_move(mask: int) -> void:
+	if mask == free_move_mask:
+		return
+	free_move_mask = mask
+	server_events += 1
+
+
+## True while a light or heavy attack is out with a weapon whose attacks don't
+## slow walking (free_move_mask).
+func moves_freely() -> bool:
+	return ((attack_type == ATTACK_LIGHT or attack_type == ATTACK_HEAVY)
+			and free_move_mask & (1 << equipped) != 0)
 
 
 func is_dodging() -> bool:
@@ -752,7 +780,7 @@ func _handle_dodge_input(move: Vector2, buttons: int, on_floor: bool, params: Pl
 	queued_attack = ATTACK_NONE
 	dodge_tick = 0
 	dodge_buffer = 0
-	stamina -= params.dodge_stamina_cost
+	stamina -= dodge_cost(params)
 	stamina_regen_wait = params.stamina_regen_delay_ticks
 	if not on_floor:
 		air_dodges_used += 1
@@ -1043,13 +1071,14 @@ static func from_array(data: Array) -> PlayerState:
 
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
-## C slot, equip_left, then Wing cooldowns by pool index, without trailing zeros].
-const PACKED_WING_HEADER := 7
+## C slot, equip_left, free_move_mask, then Wing cooldowns by pool index,
+## without trailing zeros].
+const PACKED_WING_HEADER := 8
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
-			wing_slots[0], wing_slots[1], equip_left])
+			wing_slots[0], wing_slots[1], equip_left, free_move_mask])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1065,6 +1094,7 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	wing_slots[0] = packed[4]
 	wing_slots[1] = packed[5]
 	equip_left = packed[6]
+	free_move_mask = packed[7]
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
@@ -1099,6 +1129,7 @@ func matches(other: PlayerState) -> bool:
 			and cooldowns == other.cooldowns
 			and swap_tick == other.swap_tick
 			and equip_left == other.equip_left
+			and free_move_mask == other.free_move_mask
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot

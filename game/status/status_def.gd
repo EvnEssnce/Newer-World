@@ -19,8 +19,14 @@ var duration_ticks := 0
 var max_stacks := 1
 
 # Sim effects
-## Walking speed multiplier (1 = none).
+## Walking speed multiplier (1 = none; below 1 a slow, above 1 a haste: Tailwind).
 var move_multiplier := 1.0
+## Roll speed multiplier, so the same roll goes farther (Gust Roll). 1 = none.
+var dodge_speed_multiplier := 1.0
+## Roll stamina cost multiplier (Tailwind: cheaper rolls). 1 = none.
+var dodge_cost_multiplier := 1.0
+## Gravity multiplier while falling (Updraft's slow descent). 1 = none.
+var fall_gravity_multiplier := 1.0
 ## Root: no walking, dodging, jumping or dashing.
 var stops_movement := false
 ## Stun: staggers for the whole duration.
@@ -50,6 +56,9 @@ var next_hit_crits := false
 ## Marked: the applier's next melee hit on the owner deals this fraction more
 ## damage and uses the status up. 0 = none.
 var marked_bonus := 0.0
+## Per stack: fraction more damage the owner takes from whoever applied it
+## (Hunter's Mark).
+var damage_taken_from_source := 0.0
 ## Blind (0..1): a player sees a white haze this strong over the screen
 ## (fading out at the end); an enemy's swings miss with this chance (Dazzled,
 ## Flare). 0 = none.
@@ -110,6 +119,10 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.max_stacks = maxi(1, Tuning.get_value(file, section, "max_stacks"))
 	# Effect keys are optional: a status lists only what it does.
 	s.move_multiplier = Tuning.get_optional(file, section, "move_multiplier", 1.0)
+	s.dodge_speed_multiplier = Tuning.get_optional(file, section, "dodge_speed_multiplier", 1.0)
+	s.dodge_cost_multiplier = Tuning.get_optional(file, section, "dodge_cost_multiplier", 1.0)
+	s.fall_gravity_multiplier = Tuning.get_optional(file, section, "fall_gravity_multiplier", 1.0)
+	s.damage_taken_from_source = Tuning.get_optional(file, section, "damage_taken_from_source", 0.0)
 	s.stops_movement = Tuning.get_optional(file, section, "stops_movement", false)
 	s.stuns = Tuning.get_optional(file, section, "stuns", false)
 	s.attack_speed = Tuning.get_optional(file, section, "attack_speed", 1.0)

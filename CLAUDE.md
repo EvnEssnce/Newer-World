@@ -109,8 +109,9 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      equipped gear and the bag).
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
-                     greataxe, war_hammer; Assassin: dual_talons, throwing_knives),
-                     class_<id> (fighter, juggernaut, assassin),
+                     greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
+                     Ranger: longbow, crossbow, firebolts),
+                     class_<id> (fighter, juggernaut, assassin, ranger),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
@@ -200,9 +201,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`);
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
-  rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, Wing cooldowns by
-  pool index without trailing zeros]` (`PACKED_WING_HEADER` = 7; new small ints can
-  go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
+  rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask, Wing
+  cooldowns by pool index without trailing zeros]` (`PACKED_WING_HEADER` = 8; new
+  small ints can go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
   speed" under Status effects). Append new fields at the end. A player's snapshot entry is
   about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
   player already goes over it (Godot warns "above the MTU"); interest management /
@@ -531,6 +532,59 @@ behind, bonus or not).
   Ashstep charge; Mirror Image: decoys) are `effect="none"` until then. Wing
   Enhancement item: Ashen Vanes. Weapon items: Iron Talons, Iron Knives.
 
+## Ranger (Longbow, Crossbow, Firebolts)
+
+`data/class_ranger.cfg` (`--class=ranger`, `-Class ranger`; default loadout Longbow +
+Firebolts). Every attack fires projectiles (`[projectile_arrow]`, `arrow_piercing`,
+`arrow_rain`, `bolt`, `bolt_scatter`, `firebolt`, `flare`); the damage is the
+projectile's hit. Placeholder models in `player.gd` (`_build_ranger_models`: a bow on
+the left hand and a crossbow carried pointing down and raised level while attacking,
+glowing ember wraps on both hands). World helpers: "Ranger: Longbow, Crossbow and
+Firebolts mechanics". Counters: `SUMMARY ranger ignites= ignited_stacks= loaded_shots=
+piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
+
+- **Longbow** (Marksman / Skirmisher): light quick shot (45), heavy full draw (0.6 s,
+  140). Piercing Shot (pierce 4), Arrow Rain (7 arrows lobbed at 40° under heavy
+  gravity: they come down ~14 m ahead; no ground zone), Snare Arrow (Root 1.5 s),
+  Backstep Shot (3.5 m `dash_direction="back"` + arrow), Hunter's Mark (**Hunted**:
+  `damage_taken_from_source` +15% from the marker, `World._hunted_scale`), Rapid Nock
+  (self attack speed 1.7, 4 s). Capstones: **True Flight** (`heavy_pierce`: heavy arrows
+  pierce 20, `World.release_mods`) and **Running Shot** (`free_draw`, below).
+- **Skirmisher's Running Shot is in the sim**: `CharacterBuild.free_move_mask()` (bit
+  per weapon slot whose tree has `free_draw`) → `PlayerState.set_free_move` (server
+  event) in `apply_to_state`, synced as `free_move_mask` in the packed header;
+  `PlayerMovement` skips the attack's `move_multiplier` while `moves_freely()` (light
+  or heavy with that slot out). The one tree effect that reaches the sim.
+- **Crossbow** (Siege / Trapper): light bolt (70) with a 0.55 s recovery (the reload),
+  heavy bolt (160, breaks blocks). Concussive Bolt (knockback 3 m), Bolt Barrage (4
+  bolts, 8°), Scatter Bolt (6 short bolts, 45°), Quick Reload (self: attack speed 1.5
+  and the next hit slows, `on_hit_status` + `consume_on_hit`). Siege capstone
+  **Loaded Chamber** (`loaded_chamber`: a light/heavy shot ≥ `threshold` 2 s after
+  your previous one deals ×2; `Player.last_release_tick`, `World.release_mods`, which
+  `ProjectileSystem.server_fire_attack` calls once per release to scale
+  `damage_scale` and raise `pierce_left`). **Not built:** Tripwire (trap), Smoke Bolt
+  (cloud), the Trapper capstone (re-arming traps).
+- **Firebolts** (Kindling / Flashfire): light firebolt (26, 0.28 s, +1 **Burn**),
+  heavy 3 bolts (60 each, Burn). Burn: 6 dps per stack, max 6, 4 s. Scatterflame (5
+  bolts, 40°, Burn), **Ignite** (`detonates_status="burn"`, `detonate_damage` 35: on a
+  hit, every Burn stack is removed for +35 base damage each, `World._detonate`, before
+  the damage scales), Flare (**Flared**: `blind` 0.85, 2 s), Overheat (self attack speed
+  1.6, 4 s; no lockout). Capstones: **Inferno** (`status_cap`: Burn you apply stacks to
+  max_stacks × 2, `World._stack_cap` → `StatusEffects.apply(..., max_stacks)`) and
+  **Cinder Return** (`ignite_ember`: 3 Ember per stack Ignite uses). **Not built:**
+  Fire Trail (burning ground), Seeker Spark (homing).
+- **Ranger Wings** (Windrider / Parting Shot, 12 points): Gust Roll (15 Ember: rolls
+  1.8× as fast for 5 s, so 1.8× as far: `dodge_speed_multiplier`), Tailwind (20:
+  `move_multiplier` 1.3 haste + `dodge_cost_multiplier` 0.5, 6 s; `PlayerState.
+  dodge_cost`), Backdraft (20: 4 m radial knockback 3 m), Updraft (25: a real jump,
+  `launch_height` 3.5 m at `launch_time`, `PlayerMovement._self_launch_speed`, then
+  **Updraft** `fall_gravity_multiplier` 0.2 for 2.5 s: a slow descent; no true hover).
+  Defaults Z Gust Roll, C Backdraft. Capstones: **Parting Gift** (`roll_empower`:
+  `Player.dodged` (server) → `World._parting_shot` gives **Parting Shot**, +30%
+  damage dealt consumed by the next hit) and Second Wind (a second roll charge: not
+  built, `effect="none"`). Items: Ashwood Longbow, Iron Crossbow, Cinder Wraps,
+  Galeborn Plumes.
+
 ## Status effects
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
@@ -542,7 +596,11 @@ behind, bonus or not).
   only the keys for what it does. Reapplying adds stacks (capped) and resets the time to
   full (never shortens). `StatusDefs.validate()` checks the file (a unit test runs it).
 - **Players**: `PlayerState.statuses` (synced in `to_array()`), ticked down at the top of
-  `PlayerState.step`. Slow scales walking speed and root stops walking/dodging/jumping/
+  `PlayerState.step`. Sim keys besides slow/root/stun/attack speed: hastes
+  (`move_multiplier` > 1, times the strongest slow), `dodge_speed_multiplier`,
+  `dodge_cost_multiplier`, `fall_gravity_multiplier` (Ranger Wings). `blind` (0..1) is
+  a HUD haze for players and a per-swing miss chance for enemies
+  (`StatusEffects.blind_amount`, `Enemy.swing_misses`). Slow scales walking speed and root stops walking/dodging/jumping/
   dashing in `PlayerMovement`/`can_dodge`. **Stun = stagger**: applying a stun staggers
   for its duration (same interrupt and "can't act"); the status entry is the name/timer
   and what a cleanse removes (`cleanse()` also ends the stagger). Enemies: stun =
@@ -855,7 +913,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headl
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut)
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 

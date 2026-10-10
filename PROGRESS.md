@@ -50,7 +50,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|---|
 | Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
-| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin built (Assassin: decoy/stealth Wings not yet) |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin, Ranger built (not yet: decoys/stealth, traps, ground zones, homing) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
 | Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
@@ -72,8 +72,9 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 5. Persistence | Not started |
 | 6. One zone, then playtest with real people | Not started |
 
-**Session 32:** the **Assassin** class (Dual Talons, Throwing Knives, two of four Wing
-abilities), unplaytested; see §4.
+**Sessions 32–33:** the **Assassin** (Dual Talons, Throwing Knives, two of four Wing
+abilities) and the **Ranger** (Longbow, Crossbow, Firebolts, all four Wing abilities),
+unplaytested; see §4.
 
 **Latest state (session 28):** Husks drop personal loot; F picks it up; I opens the
 inventory with equipped gear; gear changes damage, crits, armor, max health, block
@@ -190,7 +191,10 @@ Brief: two or three node types, one refining step, one crafting station, tradesk
 
 Order from `design/classes.md`: ~~Assassin~~ (built in session 32 except Ember Double,
 Shadow Swap, Ricochet and Recall, which need decoys/stealth/new projectile kinds)
-→ **Ranger** → **Mage** → **Paladin**. Each class is about 2–3 sessions (weapons,
+→ ~~Ranger~~ (session 33 except Tripwire, Smoke Bolt, Fire Trail, Seeker Spark, the
+Trapper and Windrider capstones and Updraft's real hover) → **Mage** → **Paladin**.
+Systems the unbuilt pieces wait for: `SUMMON` (decoys, traps), `AREA` ground zones
+(Smoke Bolt, Fire Trail, Arrow Rain's zone), homing projectiles, ability charges. Each class is about 2–3 sessions (weapons,
 trees, Wings, models), plus the systems it needs:
 - `SUMMON` (built in step 6 for Shield Wall), `AREA` ground effects and traps (Ranger,
   Mage), **stealth** (Assassin), **updraft hover** (Wings), weapon abilities that cost
@@ -242,6 +246,19 @@ it heal and stand back up 4 s after you stop? It drops nothing.
   other window: its screen should go 60% white and clear over the last ~1 s.
 - Models: claws on the fists, knives in the hands (no throw animation beyond the swing).
 
+**Ranger (session 33, `run_local_test.ps1 -Class ranger`):**
+- Longbow: light vs full draw (0.6 s): readable? Arrow Rain lands ~14 m ahead in a
+  spread (no aim pitch yet); Backstep Shot's hop; Snare Arrow root; Hunter's Mark
+  (+15% from you); Rapid Nock.
+- Running Shot (Skirmisher capstone, K): walk at full speed while drawing.
+- Crossbow: does the 0.55 s reload after each bolt feel like "burst, then vulnerable"?
+  Loaded Chamber (Siege capstone): wait 2 s, the next bolt doubles.
+- Firebolts: click speed, Burn stacking, Ignite's burst (numbers: 35 per stack), Flare
+  blinding a Husk (its swings mostly miss for 2 s; on a player, an 85% white haze).
+- Wings: Gust Roll glide length, Tailwind speed, Backdraft, Updraft's jump and slow
+  fall (shoot while floating).
+- Models: bow on the left hand, crossbow, glowing wraps.
+
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
 
 **Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
@@ -279,6 +296,16 @@ PvP: built in session 33 as `blind` on Dazzled):
   60% white haze (fading over the last 30%), a blinded Husk's swings miss 60% of the
   time; plus a Slow. Turn speed isn't reduced.
 - Both Wing capstones and two Wing abilities wait for decoys/stealth (`effect="none"`).
+
+Ranger (session 33):
+- No charged-shot mechanic: the Longbow heavy *is* the full draw (hold = heavy).
+- No crossbow magazine: the light bolt's long recovery is the reload; Bolt Barrage
+  fires 4 bolts at once. Loaded Chamber = 2 s since your previous shot.
+- Arrow Rain is a lobbed 7-arrow volley, not a zone; Updraft is a 3.5 m jump plus a slow
+  fall (gravity × 0.2 while falling, 2.5 s), not a hover.
+- Overheat has no lockout. Quick Reload's slow rides on the next hit of any weapon.
+- Ignite uses up the stacks even if the hit is blocked (base damage before the block).
+- Running Shot covers lights and heavies of the Longbow (not abilities).
 
 Open questions for coming steps:
 - **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
@@ -387,6 +414,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 30 | 2026-10-10 | Training dummy: stationary enemy, idle reset, per-player DPS readout (branch `training-dummy`) |
 | 31 | 2026-10-10 | Merged `training-dummy` and the loot branch; smoke tests run with PowerShell 7 on Linux; fixed the loot `--tune` quoting (it parsed as `{}`, so no drops) and made Tuning log unparseable overrides |
 | 32 | 2026-10-10 | The Assassin: Dual Talons (backstabs, Feint/Primed, Talon Storm), Throwing Knives (knife projectile, poison, Marked, Festering Wounds, Endless Flurry), Wings Ashstep and Plumage Flash, models, items. 460 tests; smoke (Fighter, -Party, Juggernaut, Assassin, Assassin -Party) passes on Linux/PowerShell 7 with 0 corrections (the -Party "party of 2" line is the known Linux quit race) |
+| 33 | 2026-10-10 | Plumage Flash blinds (`blind`: HUD haze, enemy misses). The Ranger: Longbow (Hunter's Mark, True Flight pierce, Running Shot free movement in the sim), Crossbow (Loaded Chamber), Firebolts (Burn, Ignite, Flare, Inferno), Wings Gust Roll, Tailwind, Backdraft, Updraft (new sim statuses: haste, roll speed/cost, slow fall; a real self-launch). 472 tests; smoke Fighter, -Party, Juggernaut, Assassin, Ranger, Ranger -Party pass with 0 corrections (Linux quit race aside) |
 
 ---
 
