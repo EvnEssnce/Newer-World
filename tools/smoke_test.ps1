@@ -49,6 +49,7 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=enemy_husk/attack/applies_status=bleed',
     '--tune=weapon_broadsword/heavy/force_distance=0.4',
     '--tune=weapon_war_hammer/heavy/force_distance=0.4',
+    '--tune=weapon_dual_talons/heavy/force_distance=0.4',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # More throws per run (each weapon is out for about one cycle), so a
     # projectile hit doesn't hang on one or two throws.

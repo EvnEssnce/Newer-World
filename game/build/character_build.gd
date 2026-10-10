@@ -157,12 +157,19 @@ func execute_bonus(weapon_id: String) -> Vector2:
 ## The weapon tree's crit multiplier for one of that weapon's attacks on a
 ## target (MasteryTree.crit_multiplier); 1 without a crit node.
 func crit_multiplier(weapon_id: String, attack_kind: String, ability_id: String,
-		target_staggered: bool, crit_damage: float) -> float:
+		target_staggered: bool, crit_damage: float, backstab := false) -> float:
 	var tree: MasteryTree = trees.get(weapon_id)
 	if tree == null:
 		return 1.0
 	return tree.crit_multiplier(get_allocated(weapon_id), attack_kind, ability_id,
-			target_staggered, crit_damage)
+			target_staggered, crit_damage, backstab)
+
+
+## The weapon tree's backstab damage multiplier for one of that weapon's
+## attacks (MasteryTree.backstab_multiplier); 1 without one.
+func backstab_multiplier(weapon_id: String, attack_kind: String, ability_id: String) -> float:
+	var tree: MasteryTree = trees.get(weapon_id)
+	return tree.backstab_multiplier(get_allocated(weapon_id), attack_kind, ability_id) if tree else 1.0
 
 
 ## The weapon tree's hitbox range multiplier for one of its abilities

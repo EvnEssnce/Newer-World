@@ -41,6 +41,9 @@ class Entry:
 
 ## Values per entry in to_packed().
 const PACKED_FIELDS := 4
+## Fastest attack speed any statuses give (PlayerState skips at most one tick
+## per tick).
+const MAX_ATTACK_SPEED := 2.0
 
 var entries: Array[Entry] = []
 ## Set by tick(): the source of the last status that dealt damage this tick.
@@ -233,15 +236,34 @@ func crowd_damage_taken_multiplier(defs: StatusDefs, nearby: int) -> float:
 
 ## Multiplier on damage the owner deals: 1 + the sum of damage_dealt x stacks.
 ## How many times faster light and heavy attacks play (Rampage): the fastest
-## status whose stamina condition holds (stamina_fraction = stamina / max). 1
-## = normal. Stacks don't change it.
+## status whose stamina condition holds (stamina_fraction = stamina / max),
+## each stack adding its attack_speed - 1 (Talon Storm), at most
+## MAX_ATTACK_SPEED. 1 = normal.
 func attack_speed(defs: StatusDefs, stamina_fraction: float) -> float:
 	var result := 1.0
 	for e in entries:
 		var def := defs.get_def(e.status)
 		if def and stamina_fraction >= def.attack_speed_min_stamina:
-			result = maxf(result, def.attack_speed)
-	return result
+			result = maxf(result, 1.0 + (def.attack_speed - 1.0) * e.stacks)
+	return minf(result, MAX_ATTACK_SPEED)
+
+
+## The index of a mark (marked_bonus > 0: Marked) that source_id applied, or -1.
+func mark_from(defs: StatusDefs, source_id: int) -> int:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.marked_bonus > 0.0 and e.source == source_id:
+			return e.status
+	return -1
+
+
+## The index of a status that makes the owner's next hit crit (Primed), or -1.
+func next_hit_crit_status(defs: StatusDefs) -> int:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.next_hit_crits:
+			return e.status
+	return -1
 
 
 ## Shield Wall's cover box behind the owner while it blocks: (depth, width) in

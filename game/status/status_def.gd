@@ -25,7 +25,8 @@ var move_multiplier := 1.0
 var stops_movement := false
 ## Stun: staggers for the whole duration.
 var stuns := false
-## Light and heavy attacks play this many times faster (1 = none; Rampage)...
+## Light and heavy attacks play this many times faster (1 = none; Rampage);
+## each stack adds attack_speed - 1 (Talon Storm), up to 2x in all...
 var attack_speed := 1.0
 ## ...while stamina is at least this fraction of max.
 var attack_speed_min_stamina := 0.0
@@ -44,6 +45,11 @@ var on_hit_status := ""
 var on_hit_stacks := 0
 ## Each such hit uses up one stack of this status.
 var consume_on_hit := false
+## The owner's next hit crits (and uses the status up): Primed, from Feint.
+var next_hit_crits := false
+## Marked: the applier's next melee hit on the owner deals this fraction more
+## damage and uses the status up. 0 = none.
+var marked_bonus := 0.0
 ## Shield Wall: while the owner blocks, allies inside a box this deep (m,
 ## straight behind them) and cover_width wide (m) are covered: hits on them
 ## from within the owner's block arc are blocked by the owner. 0 = none.
@@ -117,6 +123,8 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.on_hit_status = Tuning.get_optional(file, section, "on_hit_status", "")
 	s.on_hit_stacks = Tuning.get_optional(file, section, "on_hit_stacks", 1)
 	s.consume_on_hit = Tuning.get_optional(file, section, "consume_on_hit", false)
+	s.next_hit_crits = Tuning.get_optional(file, section, "next_hit_crits", false)
+	s.marked_bonus = Tuning.get_optional(file, section, "marked_bonus", 0.0)
 	s.forces_target = Tuning.get_optional(file, section, "forces_target", false)
 	s.force_immune = Tuning.get_optional(file, section, "force_immune", false)
 	s.stagger_immune = Tuning.get_optional(file, section, "stagger_immune", false)

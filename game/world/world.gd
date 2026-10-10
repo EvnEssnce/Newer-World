@@ -132,6 +132,17 @@ var _ramp_stacks := 0
 var _aftershocks := 0
 var _wall_stuns := 0
 var _roar_guards := 0
+## Assassin (server): backstabs (hits from behind or on an unaware enemy),
+## Primed crits used, Feint reads (a blocked/evaded Feint, or one landing on
+## an enemy mid-swing).
+var _backstabs := 0
+var _primed_crits := 0
+var _feint_reads := 0
+## Throwing Knives (server): Marked hits used, free Fans of Knives (Flurry),
+## heals cut by poison (Venom).
+var _marked_hits := 0
+var _flurry_fans := 0
+var _heal_cuts := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -315,6 +326,7 @@ func _client_ready(class_id: String) -> void:
 	player.ability_started.connect(_on_ability_started)
 	player.weapon_swapped.connect(func(_p: Player) -> void: _swaps += 1)
 	player.projectile_released.connect(_projectiles.server_fire)
+	player.projectile_released.connect(_knife_flurry)
 	player.equip_finished.connect(loot.finish_equip)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
@@ -369,12 +381,15 @@ func _on_attack_stepped(attacker: Player) -> void:
 ## how many it connected with.
 func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -> int:
 	var connected := 0
+	var read := false
 	var execute := attacker.execute_bonus()
 	for target: Player in _players.get_children():
 		if target == attacker:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
 				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute)
+		if result in [HIT_BLOCKED, HIT_GUARD_BROKEN, HIT_EVADED]:
+			read = true
 		if result >= 0:
 			_pvp_hits += 1
 		if result >= 0 and result != HIT_EVADED:
@@ -390,8 +405,12 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 			continue
 		attacker.attack_results[enemy.enemy_id] = true
 		connected += 1
+		if enemy.brain.mode == EnemyBrain.Mode.ATTACK:
+			read = true
 		strike_enemy(attacker.peer_id, attacker.global_position, attacker.state.yaw, attack,
 				enemy, damage_scale, attacker.on_hit_statuses_for_window, execute)
+	if read:
+		_feint_read(attacker, attack)
 	return connected
 
 
@@ -405,8 +424,11 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, enemy: Enemy, damage_scale: float, on_hit: Callable,
 		execute := Vector2.ZERO) -> bool:
 	var was_staggered := enemy.brain.mode == EnemyBrain.Mode.STAGGERED
-	var crit := _crit_multiplier(attacker_id, attack, was_staggered)
+	var backstab := _is_backstab(attacker_id, attacker_pos, enemy)
+	var crit := _crit_multiplier(attacker_id, attack, was_staggered, backstab)
 	var damage := (attack.damage * damage_scale * crit
+			* _backstab_scale(attacker_id, attack, backstab)
+			* _marked_scale(attacker_id, attack, enemy.statuses, enemy.status_defs, null)
 			* _execute_scale(execute, attack, enemy.health / enemy.params.max_health)
 			* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
 	_enemy_damaged += 1
@@ -522,8 +544,11 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 			return _covered_hit(attacker_id, attacker_pos, attacker_yaw, attack, damage_scale,
 					execute, holder, target)
 	var was_staggered := target.state.is_staggered()
-	var crit := _crit_multiplier(attacker_id, attack, was_staggered)
+	var backstab := _is_backstab(attacker_id, attacker_pos, target)
+	var crit := _crit_multiplier(attacker_id, attack, was_staggered, backstab)
 	var base_damage := (attack.damage * damage_scale * crit
+			* _backstab_scale(attacker_id, attack, backstab)
+			* _marked_scale(attacker_id, attack, target.state.statuses, target.params.statuses, target)
 			* _execute_scale(execute, attack, target.health / target.max_health()))
 	var damage := _after_armor(base_damage
 			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
@@ -703,14 +728,23 @@ func _execute_scale(execute: Vector2, attack: AttackParams, health_fraction: flo
 
 
 ## Crits: the [crit] multiplier if the attacking player's tree covers this
-## attack and the target was staggered before the hit (the Halberd's Headsman
-## capstone, "crit_staggered"), or else on a roll of its gear's crit chance
-## (Sear); else 1. Enemies never crit.
-func _crit_multiplier(attacker_id: int, attack: AttackParams, target_staggered: bool) -> float:
+## attack and its condition holds (the Halberd's Headsman capstone,
+## "crit_staggered": the target was staggered before the hit; the Dual
+## Talons' Predator capstone, "crit_backstab": a backstab), or the attacker is
+## Primed (Feint: its next hit crits, using the status up), or else on a roll
+## of its gear's crit chance (Sear); else 1. Enemies never crit.
+func _crit_multiplier(attacker_id: int, attack: AttackParams, target_staggered: bool,
+		backstab := false) -> float:
 	var attacker := _player_by_id(attacker_id)
 	if attacker == null:
 		return 1.0
-	var crit := attacker.crit_multiplier(attack, target_staggered)
+	var crit := attacker.crit_multiplier(attack, target_staggered, backstab)
+	if crit <= 1.0:
+		var primed := attacker.state.statuses.next_hit_crit_status(attacker.params.statuses)
+		if primed >= 0:
+			attacker.state.remove_status(primed)
+			crit = attacker.params.crit_damage_multiplier
+			_primed_crits += 1
 	if crit <= 1.0 and randf() < attacker.gear.bonus("crit_chance"):
 		crit = attacker.params.crit_damage_multiplier
 		_gear_crits += 1
@@ -843,6 +877,111 @@ func _ramp_on_hit(attacker: Player) -> void:
 		_ramp_stacks += 1
 
 
+# --- Assassin: Dual Talons mechanics (server only) ---
+
+## A backstab: a player's hit (attacker_id > 0) from within [backstab]
+## rear_arc behind the target's facing (attacker_pos: for a projectile, a
+## point back along its path), or on an enemy whose threat target isn't the
+## attacker (idle, or fighting someone else) when unaware_enemies is on.
+## target: a Player or an Enemy.
+func _is_backstab(attacker_id: int, attacker_pos: Vector3, target: Node3D) -> bool:
+	var attacker := _player_by_id(attacker_id) if attacker_id > 0 else null
+	if attacker == null:
+		return false
+	var p := attacker.params
+	var player := target as Player
+	var yaw: float = player.state.yaw if player else (target as Enemy).brain.yaw
+	var behind := MeleeHitbox.is_in_front(target.global_position, yaw + PI, attacker_pos,
+			p.backstab_rear_arc)
+	if not behind and player == null and p.backstab_unaware_enemies:
+		behind = (target as Enemy).brain.target_id != attacker_id
+	if behind:
+		_backstabs += 1
+	return behind
+
+
+## The attacker's backstab damage multiplier for this attack (Backstab
+## passives, Player.backstab_multiplier) when `backstab`, else 1.
+func _backstab_scale(attacker_id: int, attack: AttackParams, backstab: bool) -> float:
+	if not backstab:
+		return 1.0
+	var attacker := _player_by_id(attacker_id)
+	return attacker.backstab_multiplier(attack) if attacker else 1.0
+
+
+## Feint ("read_status"): a player's attack that a player blocked or evaded,
+## or that landed on an enemy mid-swing, gives the attacker its read_status
+## (Primed: the next hit crits). Once per step.
+func _feint_read(attacker: Player, attack: AttackParams) -> void:
+	if attack.read_status.is_empty():
+		return
+	if _give_status(attacker.peer_id, attacker,
+			attacker.params.statuses.index_of(attack.read_status), 1, -1):
+		_feint_reads += 1
+		if _verbose:
+			print("[server] peer %d reads its target: %s" % [attacker.peer_id, attack.read_status])
+
+
+# --- Assassin: Throwing Knives mechanics (server only) ---
+
+## Marked Blade: a melee hit (not a projectile: its attack has no
+## `projectile`) from the player who marked the target (a mark status,
+## StatusEffects.mark_from) deals 1 + marked_bonus as much and uses the mark
+## up. target_player: the target if it's a player (removing a status is then
+## a server event), null for an enemy. Else 1.
+func _marked_scale(attacker_id: int, attack: AttackParams, statuses: StatusEffects,
+		defs: StatusDefs, target_player: Player) -> float:
+	if attacker_id <= 0 or not attack.projectile.is_empty():
+		return 1.0
+	var index := statuses.mark_from(defs, attacker_id)
+	if index < 0:
+		return 1.0
+	var bonus := defs.get_def(index).marked_bonus
+	if target_player:
+		target_player.state.remove_status(index)
+	else:
+		statuses.remove(index)
+	_marked_hits += 1
+	return 1.0 + bonus
+
+
+## Venom capstone ("heal_cut"): healing on a target carrying a status
+## (applies_to: Poison) applied by a player with the node in the tree of one of
+## its equipped weapons is cut by its amount (the biggest cut counts). 1 = no cut.
+func _heal_cut(target: Player) -> float:
+	var cut := 0.0
+	for source: Player in _players.get_children():
+		if source.build == null or source == target:
+			continue
+		for weapon_id in source.build.weapons:
+			var node := source.build.weapon_effect(weapon_id, "heal_cut")
+			if node == null:
+				continue
+			var index := source.params.statuses.index_of(node.applies_to)
+			if index >= 0 and target.state.statuses.source_of(index) == source.peer_id:
+				cut = maxf(cut, node.amount)
+	if cut > 0.0:
+		_heal_cuts += 1
+	return maxf(0.0, 1.0 - cut)
+
+
+## Flurry capstone ("knife_flurry"), on every projectile release: a light or
+## heavy throw (not an ability) with the weapon whose tree has it is counted
+## (Player.throw_counter, once per attack); every amount-th also sends out the
+## ability applies_to (Fan of Knives) from where the player stands, for free.
+func _knife_flurry(player: Player) -> void:
+	if player.build == null or player.state.is_using_ability():
+		return
+	var node := player.build.weapon_effect(player.state.weapon_id(), "knife_flurry")
+	if node == null or not player.throw_counter.register(player.state.attack_serial, roundi(node.amount)):
+		return
+	var weapon := player.state.weapon(player.params)
+	var fan := weapon.ability(weapon.ability_index(node.applies_to))
+	if fan:
+		_flurry_fans += 1
+		_projectiles.server_fire_attack(player, fan)
+
+
 # --- Juggernaut: War Hammer capstones, Wing tree effects (server only) ---
 
 ## Server, every live tick of a player's attack: the War Hammer capstones of
@@ -951,6 +1090,8 @@ func _print_juggernaut_summary() -> void:
 	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d wall_stuns=%d roar_guards=%d" % [
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
 			_roar_guards])
+	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d" % [
+			_backstabs, _primed_crits, _feint_reads, _marked_hits, _flurry_fans, _heal_cuts])
 
 
 ## Server: a player's health reached 0 (a hit or damage over time). With
@@ -1237,7 +1378,7 @@ func _give_ember(player: Player, amount: float, in_combat: bool) -> void:
 func _heal_player(target: Player, amount: float, healer_id: int) -> float:
 	if target.state.dead or amount <= 0.0:
 		return 0.0
-	amount *= 1.0 + target.gear.bonus("healing_pct")  # Tend
+	amount *= (1.0 + target.gear.bonus("healing_pct")) * _heal_cut(target)  # Tend, Venom
 	var healed := minf(amount, target.max_health() - target.health)
 	if healed <= 0.0:
 		return 0.0

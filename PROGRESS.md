@@ -50,7 +50,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|---|
 | Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
-| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut built |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin built (Assassin: decoy/stealth Wings not yet) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
 | Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
@@ -71,6 +71,9 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 4. Second weapon and weapon swap | **Done**, and well past it: Fighter (Broadsword, Spear, Dual Axes) and Juggernaut (Halberd, Greataxe, War Hammer), all abilities and capstones, Wings, statuses, forced movement, projectiles, parties, enemy threat (sessions 11–25) |
 | 5. Persistence | Not started |
 | 6. One zone, then playtest with real people | Not started |
+
+**Session 32:** the **Assassin** class (Dual Talons, Throwing Knives, two of four Wing
+abilities), unplaytested; see §4.
 
 **Latest state (session 28):** Husks drop personal loot; F picks it up; I opens the
 inventory with equipped gear; gear changes damage, crits, armor, max health, block
@@ -185,7 +188,8 @@ Brief: two or three node types, one refining step, one crafting station, tradesk
 
 ### Class track (fits after Step E, or between steps when the developer wants)
 
-Order from `design/classes.md`: **Assassin** (Dual Talons first, then Throwing Knives)
+Order from `design/classes.md`: ~~Assassin~~ (built in session 32 except Ember Double,
+Shadow Swap, Ricochet and Recall, which need decoys/stealth/new projectile kinds)
 → **Ranger** → **Mage** → **Paladin**. Each class is about 2–3 sessions (weapons,
 trees, Wings, models), plus the systems it needs:
 - `SUMMON` (built in step 6 for Shield Wall), `AREA` ground effects and traps (Ranger,
@@ -225,6 +229,18 @@ trees, Wings, models), plus the systems it needs:
 N DPS N s" readout above it read well and match what you dealt (bleed ticks too)? Does
 it heal and stand back up 4 s after you stop? It drops nothing.
 
+**Assassin (session 32, `run_local_test.ps1 -Class assassin`):**
+- Talons feel: is a 0.28 s light too fast/too weak? Pounce's reach and hop; Talon Spin;
+  Hook Talon's 2 m pull; Eviscerate on a low Husk.
+- Backstabs: hit a Husk that's chasing the bot (or from behind): with Unseen Strike
+  learned (K, Predator capstone) every one should say "Critical!".
+- Feint: Feint a Husk mid-swing (or the bot while it blocks): the next hit crits.
+- Talon Storm (Tempest capstone): a long combo of lights should visibly speed up.
+- Knives: light/heavy throws, Fan of Knives, Pinning Knife slow, Venom Coat poison
+  ticks; Marked Blade then a Talon hit (+50%); Endless Flurry (every 5th throw fans).
+- Wings: Ashstep distance and feel; Plumage Flash's cone and Dazzled.
+- Models: claws on the fists, knives in the hands (no throw animation beyond the swing).
+
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
 
 **Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
@@ -247,6 +263,22 @@ Loot and gear:
 - New affixes **Tend** (healing received) and **Kindle** (Ember gained); Ferocity and
   Rage (stamina) are off until stamina is synced.
 - The bot never equips weapons (it picks weapons per cycle in the K panel).
+
+Assassin (session 32):
+- Backstab = from the rear 180°, **or any hit on an enemy that isn't targeting you**
+  (idle or fighting someone else): in a party the non-tank backstabs constantly.
+- The Predator capstone crits backstabs instead of "hits from behind ignore block"
+  (blocks only cover the front 120°, so that was already true).
+- Feint reads blocks, guard breaks and dodges (players) or an enemy mid-swing (Husks
+  never block or dodge); Primed lasts 4 s and is used by the next hit even if that hit
+  is blocked.
+- Marked's bonus needs a melee hit (a knife doesn't use it); Venom Coat's poison also
+  rides on Talon hits (it's "your next 5 hits", like Bloodlust).
+- Festering Wounds cuts healing on players only (Husks don't heal from anything it
+  covers); Endless Flurry's free fan uses no cooldown.
+- Plumage Flash: Dazzled is −25% damage dealt (the design's "aim and turn speed
+  reduced" has no equivalent on enemies yet) plus a Slow.
+- Both Wing capstones and two Wing abilities wait for decoys/stealth (`effect="none"`).
 
 Open questions for coming steps:
 - **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
@@ -354,6 +386,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 29 | 2026-10-10 | Merged the project handoff into this file; one build order (docs only) |
 | 30 | 2026-10-10 | Training dummy: stationary enemy, idle reset, per-player DPS readout (branch `training-dummy`) |
 | 31 | 2026-10-10 | Merged `training-dummy` and the loot branch; smoke tests run with PowerShell 7 on Linux; fixed the loot `--tune` quoting (it parsed as `{}`, so no drops) and made Tuning log unparseable overrides |
+| 32 | 2026-10-10 | The Assassin: Dual Talons (backstabs, Feint/Primed, Talon Storm), Throwing Knives (knife projectile, poison, Marked, Festering Wounds, Endless Flurry), Wings Ashstep and Plumage Flash, models, items. 460 tests; smoke (Fighter, -Party, Juggernaut, Assassin, Assassin -Party) passes on Linux/PowerShell 7 with 0 corrections (the -Party "party of 2" line is the known Linux quit race) |
 
 ---
 

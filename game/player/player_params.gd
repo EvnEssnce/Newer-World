@@ -70,6 +70,10 @@ var force_max_height := 0.0
 var force_pull_gap := 0.0
 ## A critical hit's damage multiplier ([crit] in combat.cfg; server).
 var crit_damage_multiplier := 1.0
+## Backstabs ([backstab] in combat.cfg; server): the arc behind a target that
+## counts (radians), and whether a hit on an enemy that isn't targeting you is one.
+var backstab_rear_arc := PI
+var backstab_unaware_enemies := true
 
 # Wings (data/wings_<class>.cfg)
 ## Every class's Wing ability pool, by class id.
@@ -186,6 +190,8 @@ static func _load_force_limits(p: PlayerParams) -> void:
 	p.force_max_height = Tuning.get_value("combat", "force", "max_height")
 	p.force_pull_gap = Tuning.get_value("combat", "force", "pull_gap")
 	p.crit_damage_multiplier = Tuning.get_value("combat", "crit", "damage_multiplier")
+	p.backstab_rear_arc = deg_to_rad(Tuning.get_value("combat", "backstab", "rear_arc"))
+	p.backstab_unaware_enemies = Tuning.get_value("combat", "backstab", "unaware_enemies")
 
 
 ## The weapon with this id, or default_weapon.

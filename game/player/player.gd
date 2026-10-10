@@ -159,6 +159,9 @@ var status_damage_pending := 0.0
 var status_heal_pending := 0.0
 ## Server: War Hammer heavies counted for the Earthshaker capstone.
 var heavy_counter := HeavyCounter.new()
+## Server: counts this player's knife throws (light and heavy) for the Throwing
+## Knives' Flurry capstone ("knife_flurry").
+var throw_counter := HeavyCounter.new()
 ## Server: the player whose knockback is moving this one and who has the
 ## Tempest Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
@@ -232,6 +235,7 @@ func _ready() -> void:
 	_build_phoenix_visuals()
 	_build_halberd_greataxe()
 	_build_hammer_model()
+	_build_assassin_models()
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -369,15 +373,25 @@ func _attack_kind(attack: AttackParams) -> PackedStringArray:
 	return PackedStringArray(["heavy" if heavy else "light", ""])
 
 
-## Server: the crit multiplier (Headsman: [crit] in data/combat.cfg) of the
-## weapon tree that's out for this attack on a target that was (or wasn't)
-## staggered before the hit; 1 = no crit (and always during a Wing ability).
-func crit_multiplier(attack: AttackParams, target_staggered: bool) -> float:
+## Server: the crit multiplier (Headsman, Predator: [crit] in data/combat.cfg)
+## of the weapon tree that's out for this attack on a target that was (or
+## wasn't) staggered before the hit, and is (or isn't) a backstab; 1 = no crit
+## (and always during a Wing ability).
+func crit_multiplier(attack: AttackParams, target_staggered: bool, backstab := false) -> float:
 	if build == null or attack == null or state.is_using_wing():
 		return 1.0
 	var kind := _attack_kind(attack)
 	return build.crit_multiplier(state.weapon_id(), kind[0], kind[1], target_staggered,
-			params.crit_damage_multiplier)
+			params.crit_damage_multiplier, backstab)
+
+
+## Server: the weapon tree's damage multiplier for this attack when it's a
+## backstab (Backstab passives); 1 otherwise or during a Wing ability.
+func backstab_multiplier(attack: AttackParams) -> float:
+	if build == null or attack == null or state.is_using_wing():
+		return 1.0
+	var kind := _attack_kind(attack)
+	return build.backstab_multiplier(state.weapon_id(), kind[0], kind[1])
 
 
 ## Server: the execute bonus (Finishing Thrust) of the weapon that's out, as
@@ -631,7 +645,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var ability_id := ability.id if ability else ""
 
 	var spin := 0.0
-	if ability_id in ["whirlwind_edge", "vortex"]:
+	if ability_id in ["whirlwind_edge", "vortex", "talon_spin"]:
 		spin = _spin_offset(ability, attack_tick)
 	var lift := ability.leap_lift(attack_tick) if ability else 0.0
 	_model.rotation.y = yaw + spin
@@ -654,8 +668,9 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var axes := model == "dual_axes"
 	var spear := model == "spear"
 	var polearm_or_greataxe := model in ["halberd", "greataxe"]
-	_sword_pivot.visible = not axes and not spear and not polearm_or_greataxe
-	_shield_pivot.visible = not axes and not spear and not polearm_or_greataxe
+	var own_model := polearm_or_greataxe or model in ASSASSIN_MODELS
+	_sword_pivot.visible = not axes and not spear and not own_model
+	_shield_pivot.visible = not axes and not spear and not own_model
 	_axe_right_pivot.visible = axes and not _axe_thrown
 	_axe_left_pivot.visible = axes
 	_spear_pivot.visible = spear
@@ -678,6 +693,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_sword_pivot.position = _sword_rest_position + Vector3(0.0, 0.0, pose.z)
 	_show_halberd_greataxe(model, view, attack, ability_id, attack_tick, lowered)
 	_show_hammer(model == "war_hammer", attack, view.attack_type, ability_id, attack_tick, lowered)
+	_show_assassin(model, attack, view.attack_type, ability_id, attack_tick, lowered)
 
 	_show_hitbox(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
@@ -820,7 +836,7 @@ static func _axe_pitches(attack: AttackParams, attack_type: int, ability_id: Str
 	var chop := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_STRUCK, 0.0)).x
 	if ability_id == "frenzy":
 		return _frenzy_pitches(attack, tick, chop)
-	if ability_id in ["bloodlust", "rampage"]:
+	if ability_id in ["bloodlust", "rampage", "venom_coat"]:
 		# Both axes raised high, then lowered.
 		var raised := _phase_pose(attack, tick, rest, Vector2(AXE_WOUND, 0.0), Vector2(AXE_WOUND, 0.0)).x
 		return Vector2(raised, raised)
@@ -843,6 +859,59 @@ static func _frenzy_pitches(attack: AttackParams, tick: float, chop: float) -> V
 		pitch = lerpf(AXE_STRUCK, AXE_WOUND,
 				(into - attack.active_ticks) / maxf(interval - attack.active_ticks, 1.0))
 	return Vector2(pitch, AXE_WOUND) if index % 2 == 0 else Vector2(AXE_WOUND, pitch)
+
+
+# --- Assassin: Dual Talons and Throwing Knives models (placeholder, client) ---
+# Built in code: a claw (three blades) on each fist, or a knife in each hand.
+# They swing like the Dual Axes (_axe_pitches: pitch on a pivot at each hand).
+
+const ASSASSIN_MODELS := ["dual_talons", "throwing_knives"]
+const TALON_RIGHT_PIVOT := Vector3(0.42, 0.2, -0.15)
+const TALON_LEFT_PIVOT := Vector3(-0.42, 0.2, -0.15)
+
+var _talon_right: Node3D
+var _talon_left: Node3D
+var _knife_right: Node3D
+var _knife_left: Node3D
+
+
+func _build_assassin_models() -> void:
+	var claw := _flat_material(Color(0.85, 0.45, 0.18), 0.6, 0.35)
+	var wrap := _flat_material(Color(0.22, 0.18, 0.16), 0.0, 0.9)
+	var steel := _flat_material(Color(0.75, 0.77, 0.8), 0.7, 0.3)
+	for side in [1.0, -1.0]:
+		var parts: Array = [[Vector3(0.14, 0.12, 0.14), Vector3.ZERO, wrap]]
+		for i in 3:
+			parts.append([Vector3(0.025, 0.03, 0.42), Vector3((i - 1) * 0.045, 0.0, -0.27), claw])
+		var talon := _weapon_pivot(TALON_RIGHT_PIVOT if side > 0.0 else TALON_LEFT_PIVOT, parts)
+		var knife := _weapon_pivot(TALON_RIGHT_PIVOT if side > 0.0 else TALON_LEFT_PIVOT, [
+			[Vector3(0.04, 0.04, 0.12), Vector3(0.0, 0.0, -0.02), wrap],
+			[Vector3(0.015, 0.06, 0.24), Vector3(0.0, 0.0, -0.2), steel],
+		])
+		if side > 0.0:
+			_talon_right = talon
+			_knife_right = knife
+		else:
+			_talon_left = talon
+			_knife_left = knife
+
+
+## Shows the Talons or Knives (hidden for other models), swung like the axes.
+func _show_assassin(model: String, attack: AttackParams, attack_type: int, ability_id: String,
+		attack_tick: float, lowered: float) -> void:
+	var talons := model == "dual_talons"
+	var knives := model == "throwing_knives"
+	_talon_right.visible = talons
+	_talon_left.visible = talons
+	_knife_right.visible = knives
+	_knife_left.visible = knives
+	if not talons and not knives:
+		return
+	var pitches := _axe_pitches(attack, attack_type, ability_id, attack_tick)
+	var right := _talon_right if talons else _knife_right
+	var left := _talon_left if talons else _knife_left
+	right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
+	left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
 
 
 # --- Juggernaut: Halberd and Greataxe models (placeholder, client) ---

@@ -33,13 +33,14 @@ class MasteryNode:
 	var ability := ""
 	## Passive/upgrade nodes: "damage", "low_health_damage", "block_stamina",
 	## "execute_damage", "hold_the_line", "hook_stagger", "crit_staggered",
-	## "ability_range", "ramp_on_hit", "none", or (Wing trees)
+	## "ability_range", "ramp_on_hit", "backstab_damage", "crit_backstab",
+	## "none", or (Wing trees)
 	## "damage_taken", "mantle_heal", "surge_stagger", "force_distance",
 	## "wall_stun", "roar_guard"; War Hammer: "heavy_shockwave",
 	## "heavy_breaks_block".
 	var effect := "none"
-	## "damage", "crit_staggered": "light", "heavy", "abilities", "all" or one
-	## ability id.
+	## "damage", "crit_staggered", "backstab_damage", "crit_backstab": "light",
+	## "heavy", "abilities", "all" or one ability id.
 	## "mantle_heal" / "surge_stagger": the Wing ability whose self-buff it needs.
 	## "hold_the_line": the internal ability that pokes.
 	## "hook_stagger": the mark status it needs (Hooked); "ramp_on_hit": the
@@ -306,19 +307,36 @@ static func covers(applies_to: String, attack_kind: String, ability_id: String) 
 			or (attack_kind == "ability" and (applies_to == "abilities" or applies_to == ability_id)))
 
 
-## Crits ("crit_staggered" nodes: the Halberd's Headsman capstone): crit_damage
-## (the [crit] multiplier, data/combat.cfg) if such a node covers this attack
-## and the target was staggered before the hit; else 1.
+## Crits: crit_damage (the [crit] multiplier, data/combat.cfg) if a node
+## covering this attack has its condition: "crit_staggered" (the Halberd's
+## Headsman capstone) a target staggered before the hit, "crit_backstab" (the
+## Dual Talons' Predator capstone) a backstab (World._is_backstab: from
+## behind, or an enemy fighting someone else). Else 1.
 func crit_multiplier(allocated: PackedStringArray, attack_kind: String, ability_id: String,
-		target_staggered: bool, crit_damage: float) -> float:
-	if not target_staggered:
+		target_staggered: bool, crit_damage: float, backstab := false) -> float:
+	if not target_staggered and not backstab:
 		return 1.0
 	for id in allocated:
 		var n := get_node(id)
-		if (n and n.kind != KIND_ACTIVE and n.effect == "crit_staggered"
-				and covers(n.applies_to, attack_kind, ability_id)):
+		if n == null or n.kind == KIND_ACTIVE or not covers(n.applies_to, attack_kind, ability_id):
+			continue
+		if ((n.effect == "crit_staggered" and target_staggered)
+				or (n.effect == "crit_backstab" and backstab)):
 			return crit_damage
 	return 1.0
+
+
+## Damage multiplier on a backstab ("backstab_damage" nodes covering this
+## attack: 1 + the sum of their amounts). 1 without one.
+func backstab_multiplier(allocated: PackedStringArray, attack_kind: String,
+		ability_id: String) -> float:
+	var bonus := 0.0
+	for id in allocated:
+		var n := get_node(id)
+		if (n and n.kind != KIND_ACTIVE and n.effect == "backstab_damage"
+				and covers(n.applies_to, attack_kind, ability_id)):
+			bonus += n.amount
+	return 1.0 + bonus
 
 
 ## Hitbox range multiplier for one ability ("ability_range" nodes whose

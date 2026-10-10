@@ -109,7 +109,8 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      equipped gear and the bag).
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
-                     greataxe, war_hammer), class_<id> (fighter, juggernaut),
+                     greataxe, war_hammer; Assassin: dual_talons, throwing_knives),
+                     class_<id> (fighter, juggernaut, assassin),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
@@ -466,6 +467,70 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
 - Counters: `SUMMARY juggernaut crits= hook_staggers= brace_staggers= bloodied_stacks=`
   (server, no smoke check).
 
+## Assassin (Dual Talons, Throwing Knives)
+
+`data/class_assassin.cfg` (`--class=assassin`, `-Class assassin`). Placeholder models
+built in code in `player.gd` (`_build_assassin_models`: a three-blade claw on each fist,
+or a knife in each hand), swung with the Dual Axes' poses (`_axe_pitches`). Every new
+mechanic is server-only (no new `to_array()` fields); the `World` helpers sit in two
+blocks, "Assassin: Dual Talons mechanics" and "Assassin: Throwing Knives mechanics".
+Counters: `SUMMARY assassin backstabs= primed_crits= feint_reads= marked_hits=
+flurry_fans= heal_cuts=` (no smoke check; `backstabs` counts every class's hits from
+behind, bonus or not).
+
+- **Dual Talons** (`weapon_dual_talons.cfg`, tree `mastery_dual_talons.cfg`: Predator /
+  Tempest). The fastest light (38 dmg, 0.28 s), heavy 120. Pounce (5 m dash + 1 m
+  cosmetic hop, hit at the landing), Rending Talons (bleed ×2), Eviscerate
+  (attack-level execute: +100% at 0 health from 35%), Talon Spin (3 radial windows,
+  2.4 m; spins the body), Feint (a weak poke with `read_status`, below), Hook Talon
+  (3.5 m line, `max_targets` 1, pull 2 m). Defaults: all six learned, Q/E/R = Pounce,
+  Rending Talons, Feint. The heavy has a 0 m knockback the smoke test turns on.
+- **Backstabs** (`[backstab]` in combat.cfg, `World._is_backstab`): a player's hit
+  from within `rear_arc` (180°) behind the target's facing (players: `state.yaw`,
+  enemies: `brain.yaw`; a projectile's attacker position is back along its path), or
+  on an enemy whose `brain.target_id` isn't the attacker (idle, or fighting someone
+  else; `unaware_enemies`). Tree effects: `backstab_damage` (+amount on backstabs,
+  `MasteryTree.backstab_multiplier` → `World._backstab_scale`, in `resolve_strike` /
+  `strike_enemy`) and the Predator capstone **Unseen Strike** (`crit_backstab`:
+  backstabs crit, `MasteryTree.crit_multiplier`'s `backstab` argument). **Choice:** the
+  design's "hits from behind ignore block" was already true (the block arc is 120° in
+  front), so the capstone crits backstabs instead.
+- **Feint** (`read_status="primed"`, `AttackParams.read_status`): in `_hit_targets`, a
+  player result `HIT_BLOCKED` / `HIT_GUARD_BROKEN` / `HIT_EVADED`, or an enemy in
+  `EnemyBrain.Mode.ATTACK` when it lands, gives the attacker **Primed** once per step
+  (`World._feint_read`). Primed (`next_hit_crits`): `World._crit_multiplier` crits the
+  next hit that the tree doesn't already crit and removes it (`remove_status`, a
+  server event). **Choice:** enemies never block or dodge, so "mid-swing" is their read.
+- **Talon Storm** (Tempest capstone, `ramp_on_hit` with `applies_to="talon_storm"`):
+  the Greataxe's Red Tide path with a *sim* status: each connecting step adds a stack
+  of +4% attack speed (max 8, 1.5 s). Stacking attack speed: each stack adds
+  `attack_speed - 1`, capped at `StatusEffects.MAX_ATTACK_SPEED` (2). Applied by the
+  server, so it's a server event (no counted corrections). Counted in
+  `bloodied_stacks=` on the juggernaut line.
+- **Throwing Knives** (`weapon_throwing_knives.cfg`, tree `mastery_throwing_knives.cfg`:
+  Venom / Flurry). Every attack throws `[projectile_knife]` (feather, 30 m/s, ~15 m,
+  stops at the first target or a guard): light 1 knife (32), heavy 3 fanned 16° (42
+  each). Fan of Knives (5 over 50°), Pinning Knife (Slow 3 s), Marked Blade (Marked),
+  Venom Coat (self: next 5 hits poison, like Bloodlust). Defaults: all four learned,
+  Q/E/R = Fan of Knives, Pinning Knife, Venom Coat. **Not built:** Ricochet and Recall.
+- **Marked** (`marked_bonus` 0.5, `StatusEffects.mark_from(defs, source)`): the
+  marker's next *melee* hit (an attack without `projectile`) on the target deals +50%
+  and removes the mark (`World._marked_scale`, players via `remove_status`).
+- **Venom capstone Festering Wounds** (`heal_cut`, `applies_to="poison"`, 0.5): healing
+  on a player carrying your poison is cut by half, whichever of your weapons is out
+  (`World._heal_cut` in `_heal_player`).
+- **Flurry capstone Endless Flurry** (`knife_flurry`, amount 5, `applies_to=
+  "fan_of_knives"`): `World._knife_flurry` on `projectile_released` counts light/heavy
+  throws (`Player.throw_counter`, a `HeavyCounter` by `attack_serial`); every 5th also
+  fires Fan of Knives via `ProjectileSystem.server_fire_attack` (no cooldown used).
+- **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
+  Trickster, 12 points): Ashstep (15 Ember, 6 s: 4.5 m blink the way you move, i-frames)
+  and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
+  dealt 4 s + Slow 2.5 s). Defaults Z Ashstep, C Plumage Flash. **Not built:** Ember
+  Double (decoy + stealth) and Shadow Swap; both capstones (Second Step: a second
+  Ashstep charge; Mirror Image: decoys) are `effect="none"` until then. Wing
+  Enhancement item: Ashen Vanes. Weapon items: Iron Talons, Iron Knives.
+
 ## Status effects
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
@@ -483,7 +548,8 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
   and what a cleanse removes (`cleanse()` also ends the stagger). Enemies: stun =
   `brain.stagger`.
 - **Attack speed** (`attack_speed` 1–2, `attack_speed_min_stamina` fraction; Rampage
-  1.25 at ≥ 50% stamina): `StatusEffects.attack_speed(defs, stamina fraction)`. In
+  1.25 at ≥ 50% stamina; each stack adds `attack_speed - 1`, at most 2: Talon Storm):
+  `StatusEffects.attack_speed(defs, stamina fraction)`. In
   `PlayerState._step_attack_speed`, a light or heavy attack (not abilities) adds
   (speed − 1) per tick to `attack_speed_carry` (synced, index 35); each whole tick
   skips the tick just reached, but only a windup or recovery tick (never from the first
@@ -789,6 +855,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headl
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
@@ -862,7 +929,7 @@ bot's camera then turns to where it aims, and with `--verbose` it prints
 give the server and every client the same overrides; only keys that exist in the file
 can be overridden, strings need no quotes). The smoke test uses `--tune` for low health
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
-in the real data (Husk swings bleed, Broadsword and War Hammer heavies push) so its
+in the real data (Husk swings bleed, Broadsword, War Hammer and Dual Talons heavies push) so its
 status and force checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`)
 so a reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe /
 Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` on the
