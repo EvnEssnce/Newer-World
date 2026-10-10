@@ -70,6 +70,7 @@ static func format_stat(stat: String, value: float) -> String:
 ## A sign of -1 shows the bonus as a reduction (block_stamina_reduction).
 const STAT_TEXT := {
 	"weapon_power": ["weapon power", false, 0],
+	"wing_power": ["wing power", false, 0],
 	"armor": ["armor", false, 0],
 	"damage_pct": ["damage", true, 1],
 	"crit_chance": ["crit chance", true, 1],
@@ -77,6 +78,8 @@ const STAT_TEXT := {
 	"max_stamina": ["max stamina", false, 1],
 	"stamina_regen_pct": ["stamina regen", true, 1],
 	"block_stamina_reduction": ["stamina cost of blocked hits", true, -1],
+	"healing_pct": ["healing received", true, 1],
+	"ember_gain_pct": ["Ember gained", true, 1],
 }
 
 
@@ -100,11 +103,12 @@ func rarity_color(db: ItemDatabase) -> Color:
 	return rarity_def.color if rarity_def else Color.WHITE
 
 
-## "Rare  Head" or "Common  Weapon (Broadsword)".
+## "Rare  Head", "Common  Weapon (Broadsword)" or "Epic  Wing Enhancement".
 func kind_text(db: ItemDatabase) -> String:
 	var rarity_def: ItemDatabase.RarityDef = db.rarities.get(rarity)
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
-	var slot := def.slot.capitalize() if def else "?"
+	var slot: String = "?" if def == null else (
+			"Wing Enhancement" if def.slot == "wings" else def.slot.capitalize())
 	if def and not def.weapon_type.is_empty():
 		var file := "weapon_" + def.weapon_type
 		var weapon_name: String = Tuning.get_optional(file, "weapon", "name", def.weapon_type.capitalize())

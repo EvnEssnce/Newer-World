@@ -13,8 +13,8 @@ func before_each() -> void:
 	_rarity("common", 0)
 	_rarity("rare", 2)
 	_rarity("legendary", 9)  # more than any slot's pool
-	_item("sword", "weapon", "broadsword", "weapon_power", 1.0)
-	_item("cap", "head", "", "armor", 0.2)
+	_item("sword", "weapon", "broadsword", "weapon_power", 100.0)
+	_item("cap", "head", "", "armor", 20.0)
 	_affix("fierce", "damage_pct", 0.02, 0.06, ["weapon"])
 	_affix("precise", "crit_chance", 0.01, 0.04, ["weapon", "head"])
 	_affix("hale", "max_health", 20.0, 60.0, ["head"])
@@ -39,14 +39,14 @@ func _rarity(id: String, affix_count: int) -> void:
 	db.rarities[id] = r
 
 
-func _item(id: String, slot: String, weapon_type: String, primary: String, per_gs: float) -> void:
+func _item(id: String, slot: String, weapon_type: String, primary: String, base: float) -> void:
 	var item := ItemDatabase.ItemDef.new()
 	item.id = id
 	item.name = id.capitalize()
 	item.slot = slot
 	item.weapon_type = weapon_type
 	item.primary_stat = primary
-	item.primary_per_gear_score = per_gs
+	item.primary_base = base
 	db.items[id] = item
 
 
@@ -103,9 +103,12 @@ func test_affix_values_scale_with_gear_score() -> void:
 				"20-60 per 100 gear score, at 150: %s" % hale)
 
 
-func test_primary_stat_scales_with_gear_score() -> void:
-	assert_almost(LootRoller.roll_item(db.items["sword"], "common", 123, db, rng).primary_value, 123.0)
-	assert_almost(LootRoller.roll_item(db.items["cap"], "common", 150, db, rng).primary_value, 30.0)
+func test_primary_stat_follows_the_gear_score_curve() -> void:
+	# 4 whole steps of 5 above 100, +1.12% each, compounding.
+	assert_almost(LootRoller.roll_item(db.items["sword"], "common", 123, db, rng).primary_value,
+			100.0 * pow(1.0112, 4))
+	assert_almost(LootRoller.roll_item(db.items["cap"], "common", 150, db, rng).primary_value,
+			20.0 * pow(1.0112, 10))
 
 
 func test_table_rolls_items_in_its_gear_score_range() -> void:
@@ -159,3 +162,10 @@ func test_real_data_files_are_consistent() -> void:
 	var real := ItemDatabase.from_tuning()
 	assert_eq(real.validate(), PackedStringArray(), "data/loot.cfg, items.cfg and affixes.cfg")
 	assert_true(real.tables.has("husk"), "Husks have a loot table")
+	for def: ItemDatabase.ItemDef in real.items.values():
+		if not def.class_id.is_empty():
+			assert_true(ClassDef.for_id(def.class_id) != null,
+					"%s's class %s exists" % [def.id, def.class_id])
+		if not def.weapon_type.is_empty():
+			assert_true(Tuning.has_file("weapon_" + def.weapon_type),
+					"%s's weapon %s exists" % [def.id, def.weapon_type])

@@ -11,6 +11,60 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-10 (28): Equipping gear (milestone 2, session 3)
+
+Built from the developer's guidance in a Linux cloud session. Milestone 2's loop is
+now complete: kill Husks → personal drops → pick up → equip → stronger numbers.
+
+Done:
+- **Equip slots**: Weapon 1, Weapon 2, Head, Chest, Legs, Wing Enhancement. Hands and
+  feet are gone (Padded Gloves/Boots removed). Armor fits any class; weapons and Wing
+  Enhancements are class-locked. New items: Iron Spear, Iron Halberd, Iron Greataxe,
+  Iron Maul (War Hammer), and Wing Enhancements **Cinder Plumes** (Fighter) and
+  **Ironquill Pinions** (Juggernaut), all in the Husk table.
+- **Gear score like New World** (`data/gear.cfg`; from the community-datamined
+  formulas on the New World fandom wiki: weapon damage ×1.0112 per 5 GS up to 500,
+  ×(1 + 0.0112 × ⅔) per 5 above; armor mitigation = armor / (armor + attacker
+  weapon GS^1.2)). Weapon power and wing power use the curve (100 at GS 100 = the
+  weapon file's numbers, so an empty slot is a plain GS 100 weapon); armor rating
+  uses the same curve (assumption: the wiki only gives the weapon one). Armor's
+  reduction depends on the gear score of the attacker's weapon (Husks count as GS
+  120): a full GS 100–140 Padded set is about 75–85 armor ≈ 20% less damage from a
+  Husk. Average gear score shows in the inventory.
+- **Stats that work now**: weapon/wing power, Blaze (damage %), Sear (crit chance,
+  rolls a real crit), Hearth (max health, shown on the bars), Scorch (blocked-hit
+  stamina), new **Tend** (healing received) and **Kindle** (Ember gained). Ferocity and
+  Rage (stamina) are switched off (`slots=[]`) until stamina gear is synced.
+- **Equipping takes 1 s** (`[equip] time`): you can walk but not attack, block, dodge,
+  swap or use abilities; a gold "Equipping Padded Jerkin" bar shows it. Free any time
+  (not mid-swing; dying cancels it). Equipping a weapon item changes that slot's
+  weapon type; changing weapons in K moves weapon items with them (or back to the bag).
+- **I panel**: Equipped section (Take off), totals line (armor and its % vs GS 120,
+  every bonus), bag items with Equip / "Replace <weapon>" buttons, a comparison line
+  ("+7 weapon power vs. your plain Broadsword") and a red reason when your class can't
+  use it.
+- Bot equips armor and Wing Enhancements that beat what it wears (twice a cycle);
+  smoke test requires an equip (its Husks drop only armor, so any class qualifies).
+- Snapshots: health and max health share one Vector2 and the equip time rides in the
+  packed int array, so they grew only ~4 bytes per player (still over the MTU at
+  worst with 2 players + 2 Husks, as before).
+- Tests: 442. Smoke (Linux runner): default, `-Party` and `-Class juggernaut` passed
+  (2–8 equips per run, 0 corrections). Two earlier runs hit the known "no Husk/player
+  moved by force" luck checks (they fail on the old code too). `smoke_test.ps1` not run here (no PowerShell).
+
+Needs a hand playtest (`run_local_test.ps1`):
+- Kill Husks, equip armor: does armor feel noticeable (~20%)? Equip time 1 s right?
+- Equip a weapon item of a type you don't have out ("Replace ..."), then change
+  weapons in K: does the item follow / come back to the bag?
+- Wing Enhancement: Wing abilities hit a little harder; Kindle Ember gain.
+
+Decisions to confirm: armor rating follows the same GS curve as weapons; affixes still
+scale linearly with GS; empty armor slots count 0 in the average gear score (a plain
+weapon counts 100); armor doesn't reduce damage over time (bleed); while equipping
+you can walk at full speed, and a stagger doesn't interrupt it; max health going up
+doesn't heal you; Tend and Kindle are new affix names/stats (healing received,
+Ember gained); the bot never equips weapons.
+
 ### 2026-10-09 (27): Loot drops, pickup and inventory (milestone 2, session 2)
 
 Built in a Linux cloud session (Godot downloaded there; see "Linux cloud sessions" in
@@ -839,11 +893,10 @@ building its Wave 1 in parallel: 1A ability framework/weapon swap/Fighter, 1B pa
    stay in 1A's `data/weapon_<name>.cfg`, not in loot data).
 2. **Done (session 27):** dead Husks drop **personal** loot (everyone who damaged it
    gets their own server roll); pick up with **F**, inventory screen on **I**.
-3. **Next:** equipping armor and weapons changes your numbers, built on the weapon
-   slots, with gear bonuses feeding the same modifier path as mastery passives. Open
-   questions for it: how armor reduces damage; whether equipped weapon items replace
-   the class's default weapons or only modify them; head/legs/feet Legendaries still
-   roll only 2 affixes (session 10).
+3. **Done (session 28):** equipping (6 slots, New World gear score, armor, 1 s
+   equip time). Milestone 2's loop works end to end; after a playtest it's done.
+   Later: stamina gear stats (sync max stamina/regen in `PlayerState`), salvage /
+   repair, item levels beyond GS 140 (more enemies and tables).
 
 Later / unscheduled:
 - Light attack combo chain (New World-style 3-hit string)?

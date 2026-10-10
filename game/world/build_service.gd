@@ -16,6 +16,8 @@ extends Node
 signal build_changed
 
 # Server
+## World/Loot, for weapon items that follow the weapon slots. Set by World.
+var loot: LootSystem
 ## Build changes applied / refused (for the smoke test summary).
 var accepted := 0
 var rejected := 0
@@ -70,9 +72,27 @@ func _request_weapons(weapons: PackedStringArray) -> void:
 	if player == null:
 		return
 	var error := _check_can_change(player)
+	if error.is_empty() and loot:
+		error = loot.check_weapon_change(player, weapons)
 	if error.is_empty():
 		error = player.build.set_weapons(weapons)
 	_finish(player, error)
+	if error.is_empty() and loot:
+		loot.weapons_changed(player)
+
+
+## Server: equips these weapon types (one per slot) for a weapon item being
+## equipped (LootSystem); the same checks as a request from the K panel.
+## Returns "" or why not.
+func apply_weapons(player: Player, weapons: PackedStringArray) -> String:
+	var error := _check_can_change(player)
+	if error.is_empty():
+		error = player.build.set_weapons(weapons)
+	if error.is_empty():
+		player.build.apply_to_state(player.state, player.params)
+		accepted += 1
+		send_build(player)
+	return error
 
 
 ## Client → server: replace the Wing tree allocation and the Wing slots (ability
@@ -92,7 +112,7 @@ func _check_can_change(player: Player) -> String:
 	if player.build == null:
 		return "No build yet."
 	if not player.state.can_change_loadout():
-		return "Can't change your build mid-attack, mid-ability or mid-swap."
+		return "Can't change your build mid-attack, mid-ability, mid-swap or while changing gear."
 	return ""
 
 

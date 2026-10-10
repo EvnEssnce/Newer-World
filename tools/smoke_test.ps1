@@ -4,7 +4,7 @@
 # guarded hit, ability hits and a build change, and Husks and bots must hit each
 # other; players and Husks must be moved by force (knockback) and the Spear's
 # abilities used; projectiles thrown and hitting; Husks dropping personal loot
-# that the bots pick up; no unexpected prediction corrections.
+# that the bots pick up and equip; no unexpected prediction corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID]
 # -Class picks the bots' class (default fighter; e.g. juggernaut).
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
@@ -74,7 +74,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=ember/rebirth/duration=1.0',
     # Every Husk kill drops something for each bot that damaged it (60% in the
     # real data), so the loot check doesn't hang on a few rolls.
-    '--tune=loot/table_husk/drop_chance=1.0')
+    '--tune=loot/table_husk/drop_chance=1.0',
+    # ...and only armor, which every class can wear, so the gear check (the bots
+    # equip what they pick up) doesn't hang on class-locked drops.
+    '--tune=loot/table_husk/items={"padded_cap": 1, "padded_jerkin": 1, "padded_leggings": 1}')
 
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
@@ -264,6 +267,15 @@ if (-not $lootSummary) {
     $failed = $true
 } else {
     Write-Host "PASS loot: $($lootSummary.Line)" -ForegroundColor Green
+}
+# Gear: the bots put on armor and Wing Enhancements they pick up (twice a cycle,
+# see LootSystem._bot_equip), so at least one equip must finish on the server.
+$gearSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY gear equips=(\d+)'
+if (-not $gearSummary -or [int]$gearSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL gear: nothing was equipped ($($gearSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS gear: $($gearSummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'

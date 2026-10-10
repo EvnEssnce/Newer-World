@@ -21,6 +21,9 @@ signal attack_stepped(player: Player)
 signal ability_started(player: Player)
 ## Server only: emitted on the sim step a weapon swap starts.
 signal weapon_swapped(player: Player)
+## Server only: the step that finished putting on or taking off gear
+## (PlayerState.equip_left reached 0); LootSystem applies the change.
+signal equip_finished(player: Player)
 ## Server, and the local client's own prediction (not replays): emitted on the
 ## sim step an attack releases its projectiles (AttackParams.projectile_tick).
 ## The server throws the real ones; the local client shows a cosmetic copy.
@@ -117,6 +120,10 @@ var state := PlayerState.new()
 var params := PlayerParams.current()
 ## Server-authoritative; clients copy it from snapshots.
 var health := 0.0
+## Max health from gear (Hearth); in snapshots, so clients draw the right bar.
+var bonus_max_health := 0.0
+## Server: what this player's equipped gear adds up to (LootSystem sets it).
+var gear := Equipment.Stats.new()
 ## Counted once per real simulation step (not on replays); for the smoke test.
 var dodges := 0
 var air_dodges := 0
@@ -208,7 +215,7 @@ var _axe_thrown := false
 func _ready() -> void:
 	state.stamina = params.max_stamina
 	state.ember = params.ember_resting
-	health = params.max_health
+	health = max_health()
 	if multiplayer.is_server():
 		_name_label.visible = false
 		return
@@ -237,6 +244,7 @@ func _process(_delta: float) -> void:
 
 func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, delta: float) -> void:
 	var was_on_floor := is_on_floor()
+	var was_equipping := state.is_equipping()
 	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta, aim_pitch)
 	if state.dodge_tick == 0:
 		dodges += 1
@@ -256,6 +264,8 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, de
 	if server and state.swap_tick == 0:
 		swaps += 1
 		weapon_swapped.emit(self)
+	if server and was_equipping and not state.is_equipping() and not state.dead:
+		equip_finished.emit(self)
 	if server:
 		status_damage_pending += state.status_damage
 		status_heal_pending += state.status_heal
@@ -316,18 +326,38 @@ func server_process_inputs(max_per_tick: int, delta: float) -> void:
 
 
 func get_snapshot() -> Array:
-	return [peer_id, global_position, velocity, last_processed_seq, state.to_array(), health]
+	# Health and max health in one Vector2: the same size as a float health alone
+	# (snapshots are near the MTU).
+	return [peer_id, global_position, velocity, last_processed_seq, state.to_array(),
+			Vector2(health, max_health())]
+
+
+## Base max health plus gear's.
+func max_health() -> float:
+	return params.max_health + bonus_max_health
 
 
 ## Server: the damage modifier from this player's mastery passives and
-## upgrades for one of its attacks (or abilities).
+## upgrades and gear (the weapon's weapon power, or the Wing Enhancement's wing
+## power for a Wing ability, times Blaze) for one of its attacks (or abilities).
 func damage_multiplier(attack: AttackParams) -> float:
 	if build == null or attack == null:
 		return 1.0
 	var kind := _attack_kind(attack)
 	# A Wing ability only gets the Wing tree's modifiers.
 	var weapon_id := "" if state.is_using_wing() else state.weapon_id()
-	return build.damage_multiplier(weapon_id, kind[0], kind[1], health / params.max_health)
+	var power := gear.wing_power if state.is_using_wing() else gear.weapon_power_for(weapon_id)
+	return (build.damage_multiplier(weapon_id, kind[0], kind[1], health / max_health())
+			* power * (1.0 + gear.bonus("damage_pct")))
+
+
+## Server: the gear score this player's hits count as against armor: the
+## weapon that's out (the Wing Enhancement's during a Wing ability), or the
+## base gear score without an item.
+func attack_gear_score(base: int) -> int:
+	if state.is_using_wing():
+		return gear.wing_gear_score if gear.wing_gear_score > 0 else base
+	return gear.weapon_gear_score_for(state.weapon_id(), base)
 
 
 ## [attack kind ("light", "heavy" or "ability"), ability id] of one of this
@@ -361,7 +391,8 @@ func execute_bonus() -> Vector2:
 
 ## Server: the mastery modifier on the stamina this player's blocked hits cost.
 func block_stamina_multiplier() -> float:
-	return build.block_stamina_multiplier(state.weapon_id()) if build else 1.0
+	var gear_cut := maxf(0.0, 1.0 - gear.bonus("block_stamina_reduction"))
+	return (build.block_stamina_multiplier(state.weapon_id()) if build else 1.0) * gear_cut
 
 
 ## Server: the Wing tree's modifier on damage this player takes.

@@ -11,6 +11,8 @@ var return_speed := 0.0
 var turn_speed := 0.0
 var stagger_multiplier := 0.0
 var respawn_ticks := 0
+## Its swings' gear score against players' armor (GearScore.mitigation).
+var gear_score := 100
 
 var aggro_range := 0.0
 var leash_range := 0.0
@@ -55,6 +57,7 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.turn_speed = deg_to_rad(Tuning.get_value(file, "stats", "turn_speed"))
 	p.stagger_multiplier = Tuning.get_value(file, "stats", "stagger_multiplier")
 	p.respawn_ticks = roundi(Tuning.get_value(file, "stats", "respawn_time") * tps)
+	p.gear_score = Tuning.get_optional(file, "stats", "gear_score", 100)
 
 	p.aggro_range = Tuning.get_value(file, "ai", "aggro_range")
 	p.leash_range = Tuning.get_value(file, "ai", "leash_range")

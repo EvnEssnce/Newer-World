@@ -320,7 +320,7 @@ func _update_hud(local: Player) -> void:
 		if peer == me or member == null:
 			continue
 		frames.append({"name": _name(peer), "health": member.health,
-				"max_health": member.params.max_health, "leader": peer == leader})
+				"max_health": member.max_health(), "leader": peer == leader})
 	var title := "No party"
 	var hint := "T  invite the player at your crosshair"
 	if not members.is_empty():

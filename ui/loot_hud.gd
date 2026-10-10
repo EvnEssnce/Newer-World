@@ -2,7 +2,8 @@ class_name LootHud
 extends CanvasLayer
 ## Loot overlay (client, built in code; LootSystem fills it): the "[F] Pick up"
 ## prompt just below the middle of the screen, and a feed on the right of what you picked up
-## (in rarity colours) and loot notices (inventory full, ...).
+## (in rarity colours) and loot notices (inventory full, ...), and the bar
+## while gear goes on or comes off.
 
 const NOTICE_COLOR := Color(1.0, 0.95, 0.8)
 ## How long each feed line stays, and how many show at once.
@@ -13,6 +14,9 @@ const PROMPT_BELOW_CENTER := 90.0
 
 var _prompt_panel: PanelContainer
 var _prompt: Label
+var _equip_box: VBoxContainer
+var _equip_label: Label
+var _equip_bar: ProgressBar
 var _feed: VBoxContainer
 var _feed_lines: Array[Array] = []  # [Label, expires_msec]
 
@@ -38,6 +42,34 @@ func _ready() -> void:
 	_prompt.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	_prompt_panel.add_child(_prompt)
 
+	_equip_box = VBoxContainer.new()
+	_equip_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	_equip_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_equip_box.grow_vertical = Control.GROW_DIRECTION_END
+	_equip_box.offset_top = PROMPT_BELOW_CENTER - 50.0  # above the prompt, clear of the status row
+	_equip_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_equip_box.visible = false
+	add_child(_equip_box)
+	_equip_label = Label.new()
+	_equip_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_equip_label.add_theme_font_size_override(&"font_size", 15)
+	_equip_label.add_theme_constant_override(&"outline_size", 4)
+	_equip_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	_equip_box.add_child(_equip_label)
+	_equip_bar = ProgressBar.new()
+	_equip_bar.custom_minimum_size = Vector2(220, 10)
+	_equip_bar.max_value = 1.0
+	_equip_bar.show_percentage = false
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.05, 0.06, 0.08, 0.85)
+	track.set_corner_radius_all(3)
+	_equip_bar.add_theme_stylebox_override(&"background", track)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.95, 0.75, 0.3)
+	fill.set_corner_radius_all(3)
+	_equip_bar.add_theme_stylebox_override(&"fill", fill)
+	_equip_box.add_child(_equip_bar)
+
 	_feed = VBoxContainer.new()
 	_feed.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT, Control.PRESET_MODE_MINSIZE)
 	_feed.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -59,6 +91,14 @@ func set_prompt(text: String, color: Color) -> void:
 	if _prompt.text != text:
 		_prompt.text = text
 	_prompt.add_theme_color_override(&"font_color", color)
+
+
+## The equip bar: "Equipping Padded Cap" and how far along (0-1); empty text hides it.
+func set_equip_progress(text: String, fraction: float) -> void:
+	_equip_box.visible = not text.is_empty()
+	if _equip_box.visible:
+		_equip_label.text = text
+		_equip_bar.value = fraction
 
 
 func add_feed_line(text: String, color: Color) -> void:

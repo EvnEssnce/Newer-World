@@ -84,10 +84,14 @@ game/
   items/loot_roller.gd       Rolls loot tables and items (and a kill: one roll per contributor).
                              Pure logic, unit tested.
   items/inventory.gd         One player's items (slots, uids). Pure logic, unit tested.
+  items/gear_score.gd        Gear score curve (New World's) and armor mitigation (data/gear.cfg).
+                             Pure, unit tested.
+  items/equipment.gd         Equipped gear: equip slots, class locks, weapon items following the
+                             loadout, stat totals (Equipment.Stats). Pure logic, unit tested.
   items/ground_loot.gd       Personal drops on the ground: owner, reach, expiry, partial
                              pickups. Pure logic, unit tested.
-  items/loot_system.gd       World/Loot: kill rolls, drop/pickup/discard RPCs, inventories;
-                             client drop visuals, pickup prompt, bot pickups.
+  items/loot_system.gd       World/Loot: kill rolls, drop/pickup/discard/equip RPCs, inventories
+                             and equipment; client drop visuals, pickup prompt, bot pickups/equips.
   items/loot_drop_visual.gd  Client look of a drop: sack, rarity beam, best item's name.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
@@ -100,14 +104,15 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
                      bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
                      mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code),
-                     loot_hud (pickup prompt, loot feed) and inventory_panel (I).
+                     loot_hud (pickup prompt, loot feed, equip bar) and inventory_panel (I:
+                     equipped gear and the bag).
 data/                Tuning files: network, movement, combat, camera, enemy_husk,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer), class_<id> (fighter, juggernaut),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
-                     loot (rarities + loot tables), items, affixes, party, status_effects,
-                     projectiles (.cfg).
+                     loot (rarities + loot tables), items, affixes, gear (gear score curve,
+                     armor, equip time), party, status_effects, projectiles (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -134,7 +139,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   player with no queued input doesn't move. That keeps server and client in lockstep.
 - **Server → each client**, `snapshot_rate` times per second, `World._receive_snapshot`
   (unreliable ordered, channel 2): `tick` and every player's
-  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array(), health]`.
+  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array(),
+  Vector2(health, max_health)]` (max health includes gear; one Vector2 is the size of
+  the old float health).
   Snapshots also drive spawning/despawning on clients: new id → spawn, missing id → remove.
 - **Local player**: applies each input immediately and remembers the predicted position
   and `PlayerState` per seq (keeping the latest acknowledged one, since two snapshots
@@ -145,15 +152,19 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   event (`PlayerState.server_events` changed: blocked hit, stagger, death, respawn,
   parry counter, ability stopped on hit, loadout or Wing slot change, a status
   applied/used up/cleansed by the server, forced movement, Ember gained, Rebirth
-  started/finished) isn't counted. `--verbose` logs
+  started/finished, equip time started) isn't counted. `--verbose` logs
   each unexpected one, and server-side input drops.
 - **Loot** (`World/Loot`, `LootSystem`; see "Loot"): reliable RPCs. Client → server
   `_request_pickup()` (no arguments: the server picks up the sender's own drops in
-  reach of its server position) and `_request_discard(uid)`; server → that client only
+  reach of its server position), `_request_discard(uid)`, `_request_equip(uid,
+  equip_slot)` and `_request_unequip(equip_slot)`; server → that client only
   `_receive_drop(id, position, items)` (new or what's left of one),
-  `_receive_drop_removed(id)`, `_receive_inventory(items, slots)`,
-  `_receive_picked(items)` (the feed) and `_receive_notice(text)`. Items travel as
-  `Item.to_dict()`. Never in snapshots, never touches `PlayerState`.
+  `_receive_drop_removed(id)`, `_receive_inventory(items, slots, equipment)`,
+  `_receive_picked(items)` (the feed), `_receive_equip_started(text, ticks)` (the
+  equip bar's label) and `_receive_notice(text)`. Items travel as `Item.to_dict()`.
+  Never in snapshots. The only sim state it touches is the equip time
+  (`PlayerState.start_equip`, a server event) and, for weapon items, the loadout
+  (through `BuildService.apply_weapons`).
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
   `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
@@ -187,8 +198,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`);
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
-  rebirth_cooldown, rebirth_charges, Z slot, C slot, Wing cooldowns by pool index
-  without trailing zeros]`; 35 = `attack_speed_carry` (float, Rampage: see "Attack
+  rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, Wing cooldowns by
+  pool index without trailing zeros]` (`PACKED_WING_HEADER` = 7; new small ints can
+  go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
   speed" under Status effects). Append new fields at the end. A player's snapshot entry is
   about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
   player already goes over it (Godot warns "above the MTU"); interest management /
@@ -653,7 +665,7 @@ Panels that need the mouse join the `modal_ui` group: while one is visible, clic
 wheel scrolls don't recapture the mouse. 1–9 are reserved for later (consumables):
 don't bind them to anything else.
 
-## Loot (milestone 2; drops, pickup and inventory so far)
+## Loot and gear (milestone 2)
 
 - `data/loot.cfg`: rarity tiers (affix count, color) and loot tables (`[table_<id>]`:
   drop chance, rolls, gear score range, item and rarity weights). `data/items.cfg`: item
@@ -686,7 +698,43 @@ don't bind them to anything else.
 - `ItemDatabase.validate()` checks the three files against each other; a unit test runs
   it on the real data. `tools\roll_loot.ps1 [-Table husk] [-Kills 50000]` prints what a
   table really drops.
-- Not built yet: equipping (gear changing your numbers). See PROGRESS.md.
+- **Gear score** (`data/gear.cfg`, `GearScore`, New World's community-datamined
+  curves): an item's main stat = `primary_base` (items.cfg, its value at GS 100) ×
+  `factor(GS)`: ×1.0112 per whole 5 GS up to 500, then ×(1 + 0.0112 × 0.6667) per 5.
+  Weapon/wing power 100 = the weapon file's damage, so an empty weapon slot (the
+  class's plain weapon) is GS 100 and nothing is weaker without gear. **Armor**
+  reduces hit damage by `armor / (armor + attacker_gs ^ 1.2)`, attacker_gs = the
+  attacking player's weapon item GS (Wing Enhancement during a Wing ability; 100 with
+  no item) or the enemy's `[stats] gear_score` (Husk 120). Affix values scale
+  linearly (× GS/100).
+- **Equip slots** (`Equipment.SLOTS`): Weapon 1, Weapon 2, Head, Chest, Legs, Wing
+  Enhancement (item slot "wings"). Armor fits any class; weapons need the class's
+  weapon list, Wing Enhancements their `class` (`Equipment.check`). A weapon item
+  sits in the loadout slot of its type: equipping one sets that slot's weapon type
+  (`BuildService.apply_weapons`; a type already in the other slot goes there,
+  `Equipment.weapon_target`), and when the K panel changes the types, weapon items
+  follow them or return to the bag (`check_weapon_change` / `weapons_changed`,
+  `Equipment.sync_weapons`).
+- **Equipping takes `[equip] time` (1 s)**: `_request_equip` → server checks →
+  `PlayerState.start_equip` (`equip_left`, synced; refused mid-attack, mid-ability or
+  mid-swap (`can_change_loadout`) or dead): walking only (no attack,
+  block, dodge, swap, abilities; presses stay buffered), and no K panel changes
+  meanwhile. `equip_left` counts down *after* the step's inputs, so on the step it
+  ends nothing has started; `Player.equip_finished` (server) then makes the change
+  (`LootSystem.finish_equip`). Dying cancels it ("Gear change interrupted").
+- **Stats** (`Equipment.stats` → `Player.gear`, server; `bonus_max_health` reaches
+  clients in snapshots): `Player.damage_multiplier` × weapon power of the weapon out
+  (wing power for Wing abilities) × (1 + damage_pct); `World._crit_multiplier` rolls
+  `crit_chance` when the tree doesn't crit; `World._after_armor` in `resolve_strike` /
+  `_covered_hit` (not damage over time); `Player.block_stamina_multiplier` ×
+  (1 − block_stamina_reduction); `_heal_player` × (1 + healing_pct); `_give_ember` ×
+  (1 + ember_gain_pct); `Player.max_health()` = base + max_health (health is capped
+  when it drops). `max_stamina` / `stamina_regen_pct` affixes are off (`slots=[]`)
+  until stamina gear is synced sim state. Average gear score (inventory title):
+  weighted by `[average] weights`, an empty weapon slot = GS 100.
+- `SUMMARY gear equips= unequips=` (LootSystem) and `SUMMARY gear_combat gear_crits=
+  armored_hits= armor_stopped=` (World); the smoke test checks an equip (its Husks
+  drop only armor there, so any class can wear it).
 
 ## Parties and allies
 
@@ -730,7 +778,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped and picked up
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
