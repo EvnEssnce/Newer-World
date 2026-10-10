@@ -119,6 +119,11 @@ var _line_pokes := 0
 ## Juggernaut (server): critical hits (Headsman), Hooked targets staggered
 ## (Warden), chargers staggered by Brace, Bloodied stacks gained.
 var _crits := 0
+## Crits from gear crit chance (Sear), a subset of _crits.
+var _gear_crits := 0
+## Hits on players that their armor reduced, and the damage it stopped.
+var _armored_hits := 0
+var _armor_stopped := 0.0
 var _hook_staggers := 0
 var _brace_staggers := 0
 var _ramp_stacks := 0
@@ -130,6 +135,8 @@ var _roar_guards := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
+## World/Loot: drops, pickup, inventories (both sides).
+var loot: LootSystem
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
 
@@ -178,6 +185,7 @@ func _ready() -> void:
 	_builds = BuildService.new()
 	_builds.name = "Builds"
 	add_child(_builds)
+	_add_loot_system()
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -307,9 +315,11 @@ func _client_ready(class_id: String) -> void:
 	player.ability_started.connect(_on_ability_started)
 	player.weapon_swapped.connect(func(_p: Player) -> void: _swaps += 1)
 	player.projectile_released.connect(_projectiles.server_fire)
+	player.equip_finished.connect(loot.finish_equip)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
 	_builds.send_build(player)
+	loot.add_player(peer_id)
 	print("[server] peer %d joined as %s (%d players)" % [
 			peer_id, player.build.class_def.id, _players.get_child_count()])
 
@@ -514,10 +524,10 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	var was_staggered := target.state.is_staggered()
 	var crit := _crit_multiplier(attacker_id, attack, was_staggered)
 	var base_damage := (attack.damage * damage_scale * crit
-			* _execute_scale(execute, attack, target.health / target.params.max_health))
-	var damage := (base_damage
+			* _execute_scale(execute, attack, target.health / target.max_health()))
+	var damage := _after_armor(base_damage
 			* target.state.statuses.damage_taken_multiplier(target.params.statuses)
-			* target.damage_taken_multiplier() * _crowd_multiplier(target))
+			* target.damage_taken_multiplier() * _crowd_multiplier(target), attacker_id, target)
 	var result := HIT_DAMAGED
 	if guarded:
 		var broke := target.state.take_blocked_hit(attack, target.params,
@@ -586,11 +596,11 @@ func _covered_hit(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		target: Player) -> int:
 	_shield_wall_covers += 1
 	var was_staggered := holder.state.is_staggered()
-	var damage := (attack.damage * damage_scale
-			* _execute_scale(execute, attack, holder.health / holder.params.max_health)
+	var damage := _after_armor(attack.damage * damage_scale
+			* _execute_scale(execute, attack, holder.health / holder.max_health())
 			* holder.state.statuses.damage_taken_multiplier(holder.params.statuses)
 			* holder.damage_taken_multiplier() * _crowd_multiplier(holder)
-			* holder.params.block_damage_taken)
+			* holder.params.block_damage_taken, attacker_id, holder)
 	var broke := holder.state.take_blocked_hit(attack, holder.params,
 			holder.block_stamina_multiplier())
 	var result := HIT_GUARD_BROKEN if broke else HIT_BLOCKED
@@ -692,17 +702,49 @@ func _execute_scale(execute: Vector2, attack: AttackParams, health_fraction: flo
 			* MasteryTree.execute_multiplier(attack.execute, health_fraction))
 
 
-## Crits (the Halberd's Headsman capstone, "crit_staggered"): the [crit]
-## multiplier if the attacking player's tree covers this attack and the target
-## was staggered before the hit, else 1. Enemies never crit.
+## Crits: the [crit] multiplier if the attacking player's tree covers this
+## attack and the target was staggered before the hit (the Halberd's Headsman
+## capstone, "crit_staggered"), or else on a roll of its gear's crit chance
+## (Sear); else 1. Enemies never crit.
 func _crit_multiplier(attacker_id: int, attack: AttackParams, target_staggered: bool) -> float:
 	var attacker := _player_by_id(attacker_id)
 	if attacker == null:
 		return 1.0
 	var crit := attacker.crit_multiplier(attack, target_staggered)
+	if crit <= 1.0 and randf() < attacker.gear.bonus("crit_chance"):
+		crit = attacker.params.crit_damage_multiplier
+		_gear_crits += 1
 	if crit > 1.0:
 		_crits += 1
 	return crit
+
+
+## Armor: the fraction of a hit's damage that gets through the target's armor
+## (GearScore.mitigation), against the attacker's weapon gear score (a
+## player's weapon or Wing Enhancement item, an enemy's [stats] gear_score).
+## Hits only; damage over time ignores armor.
+func _armor_multiplier(attacker_id: int, target: Player) -> float:
+	if target.gear.armor <= 0.0:
+		return 1.0
+	var curve := GearScore.current()
+	var attacker_gs := curve.base
+	var attacker := _player_by_id(attacker_id)
+	if attacker:
+		attacker_gs = attacker.attack_gear_score(curve.base)
+	elif attacker_id < 0:
+		var enemy := _enemies.get_node_or_null(str(attacker_id)) as Enemy
+		if enemy:
+			attacker_gs = enemy.params.gear_score
+	return 1.0 - curve.mitigation(target.gear.armor, attacker_gs)
+
+
+## The damage a hit does after the target's armor, counted for the summary.
+func _after_armor(damage: float, attacker_id: int, target: Player) -> float:
+	var through := damage * _armor_multiplier(attacker_id, target)
+	if through < damage:
+		_armored_hits += 1
+		_armor_stopped += damage - through
+	return through
 
 
 ## Maelstrom ("ability_range"): the ability in use with its hitbox range times
@@ -933,6 +975,7 @@ func _damage_enemy(enemy: Enemy, damage: float, stagger_ticks: int, attacker_id:
 	if killed:
 		enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
 		_enemy_kills += 1
+		loot.on_enemy_killed(enemy)
 	_send_hit(attacker_id, enemy.enemy_id, damage, HIT_DEFEATED if killed else alive_result)
 	return killed
 
@@ -1046,7 +1089,7 @@ func _respawn(player: Player) -> void:
 	var angle := randf() * TAU
 	player.global_position = Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS
 	player.velocity = Vector3.ZERO
-	player.health = player.params.max_health
+	player.health = player.max_health()
 	player.state.revive(player.params)
 	player.respawn_at_tick = -1
 	_respawns += 1
@@ -1159,7 +1202,7 @@ func _server_dead_player(player: Player) -> void:
 ## Server: a Rebirth is over: back where they fell with rebirth_health, the
 ## Ember left after its cost, and the Rebirth cooldown running.
 func _rebirth(player: Player) -> void:
-	player.health = PlayerState.rebirth_health(player.params)
+	player.health = player.max_health() * player.params.rebirth_health_fraction
 	player.state.finish_rebirth(player.params)
 	_rebirths += 1
 	print("[server] peer %d rose again (rebirth)" % player.peer_id)
@@ -1181,6 +1224,7 @@ func _give_ember(player: Player, amount: float, in_combat: bool) -> void:
 	if player.state.dead:
 		return
 	var before := player.state.ember
+	amount *= 1.0 + player.gear.bonus("ember_gain_pct")  # Kindle
 	player.state.gain_ember(player.params, amount, in_combat)
 	_ember_gained += player.state.ember - before
 
@@ -1193,7 +1237,8 @@ func _give_ember(player: Player, amount: float, in_combat: bool) -> void:
 func _heal_player(target: Player, amount: float, healer_id: int) -> float:
 	if target.state.dead or amount <= 0.0:
 		return 0.0
-	var healed := minf(amount, target.params.max_health - target.health)
+	amount *= 1.0 + target.gear.bonus("healing_pct")  # Tend
+	var healed := minf(amount, target.max_health() - target.health)
 	if healed <= 0.0:
 		return 0.0
 	target.health += healed
@@ -1303,6 +1348,16 @@ func _add_party_system() -> void:
 	add_child(party)
 
 
+## World/Loot must exist on the server and every client (RPCs by path).
+func _add_loot_system() -> void:
+	loot = LootSystem.new()
+	loot.name = "Loot"
+	loot.players = _players
+	loot.builds = _builds
+	_builds.loot = loot
+	add_child(loot)
+
+
 # --- Projectiles (the PROJ tag; see ProjectileSystem) ---
 
 ## World/Projectiles must exist on the server and every client (RPCs by path).
@@ -1327,6 +1382,11 @@ func is_verbose() -> bool:
 ## at), or -1 before the first snapshot.
 func render_tick() -> float:
 	return _render_time * Engine.physics_ticks_per_second if _render_time >= 0.0 else -1.0
+
+
+## Bot: seconds into its 8 s cycle (see _bot_input).
+func bot_phase() -> float:
+	return fmod(Time.get_ticks_msec() / 1000.0, 8.0)
 
 
 ## Server: a projectile connected (any result but an ally pass), for the same
@@ -1427,7 +1487,7 @@ func _ability_and_swap_buttons() -> int:
 ## Returns [move, buttons, aim_yaw].
 func _bot_input() -> Array:
 	var t := Time.get_ticks_msec() / 1000.0
-	var phase := fmod(t, 8.0)
+	var phase := bot_phase()
 	var cycle := floori(t / 8.0)
 	if phase < 3.5:
 		_bot_sync_weapons(cycle)
@@ -1585,7 +1645,7 @@ func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float
 		roles.append("burst")  # after its heavy (a press at once would replace it)
 	var off_time := turn_time + 2.0 if turn_time < 0.0 else turn_time - 2.0
 	if phase < 4.0 and off_time >= 0.0 and off_time < 0.3:
-		if _local_player.health < _local_player.params.max_health * 0.8:
+		if _local_player.health < _local_player.max_health() * 0.8:
 			roles.append("heal")
 		roles.append("guard")
 	var wanted: Array[String] = []
@@ -1723,7 +1783,9 @@ func _receive_snapshot(tick: int, states: Array, enemy_states: Array) -> void:
 			player.client_receive_ack(state[1], state[2], state[3], state[4])
 		else:
 			player.push_snapshot(server_time, state[1], state[4])
-		player.set_health(state[5])
+		var health: Vector2 = state[5]  # (health, max health)
+		player.bonus_max_health = health.y - player.params.max_health
+		player.set_health(health.x)
 	for player: Player in _players.get_children():
 		if not seen.has(player.peer_id):
 			print("[client] peer %d left" % player.peer_id)
@@ -1815,7 +1877,7 @@ func _update_hud() -> void:
 		lines.append("BOT MODE")
 	_hud.set_info("\n".join(lines))
 	if _local_player:
-		_hud.set_health(_local_player.health, _local_player.params.max_health)
+		_hud.set_health(_local_player.health, _local_player.max_health())
 		_hud.set_stamina(_local_player.state.stamina, _local_player.params.max_stamina)
 		var banner := ""
 		if _local_player.state.is_rebirthing():
@@ -1942,8 +2004,12 @@ func print_summary() -> void:
 		_print_ember_summary()
 		_print_juggernaut_summary()
 		_projectiles.print_summary()
+		loot.print_summary()
+		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [
+				_gear_crits, _armored_hits, roundi(_armor_stopped)])
 		return
 	_projectiles.print_client_summary()
+	loot.print_client_summary()
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,

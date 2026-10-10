@@ -128,6 +128,11 @@ var swap_tick := -1
 ## Ticks a swap press stays queued while a swap isn't possible.
 var swap_buffer := 0
 
+# Equipping gear (started by the server: LootSystem)
+## Ticks left of putting on or taking off a piece of gear; 0 = not equipping.
+## Like a swap: you can walk, but not attack, block, dodge, swap or use abilities.
+var equip_left := 0
+
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
 var ability := -1
@@ -237,7 +242,11 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	_handle_attack_input(move, buttons, aim_yaw, aim_pitch, params)
 	# Attacking and dodging take priority; holding block resumes the guard after.
 	blocking = ((buttons & BUTTON_BLOCK) != 0 and can_act() and dodge_tick < 0
-			and attack_tick < 0 and swap_tick < 0)
+			and attack_tick < 0 and swap_tick < 0 and equip_left == 0)
+	# After the inputs: on the step equipping ends nothing has started yet, so the
+	# server can change the loadout right after it (Player.equip_finished).
+	if equip_left > 0:
+		equip_left -= 1
 
 	if attack_tick > 0:
 		yaw = rotate_toward(yaw, aim_yaw, _attack_turn_speed(params) * delta)
@@ -318,6 +327,7 @@ func kill() -> void:
 	dodge_buffer = 0
 	swap_tick = -1
 	swap_buffer = 0
+	equip_left = 0
 	stagger_ticks = 0
 	statuses.clear()
 	force.stop()
@@ -460,9 +470,25 @@ func start_force(params: PlayerParams, displacement: Vector2, ticks: int, launch
 
 
 ## Loadout changes (weapons, slotted abilities) can't happen mid-attack,
-## mid-ability or mid-swap.
+## mid-ability, mid-swap or while equipping gear.
 func can_change_loadout() -> bool:
-	return attack_tick < 0 and swap_tick < 0
+	return attack_tick < 0 and swap_tick < 0 and equip_left == 0
+
+
+## Server: starts putting on or taking off gear for `ticks` (the server applies
+## the change when equip_left reaches 0). Refused (false) while dead or when
+## the loadout can't change. A server event.
+func start_equip(ticks: int) -> bool:
+	if dead or ticks <= 0 or not can_change_loadout():
+		return false
+	equip_left = ticks
+	blocking = false
+	server_events += 1
+	return true
+
+
+func is_equipping() -> bool:
+	return equip_left > 0
 
 
 ## Equips new_weapons (ids, one per weapon slot) with new_slots (see
@@ -661,7 +687,7 @@ func weapon(params: PlayerParams) -> WeaponParams:
 
 func can_swap() -> bool:
 	return (can_act() and weapons.size() >= WEAPON_SLOTS and dodge_tick < 0
-			and attack_tick < 0 and swap_tick < 0)
+			and attack_tick < 0 and swap_tick < 0 and equip_left == 0)
 
 
 func is_swapping() -> bool:
@@ -691,7 +717,7 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 ## (except during recovery, which the dodge cancels).
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
 	return (can_act() and can_move(params) and dodge_tick < 0 and dodge_cooldown == 0
-			and swap_tick < 0
+			and swap_tick < 0 and equip_left == 0
 			and stamina >= params.dodge_stamina_cost
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
@@ -741,7 +767,7 @@ func _handle_dodge_input(move: Vector2, buttons: int, on_floor: bool, params: Pl
 # --- Attacks and abilities ---
 
 func can_attack() -> bool:
-	return can_act() and dodge_tick < 0 and attack_tick < 0 and swap_tick < 0
+	return can_act() and dodge_tick < 0 and attack_tick < 0 and swap_tick < 0 and equip_left == 0
 
 
 ## True during light/heavy attacks and abilities.
@@ -1017,13 +1043,13 @@ static func from_array(data: Array) -> PlayerState:
 
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
-## C slot, then Wing cooldowns by pool index, without trailing zeros].
-const PACKED_WING_HEADER := 6
+## C slot, equip_left, then Wing cooldowns by pool index, without trailing zeros].
+const PACKED_WING_HEADER := 7
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
-			wing_slots[0], wing_slots[1]])
+			wing_slots[0], wing_slots[1], equip_left])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1038,6 +1064,7 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	rebirth_charges = packed[3]
 	wing_slots[0] = packed[4]
 	wing_slots[1] = packed[5]
+	equip_left = packed[6]
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
@@ -1071,6 +1098,7 @@ func matches(other: PlayerState) -> bool:
 			and ability_slots == other.ability_slots
 			and cooldowns == other.cooldowns
 			and swap_tick == other.swap_tick
+			and equip_left == other.equip_left
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot

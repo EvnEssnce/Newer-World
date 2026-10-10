@@ -3,8 +3,8 @@
 # ability and swap weapons; the server must resolve hits, a death and a respawn, a
 # guarded hit, ability hits and a build change, and Husks and bots must hit each
 # other; players and Husks must be moved by force (knockback) and the Spear's
-# abilities used; projectiles thrown and hitting; no unexpected prediction
-# corrections.
+# abilities used; projectiles thrown and hitting; Husks dropping personal loot
+# that the bots pick up and equip; no unexpected prediction corrections.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID]
 # -Class picks the bots' class (default fighter; e.g. juggernaut).
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
@@ -71,7 +71,13 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=weapon_spear/ability_line_poke/range=6.0',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
-    '--tune=ember/rebirth/duration=1.0')
+    '--tune=ember/rebirth/duration=1.0',
+    # Every Husk kill drops something for each bot that damaged it (60% in the
+    # real data), so the loot check doesn't hang on a few rolls.
+    '--tune=loot/table_husk/drop_chance=1.0',
+    # ...and only armor, which every class can wear, so the gear check (the bots
+    # equip what they pick up) doesn't hang on class-locked drops.
+    '--tune=loot/table_husk/items={"padded_cap": 1, "padded_jerkin": 1, "padded_leggings": 1}')
 
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
@@ -245,6 +251,31 @@ if (-not $projSummary) {
     $failed = $true
 } else {
     Write-Host "PASS projectiles: $($projSummary.Line)" -ForegroundColor Green
+}
+# Loot: Husks die in every run (party or not) and each bot that damaged one gets
+# its own drop; the bots fight next to their kills and pick up what lands in reach
+# (LootSystem's bot), so at least one pickup must reach an inventory.
+$lootSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY loot kills_rolled=(\d+) drops=(\d+) items_dropped=(\d+) pickups=(\d+) items_picked=(\d+)'
+if (-not $lootSummary) {
+    Write-Host "FAIL loot: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$lootSummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL loot: no Husk dropped loot ($($lootSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$lootSummary.Matches[0].Groups[5].Value -lt 1) {
+    Write-Host "FAIL loot: nothing was picked up ($($lootSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS loot: $($lootSummary.Line)" -ForegroundColor Green
+}
+# Gear: the bots put on armor and Wing Enhancements they pick up (twice a cycle,
+# see LootSystem._bot_equip), so at least one equip must finish on the server.
+$gearSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY gear equips=(\d+)'
+if (-not $gearSummary -or [int]$gearSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL gear: nothing was equipped ($($gearSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS gear: $($gearSummary.Line)" -ForegroundColor Green
 }
 foreach ($name in 'client1', 'client2') {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'

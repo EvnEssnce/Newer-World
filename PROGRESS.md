@@ -1,874 +1,374 @@
-# Progress
+# Progress and plan
 
-## Current milestone
+The one planning document: what we're building, where it stands, the build order from
+here, and what's outstanding. `CLAUDE.md` describes the architecture; `design/classes.md`
+holds the class/weapon/ability design. Read both this file and `CLAUDE.md` at the start
+of every session.
 
-**2. Loot loop.** Enemy drops with rarity and rolled stats, inventory, equipping gear
-that changes the player's numbers.
+**At the end of every session:** add a short entry to the session log (what was done,
+tests/smoke results, what needs a playtest), tick off or reorder the build order, and
+update the outstanding lists. Keep entries short; details belong in commits and
+`CLAUDE.md`.
 
-Milestone 1 (networked combat slice) is **done**: on 2026-10-07 the developer
-playtested fighting Husks alongside the bot and called the combat loop great, with
-Husks behaving as expected.
+---
 
-## Session log
+## 1. The brief
 
-### 2026-10-10 (27): Training dummy (item 1 of session 26's list)
+**Newer World** (working title) is a small online action RPG with combat, gathering,
+crafting, loot and movement modeled on New World: Aeternum, with low-poly graphics. The
+target is 10–50 players per server instance with persistent characters. It is
+deliberately not a true MMO: no territory wars, no server-wide trading post economy, no
+housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 
-- `data/enemy_dummy.cfg`: 6,000 HP, `[ai] stationary=true` (new key, `false` in
-  `enemy_husk.cfg`): `EnemyBrain._stand` only counts down staggers; no moving, turning,
-  swinging or threat. Hits, statuses, knockback/pull/launch all work on it.
-- `[stats] reset_time` (new key for every enemy; Husk 0 = off, dummy 4 s): no damage for
-  that long → full health and back to its spot (`Enemy._reset`; statuses run out on
-  their own). Dies like any enemy (3 s respawn).
-- Marker `TrainingDummy` at (0, 0, 18), facing the centre. Straw-colored, no club.
-- DPS readout above it, **per viewer** (your own damage, incl. bleed ticks):
-  "You: 4210 dmg  843 DPS  5.0 s", "(done)" after a 4 s pause; the next hit starts a new
-  fight. `DamageMeter` (pure, `tests/test_damage_meter.gd`), fed client-side from hit
-  events (`World._receive_hit` → `Enemy.record_my_damage`): no wire changes.
-- Bots skip it (`World._nearest_enemy`), so smoke checks are unaffected (`SUMMARY enemies
-  count=` is now 3).
-- Tests: `test_damage_meter.gd` (6), two stationary cases in `test_enemy_brain.gd`.
-- **Not run**: this session ran in a Linux cloud container without Godot. Before
-  committing more on top: run `<godot_console.exe> --headless --import` once (new
-  `class_name DamageMeter`), then `run_tests.ps1`, `smoke_test.ps1`, `smoke_test.ps1 -Party`,
-  and walk to the dummy (z = +18, past Crate3) to check the readout.
+### Decisions that stand
 
-Next: item 2, **Juggernaut weight** (hyper armor on Greataxe/War Hammer heavies and big
-abilities).
+- **Engine:** Godot 4.7, GDScript. Client and headless dedicated server from one project.
+- **Networking:** server-authoritative from the start. The server decides hits, loot,
+  inventory and crafting; clients predict only their own movement.
+- **Persistence:** SQLite in development behind one persistence module, Postgres before
+  launch. Nothing else touches the database.
+- **Art:** CC0 placeholder packs (Kenney, Quaternius) and Mixamo animations. Paid art
+  waits until the game is fun with ugly art.
+- **IP:** mechanics can be borrowed; names, art, UI layouts and item names are original.
+- **Budget:** the developer's Claude Pro subscription. No paid services until an
+  always-on server is needed (see "Costs").
+- **Changed since the original brief:**
+  - **No attributes** (STR/DEX/...). Builds come from mastery trees and gear; gear
+    stats change combat numbers directly. Phoenix/fire-themed attributes may come later.
+  - **Classes** (fixed per character) own their weapons and **Wing** abilities, fuelled
+    by **Ember**, with an automatic **Rebirth**. Six classes are designed in
+    `design/classes.md`; the Fighter and Juggernaut are built.
+  - **Gear score follows New World's curves** (session 28): main stats ×1.0112 per 5
+    GS (slower above 500), armor mitigation = armor / (armor + attacker GS^1.2).
+  - **Equip slots:** Weapon 1, Weapon 2, Head, Chest, Legs, Wing Enhancement. Armor
+    fits any class; weapons and Wing Enhancements are class-locked. Equipping takes 1 s.
+  - **Tests** use a small in-repo runner (`tests/framework/`), not GUT.
 
-### 2026-10-09 (26): Wave 3 playtest feedback (plan; nothing built yet)
+### Systems in scope
 
-The developer playtested sessions 24–25 (`PLAYTEST.md` has the ticked list and notes).
-Threat, Hold the Line, Finishing Thrust, Rampage: good. Juggernaut: "feels awesome";
-Halberd liked as the lighter tank weapon; Greataxe "really like"; Meteor Drop "looks
-amazing". Seen working in play: Headsman crits, Vortex ×2 range, wall stun. Not yet
-seen: Breaker breaking a guard. Every design call in session 24/25 is **kept**, except
-Hooked (below). Defiant stays Roar-only.
+| System | What it means | Status |
+|---|---|---|
+| Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
+| Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut built |
+| Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
+| Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
+| Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
+| Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
+| Persistence | Accounts, character saves | Not started |
+| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
+| Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
-To do (in this order; the dummy first, it helps test the rest):
-1. **Done (session 27).** **Training dummy**: a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
-   or attacks, respawns/heals after a few seconds idle; one marker on the far side of
-   the test map from the Husk spawns. A DPS readout above it would help tuning.
-2. **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
+---
+
+## 2. Where we are
+
+| Milestone (original build order) | Status |
+|---|---|
+| 1. Networked combat slice | **Done** (session 9; developer: "the combat loop is great") |
+| 2. Loot loop | **Built** (sessions 10, 27, 28); needs its playtest |
+| 3. Gathering and crafting | Not started |
+| 4. Second weapon and weapon swap | **Done**, and well past it: Fighter (Broadsword, Spear, Dual Axes) and Juggernaut (Halberd, Greataxe, War Hammer), all abilities and capstones, Wings, statuses, forced movement, projectiles, parties, enemy threat (sessions 11–25) |
+| 5. Persistence | Not started |
+| 6. One zone, then playtest with real people | Not started |
+
+**Latest state (session 28):** Husks drop personal loot; F picks it up; I opens the
+inventory with equipped gear; gear changes damage, crits, armor, max health, block
+stamina, healing and Ember. A training dummy (6,000 HP, DPS readout) stands at z = +18
+(session 30). 450 unit tests; the real `smoke_test.ps1` (run with PowerShell 7 on Linux,
+session 31) passes for Fighter, Fighter in a party and Juggernaut with 0 prediction
+corrections.
+
+---
+
+## 3. Build order from here
+
+Rule from the brief: **don't start a step until the one before it works** (built, tested
+and playtested). Each numbered item is roughly one session with one testable goal.
+
+### Step A: Close out Milestone 2 (loot loop)
+
+1. **Playtest** sessions 27–28 and 30 (no code; checklist in §4). Fix what the
+   playtest finds. Then Milestone 2 is done. (The smoke scripts themselves were run in
+   session 31 with PowerShell 7 on Linux, which found and fixed a quoting bug in the
+   loot `--tune`; a Windows run is still worth doing once.)
+   - Item weight and durability are in the brief but not built: durability goes with
+     repairs in Step D; weight is an open decision (§4).
+
+### Step B: Wave 3 combat feedback (decided in session 26, in this order)
+
+2. **Done (session 30).** **Training dummy:** a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
+   or attacks, heals after a few seconds idle; one marker on the far side of the test
+   map from the Husks; a DPS readout above it. No loot table. (Helps tune everything
+   after it, including gear.)
+3. **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
    option): longer windups/recoveries, and **hyper armor**: can't be staggered (still
    takes damage) during the windup and swing of their heavies and big abilities. Likely
-   ability/attack keys like `armor_start`/`armor_end` checked where the server staggers
-   a player (`apply_stagger` callers); decide whether it also resists knockback.
-3. **Earthshaker**: the every-3rd-heavy aftershock becomes one **expanding ring** around
+   `armor_start`/`armor_end` attack keys checked where the server staggers a player
+   (`apply_stagger` callers); decide whether it also resists knockback.
+4. **Earthshaker:** the every-3rd-heavy aftershock becomes one **expanding ring** around
    the user (hits each target once), not a forward wave. The **Shockwave** ability stays
    a single forward wave, a bit **wider** (`projectile_shockwave` `hit_radius`/`length`).
-4. Small ones: **Hooked** only applied when the Warden capstone is learned; **Shatter**
-   cooldown 12 → ~6 s; **Meteor Drop** rises slower (~30% longer climb, same fast
-   crash); **Upheaval** animation reads as slamming the ground, not a swing.
-5. **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
+5. **Small ones:** **Hooked** only applied when the Warden capstone is learned;
+   **Shatter** cooldown 12 → ~6 s; **Meteor Drop** rises slower (~30% longer climb, same
+   fast crash); **Upheaval** animation reads as slamming the ground, not a swing.
+6. **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
    three tall shields in front that blocks enemies' movement. The first `SUMMON`: a
    server-spawned obstacle with spawn/despawn events to clients (like projectiles).
-   Decided: it **blocks only enemies** (the user and allies walk through; whether hostile
-   players in PvP count as enemies wasn't asked, so treat them as blocked unless that's
-   hard), **stops hostile projectiles** (yours and allies' pass), placed about **3 m in
-   front**, about **4.5 m wide × 2.5 m tall**, lasts **8 s**, **18 s** cooldown, **doesn't
-   move** once placed. Not breakable yet, but it **will be breakable later** (give it a
-   shape that can take health then).
-
-Wave 3 (sessions 22–25 plus this plan) was merged into main and pushed after the
-playtest; the fixes above go on top of main.
-
-### 2026-10-09 (25): The Juggernaut (Wave 3, two agents)
-
-Scaffold first (main session, `613a249`): `data/class_juggernaut.cfg` (Halberd,
-Greataxe, War Hammer; default loadout Halberd + War Hammer), stub weapons so the class
-loads, `-Class ID` on `smoke_test.ps1` and `run_local_test.ps1`, and the smoke test's
-Spear check became a per-class-weapon check ("weapons": every class weapon used). Then
-two agents filled in separate files, merged on `wave3-merge` (6 conflicts: keep-both
-for counters, model calls, projectile kinds, mastery effect docs, CLAUDE.md;
-`AttackParams.copy()` + `range_copy` combined; one `SUMMARY juggernaut` line).
-
-**Halberd** (Warden / Headsman; Q/E/R Hooking Pull, Wide Reap, Crowd Sweep): Hooking Pull
-(5.5 m line, pulls 4.5 m, marks Hooked 2.5 s), Wide Reap (150, 3.6 × 6 m), Pole Vault (6
-m, landing knockback), Brace (Braced + staggers a melee attacker who was dashing or hits
-within the first 1 s, players and Husks), Cleaving Arc (200, Exposed), Crowd Sweep (push
-4 m). Capstones: **Caught on the Hook** (your next damaging hit on a target you Hooked
-staggers ≥ 0.8 s, uses the mark), **Headsman's Verdict** (heavies on already-staggered
-targets crit). New: the first **crit system** (`[crit] damage_multiplier=1.5` in
-combat.cfg, "Critical! -N" label, hit result 8), ready for gear crit chance.
-
-**Greataxe** (Maelstrom / Bloodied; Q/E/R Vortex, Charging Chop, Grounding Blow): Vortex
-(3 pulling spins of 70, 3.5 m), Charging Chop (6 m), Grounding Blow (110, Slow 3 s),
-Executioner's Swing (170, up to +150% below 30%: ability-level execute keys), Iron Hide
-(−8% damage taken per hostile within 5 m, max 5), Hurl (thrown axe ~15 m, Slow 5 s; **no
-pickup**: a fixed slow). Capstones: Maelstrom (Vortex hit/pull radius ×2, server-side;
-F3 still draws 3.5 m), **Red Tide** (Bloodied: +3% damage per stack, 8 max, 2.5 s,
-refreshed per hit).
-
-**War Hammer** (Earthshaker / Breaker; Q/E/R Seismic Slam, Clout, Upheaval): heavy 240,
-0.7 s stagger, doesn't break blocks by default. Seismic Slam (90° 4 m cone: new `arc`
-key), Clout (stun 1.5 s), Shatter (new Shattered: +15% damage taken, 2 stacks), Upheaval
-(radial launch), Shockwave (new flat piercing `shockwave` projectile, "wave" visual,
-staggers), Steadfast. Capstones: Earthshaker (every 3rd heavy sends an aftershock wave,
-`HeavyCounter`, `ProjectileSystem.server_fire_attack`), Breaker (heavies break blocks).
-
-**Juggernaut Wings** (Tempest Wings / Anchor; Z Gale Burst, C Challenger's Roar): Gale
-Burst (20 Ember, 4 m knockback 3.5 m), Challenger's Roar (25, 8 m, Taunted + Slow 3 s via
-new `applies_status_2` keys), Meteor Drop (30, 6 m leap, launch at landing), Unbowed (25).
-Capstones: Tempest Wings (knocked into a wall = stunned 1.5 s, players and enemies,
-`ForcedMotion.pushed_into_wall`), Anchor (Defiant: −6% damage taken per enemy the Roar
-taunts, 5 max). Passives: knockback distance (+20%, +20%), damage taken (−5%, −8%).
-
-Bots: Wing abilities are now chosen by role (`World._bot_wing_role`), so any class's Wings
-work; area Wings are pressed 1–2 s into the attack turn. Bots learn built capstones (Wing
-and weapon). No new `to_array()` fields; every Juggernaut mechanic is server-only.
-
-Tests: 416 passed after the merge. Smoke after merge: Fighter default and `-Party`
-passed; `-Class juggernaut` passed; `-Class juggernaut -Party` failed once "no player was
-moved by force" (Juggernauts spend time knockback-immune; known luck check) and passed on
-the rerun. 0 corrections in all. `SUMMARY juggernaut` showed hook_staggers 1,
-brace_staggers 1, bloodied_stacks 4, aftershocks 1–2, roar_guards 1–2; **crits and wall
-stuns never fired** in bot runs.
-
-**Playtest** (`run_local_test.ps1 -Class juggernaut`, `-Party` for the Roar/allies):
-- Feel and numbers of all three weapons; pull/push distances; Pole Vault, Charging Chop,
-  Meteor Drop arcs; Seismic Slam's cone; Shockwave's look and reach.
-- Never seen in play: Headsman crits, Vortex ×2 range, wall stuns (Gale Burst a Husk
-  into a crate), Breaker on a real guard.
-- Models: the greataxe is mostly hidden behind the body from the follow camera.
-- Everything from session 24 (Rampage, Shield Wall, Hold the Line, Finishing Thrust,
-  threat).
-
-**Decisions to confirm** (besides session 24's): Brace "charge" = dashing or within 1 s
-of bracing; Hooked is applied even without the capstone (a mark that does nothing alone);
-Hooking Pull hooks everything its line touches on contact; crits only on targets
-staggered *before* the hit, 1.5×; Challenger's Roar is a 0-damage hit (a facing guard
-blocks it, enemies show "0"); Defiant counts only taunts from the Roar itself; an
-interrupted heavy doesn't count toward Earthshaker; wall stun never from pulls, and also
-on players; Shattered 2 × 15% vs Exposed 25%.
-
-**Next:** playtest, then fast-forward main to `wave3-merge` and push. After that, per
-`design/classes.md`: the Assassin (Talons first). Still open from before: snapshot size
-(a third player already exceeds the MTU), loot drops/pickup/inventory (milestone 2).
-
-### 2026-10-09 (24): Fighter leftovers and enemy threat (Wave 3, two agents)
-
-Skewer/Perforate were playtested ("looks great") and pushed. Then two agents built in
-parallel worktrees, merged on the `wave3-merge` branch (5 keep-both conflicts:
-SUMMARY lines, status_effects.cfg, status validation, smoke `--tune`s, CLAUDE.md).
-
-**Fighter leftovers** (the Fighter's ability list in `design/classes.md` is now
-complete):
-- **Finishing Thrust** (Spear Impaler capstone, `effect="execute_damage"`): Spear hits
-  on targets below 30% health get up to +60% (linear: 0 at 30%, full at 0). Per target,
-  through `_strike_player`/`resolve_strike`/`strike_enemy`; projectiles capture it at
-  release.
-- **Hold the Line** (Lancer capstone, `effect="hold_the_line"`): while blocking with the
-  Spear out, a hostile player or enemy that *enters* the reach box in front is poked by
-  the internal `[ability_line_poke]` (40 damage, Slow 2 s, 2 s per-target cooldown),
-  through the normal strike path. Server only (`World._hold_the_line`). No poke
-  animation yet (only the hit label).
-- **Rampage** (Dual Axes, Berserker tier 2): self-buff, 8 s, light/heavy attacks 1.25×
-  faster while stamina ≥ 50% (`status_rampage`, `affects="sim"`). Only windup and
-  recovery ticks are skipped (`attack_speed_carry`, new `to_array()` index 35), never
-  hit windows or a projectile release.
-- **Shield Wall** (Broadsword, Vanguard tier 2): self-buff, 6 s; while blocking, an ally
-  in the 2.5 × 1.8 m box behind you is covered against hits from within your block arc
-  (melee, Husks, projectiles): you take it as a blocked hit (your stamina, can break
-  your guard), they see "Blocked". `MeleeHitbox.is_behind`.
-- All three new abilities are in the default allocation, not the default slots.
-- Bots now slot self-buffs first, then status abilities, keeping one slot for a
-  projectile (Broadsword: Shield Wall, Opening Strike, Whirlwind Edge; Dual Axes:
-  Bloodlust, Rampage, Boomerang Axe), and learn built capstones on even-cycle respecs.
-
-**Enemy threat** (`game/enemy/threat_table.gd`, `[threat]` in `data/enemy_husk.cfg`):
-- Target = highest threat; a challenger must beat the current target × 1.1. Threat from
-  damage (1/pt, every path via `Enemy.take_hit`), healing (0.5/pt to the healer, from
-  enemies already fighting the healed player), first entering aggro range (10, so the
-  nearest still gets aggro). 2%/s decay. Empty table or leash = walk home (leash wipes
-  the table). **Change:** when its target dies, a Husk now goes after whoever else has
-  threat instead of going home.
-- **Taunt** (`status_taunted`, 4 s, `forces_target`): the enemy targets the taunter and
-  the taunter's threat jumps to 1.1× the top. Nothing applies it in real data yet (the
-  smoke test tunes Skewer to apply it).
-- **Immunities** for the Juggernaut: status keys `force_immune`, `stagger_immune`,
-  `cc_immune` and buffs Braced (force, 3 s), Steadfast (force + stagger/stun, 4 s),
-  Unbowed (everything incl. slow/root/taunt, 4 s). `apply_stagger(ticks, params)` and
-  `is_force_immune(params)` now take params. Nothing applies them yet.
-
-Tests: 393 passed after the merge. Smoke after merge: default and `-Party` passed, 0
-corrections (counters: `target_switches` 6/14, `taunts` 1/0, `heal_threat` 0/15,
-`line_pokes` 2/3, `shield_wall_covers` 0 in this `-Party` run, 1 in the agent's). The
-smoke test also tunes Hold the Line's reach to 6 m so pokes happen.
-
-**Needs a hand playtest** (`run_local_test.ps1 -Party` for Shield Wall):
-- Rampage's feel (1.25×); remote players' attacks may look a little jumpy.
-- Shield Wall box size and the "Blocked" feedback, two players in a party vs Husks.
-- Hold the Line's 2.6 m reach and 2 s cooldown; Finishing Thrust on low Husks.
-- Two players on one Husk: sensible target switches, no flicker; Pyre Heart drawing aggro.
-
-**Decisions to confirm:** Unbowed also refuses taunts; Steadfast refuses stuns as well
-as staggers; heal threat goes in full to every enemy fighting the healed player; one
-wide swing hitting both a Shield Wall holder and the covered ally costs the holder
-stamina twice; Rampage stops mid-attack if stamina drops below half.
-
-**Next: the Juggernaut** (`design/classes.md`): class file, Halberd, Greataxe, War
-Hammer (6 abilities each, trees, placeholder models), Juggernaut Wings (Gale Burst,
-Meteor Drop, Challenger's Roar = taunt, Unbowed). Threat, taunt and the immunity
-statuses are ready for it. Plan: two agents (weapons split), one window each pair.
-
-### 2026-10-09 (23): Spear Skewer and Perforate (Wave 3, first part)
-
-Session 22's work was playtested by the developer ("these all look great") and
-pushed. Then Wave 3 started with the rest of the Spear's abilities (data only, plus a
-visual):
-- **Skewer** (`weapon_spear.cfg`, Lancer tier 2): a narrow 3 m thrust, 90 damage,
-  roots for 1.5 s, 12 s cooldown. First ability to apply Root.
-- **Perforate** (Impaler tier 2): 5 thrusts 0.13 s apart, 30 damage each, each its own
-  hit window adding a stack of bleed (cap 5), 11 s cooldown.
-- Both are in the Spear's default allocation (7 of 19 points), not its default slots.
-  Bots slot them first (status abilities), so a bot's Spear now has Skewer, Perforate
-  and Javelin Cast on Q/E/R.
-- Perforate's look: the spear thrusts once per hit window
-  (`Player._repeated_thrust_pose`). Skewer uses the normal heavy thrust.
-
-Tests: 354 passed (no new logic: root, bleed and multi-window abilities already have
-tests). Smoke: default and `-Party` passed, 0 corrections; the server logs showed
-Skewer rooting a Husk and a player, and Perforate stacking bleed on a Husk.
-
-**Needs a hand playtest:** Skewer's root on a Husk (it should stop moving but still
-swing), Perforate's thrusts and bleed numbers, slot them in K.
-
-**Next (Wave 3):**
-- The Spear capstones are still placeholders (`effect="none"`): **Finishing Thrust**
-  (more damage vs targets below 30% health) needs the *target's* health in the damage
-  path (`_strike_player`, `strike_enemy`, projectiles): today `damage_scale` is worked
-  out once per attacker, not per target. **Hold the Line** (auto-poke while blocking)
-  is bigger.
-- Dual Axes **Rampage** (attack speed buff above 50% stamina) and Broadsword **Shield
-  Wall** (ALLY) are the Fighter's other unbuilt abilities.
-- Enemy threat (for taunts), then the Juggernaut.
-
-### 2026-10-08 (22): Crashing Leap aimed by pitch, Diving Strike shape (items 1 and 2)
-
-Done (session 20's list is now complete):
-- **Crashing Leap aimed by camera pitch** (`weapon_dual_axes.cfg`: `dash_aim_pitch`,
-  `aim_full_pitch=0`, `aim_zero_pitch=35`, the camera's `max_pitch`). Level or looking
-  down = 4 m; looking up shortens it linearly; at the camera's top pitch it goes
-  straight up (0 m). Inputs now carry `aim_pitch` as a 5th element (server checks it's
-  finite and clamps to ±90°; bots send 0). The fraction is the length of
-  `ability_dir` at the start, so `to_array()` is unchanged. `PlayerState.step` and
-  `PlayerMovement.step` take `aim_pitch` as an optional last argument.
-- **Diving Strike shape** (`wings_fighter.cfg`): `dash_ease="in"` (speed ramps up,
-  same 5 m; `AbilityParams.dash_speed_at`), `leap_peak=0.3` (rises steeply, long
-  swoop down; `AbilityParams.leap_lift`, now used for every leap), and the hit window
-  moved into the swoop: windup 0.55 → 0.35 s, active 0.12 → 0.25 s (from about 1.8 m
-  in until just after landing). The Broadsword stab now plays during the swoop.
-- New ability keys documented in `weapon_broadsword.cfg`'s key list.
-
-Tests: 354 passed (new: pitch mapping, aimed dash distance and sync, eased dash
-distance, leap curve). Smoke: default and `-Party` both passed, 0 corrections. (Running
-the two in parallel in one checkout makes `-Party` fail: they share `build\smoke`.)
-
-**Needs a hand playtest** (`run_local_test.ps1`) of session 20's four items:
-- Crashing Leap: does looking up feel right for shortening it? (Tune
-  `aim_full_pitch`/`aim_zero_pitch`.) Note the cosmetic leap height doesn't change.
-- Diving Strike: rise and swoop, hits along the swoop (Husks), Broadsword stab.
-- Boomerang Axe's right axe leaves the hand; Opening Strike's stab.
-
-Next after the playtest: Wave 3 in `design/classes.md` (see session 19's **Next**).
-
-### 2026-10-08 (21): Broadsword stab, Boomerang Axe visuals (items 4 and 3 below)
-
-Done (client visuals only, `player.gd` and `ProjectileSystem._process`):
-- **Broadsword stab:** `_sword_pose` now returns a `Vector3` like `_spear_pose` (z =
-  meters pulled back, negative = forward) and moves `SwordPivot` along it. Opening
-  Strike draws the level sword back 0.35 m and thrusts it 0.6 m forward
-  (`SWORD_THRUST_*`); Diving Strike with the Broadsword out does the same angled down
-  at the landing (`SWORD_DIVE_*`). Heavy attacks keep the overhead chop.
-- **Boomerang Axe:** only the right axe swings, and it's hidden while that player's
-  axe projectile is in flight (any projectile with `visual="axe"`), back when it's
-  caught or ends. `ProjectileSystem` calls `Player.set_axe_thrown` every frame from
-  the visible copies, so other players see it on the render clock too.
-
-Tests: 349 passed. Smoke: default and `-Party` both passed (0 corrections). Bot
-screenshots showed the right axe gone while the Boomerang Axe was out. The sword stab
-wasn't caught clearly on screen (the bot's camera is behind it): check it by hand.
-
-Left from session 20's list: items 1 (Crashing Leap aimed by pitch) and 2 (Diving
-Strike shape). Then a playtest of all four.
-
-### 2026-10-08 (20): Wave 2 playtest feedback (items 3 and 4 done in session 21)
-
-Done: Vault's peak height 0.8 → 1.6 m (`weapon_spear.cfg` `leap_height`; cosmetic).
-
-To do (developer feedback, with the plan):
-1. **Crashing Leap aimed by camera pitch.** Looking level or down = full distance (4 m);
-   looking up shortens it; looking straight up (or the camera's max pitch) = straight
-   up, 0 m. Diving Strike and Vault keep their fixed distances.
-   - **Needs a protocol change:** inputs carry only `aim_yaw`. Add `aim_pitch` (5th
-     input element, validated on the server), passed into `PlayerState.step`.
-   - At ability start, store the distance fraction in the length of `ability_dir`, which
-     is already synced, so `to_array` doesn't change. Make sure `PlayerMovement`'s dash
-     uses that length instead of normalizing.
-   - New ability keys, e.g. `dash_aim_pitch=true`, `aim_full_pitch` (deg, full distance
-     at or below) and `aim_zero_pitch` (deg, 0 at or above; check `camera.cfg`
-     `max_pitch`).
-   - Unit test the mapping. The cosmetic leap height stays.
-2. **Diving Strike shape:** rise steeply first, then swoop down and forward.
-   - **Horizontal:** a new `dash_ease="in"` option (speed ramps up over the dash; the
-     total distance stays exact and deterministic).
-   - **Height:** a new `leap_peak` key (fraction of the dash where the cosmetic height
-     peaks, e.g. 0.3) instead of the symmetric parabola.
-   - **Damage during the swoop:** windup covers the rise; the hit window (radial) is
-     active during the late, horizontal part of the dash, not only on landing.
-3. **Boomerang Axe visuals:** only one axe swings, and that axe leaves the hand
-   (hidden) while its projectile is in flight, reappearing when caught or ended. The
-   client's projectile system knows the owner's in-flight projectiles.
-4. **Broadsword stab:** Opening Strike, and Diving Strike while the Broadsword is out,
-   use a forward thrust like the Spear's. `_sword_pose` returns only rotation; it needs
-   a forward offset like `_spear_pose`.
-
-Then run tests and smoke, commit, and get a playtest.
-
-### 2026-10-08 (19): Feather projectiles (class build Wave 2C); Wave 2 complete
-
-Built by an agent, merged into main with no conflicts.
-
-Done:
-- **Projectiles** (`data/projectiles.cfg`, `game/combat/projectile*.gd`):
-  - Simulated on the server with a swept hit test, so fast ones can't tunnel.
-  - Speed, gravity, lifetime, hit radius, pierce, walls, guard-stops, boomerang return.
-  - Hits resolve like melee: i-frames evade, a guard facing the throw blocks, allies are
-    ignored, statuses/force/Ember apply. **Riposte parries projectiles** from the front.
-  - Network: one reliable spawn event, plus turn/end events; every machine flies it
-    with the same math. Nothing in snapshots.
-  - The thrower sees their own throw instantly (a cosmetic copy the server confirms).
-  - Feather-shaped visuals (tapered vane, quill, streak), coloured per kind.
-  - Any attack or ability can fire one: `projectile`, `projectile_time`,
-    `projectile_count`, `projectile_spread`.
-- **Javelin Cast** (Spear): 110 damage, slows 3 s, 9 s cooldown. 28 m/s with a slight
-  drop (about 22 m reach). Stopped by walls and guards.
-- **Boomerang Axe** (Dual Axes): 65 per hit, 8 s cooldown. Flies 9 m out, returns to
-  you as you move, hits each target once per leg, cuts through groups.
-- Both are learned by default but **not slotted**: put them on Q/E/R in the K panel.
-- Tests: 349. Smoke after merge: default 2 of 2 passed, `-Party` 1 of 1 (the agent:
-  3 of 4 and 3 of 3; new flake "no player was moved by force" when every Husk hit
-  was blocked).
-
-Needs a hand playtest (`run_local_test.ps1`; two windows with `-NoBot` for PvP checks):
-- **Javelin:** range, speed, drop, Slow on a Husk, stops on crates and the ground.
-- **Boomerang:** returns as you move; hits going out and coming back.
-- **Defense vs throws:** blocking facing the throw, Riposte, dodging through.
-- **Corrections:** stay 0 while throwing.
-
-Known gaps:
-- Projectiles fly flat (no aim pitch).
-- No impact effect.
-- In rare cases the thrower could see their own throw twice.
-
-**Next:** Wave 3 in `design/classes.md`: the rest of the Spear (Skewer, Perforate), enemy
-threat (for taunts), then the Juggernaut. Also the queued task to make the smoke
-test's luck-based checks reliable, and snapshot size (interest management / delta
-compression) before playtests with more than 2 people.
-
-### 2026-10-08 (18): Ember, Wings and Rebirth (class build Wave 2D)
-
-Built by an agent, merged into main with no conflicts.
-
-Done:
-- **Ember** (`data/ember.cfg`):
-  - A 0–100 meter (cap read in one place, for upgrades later), synced sim state.
-  - Fills from damage dealt (0.08/pt), taken (0.05/pt) and healing done (0.05/pt).
-  - After 6 s out of combat it settles to 50 at 4/s. Wing abilities spend it
-    (predicted).
-- **Wing slots on Z / C**, unchanged by weapon swaps. Wing tree (Bulwark / Fury, 12
-  points) in the K panel's new Wings tab.
-- **Fighter Wing abilities:**
-  - Ember Mantle (25 Ember, −40% damage taken for 4 s).
-  - Wingbeat Surge (25, +20% damage for 6 s).
-  - Pyre Heart (30, heals 200 over 5 s; green numbers).
-  - Diving Strike (20, 5 m leap, 2.5 m slam).
-  - Both capstones work: Mantle of Renewal heals half the damage Ember Mantle prevents;
-    Crushing Wingbeat makes Surge hits stagger.
-- **Rebirth** (automatic): die with ≥ 50 Ember and Rebirth ready → 5 s in place
-  (fire column, banner), back at 30% health, spends 50 Ember, then a 5 min cooldown
-  (shown on the HUD). Hooks are ready for the Paladin (extra charges, cooldown cuts).
-- **Healing exists now:** `World._heal_player` (also feeds Ember).
-- **Merge fix:** the smoke run gives Diving Strike a 0.5 m knockback (off in the real
-  data), so a Husk gets moved in nearly every run.
-- **Snapshots** are close to ENet's 1392-byte packet size: about 524 bytes per player.
-  A third player already goes over it, so interest management / delta compression is
-  needed before bigger tests.
-- Tests: 325. Smoke after merge: default 4 of 5 passed (fail: "no status applied to a
-  Husk", bot luck), `-Party` 2 of 2. Corrections 0.
-
-Needs a hand playtest (`run_local_test.ps1`):
-- **Z and C:** the four Wing abilities (feel, numbers, Diving Strike distance).
-- **The Ember bar:** fills in fights, settles back to 50; are the gain rates right?
-- **Rebirth:** die above 50 Ember → Rebirth in place; die below → normal respawn.
-- **K panel → Wings tab:** learning nodes, Z/C slots, capstones.
-
-### 2026-10-08 (17): More playtest fixes
-
-Developer playtest: Shield Charge still hit only one Husk (the second usually stood a
-step away from the first contact), and Vault always faced forward.
-
-Done:
-- **Shield Charge impact:** a new `impact_radius` key (2.5 m). When a `max_targets`
-  attack stops on contact, everything within that radius of you is hit too
-  (`AttackParams.radial_copy`, `World._hit_targets`).
-- **Vault faces where it goes:** the character turns to the vault direction as it
-  starts (sim yaw, so other players see it too).
-- **Dodge cooldown** 0.2 → 0.3 s.
-- Tests: 289. Smoke: default 3 of 3 passed, `-Party` 2 of 2.
-
-### 2026-10-08 (16): Wave 2 playtest feedback
-
-Developer playtest: Opening Strike, Bloodlust and Hamstring work well; Hamstring's slow
-is clearly visible.
-
-Done:
-- **Dodge cooldown:** a new `[dodge] cooldown` (0.2 s) after a roll before the next one.
-  A press during it is buffered. It's synced state (`to_array()` index 31).
-- **Shield Charge hits a group:** it still stops at its first contact, but now hits
-  everything its hitbox touches at that moment (all staggered, ready for Rising Cut).
-  Hitbox width 1.4 → 2.2 m so two targets side by side both get hit.
-- **Bloodlust bug fixed:** it used one charge per *target* hit, so a swing through the
-  two Husks at the camp used 2 charges, and each Husk ended with 2 bleed stacks. Now
-  it's one charge per swing (per hit window), and every target that swing hits bleeds.
-  4 swings = 4 stacks.
-- **Spear:**
-  - **Vault** goes the way you're moving (backward with no input) and has i-frames
-    during its dash (0.05–0.4 s). New ability keys `dash_direction="input"`,
-    `iframe_start`, `iframe_end`.
-  - **Heavy:** same hitbox width as the light (0.8 m). The thrust animation now pushes
-    the tip to the end of the hitbox, so the heavy (3.2 m) visibly reaches 0.4 m
-    further than the light (2.8 m). This applies to every Spear thrust.
-- Fixed a broken `weapon_spear.cfg` from the last session: a PowerShell edit had
-  rewritten it in the wrong encoding, so Godot couldn't parse it. Restored from git.
-- Tests: 287. Smoke: default 3 of 4 passed (the fail was the known guard flake),
-  `-Party` 3 of 3.
-
-Needs a hand playtest:
-- Vault in each direction, and taking a Husk swing mid-vault (it should show
-  "Evaded").
-- Shield Charge into both Husks, then Rising Cut.
-- Bloodlust on one Husk: it should reach "Bleed x4".
-- The Spear heavy thrust's reach; the new dodge rhythm.
-
-Next: Wave 2's second pair (feather projectiles; Ember, Wing slots and Rebirth).
-
-### 2026-10-08 (15): Forced movement, Rising Cut and the Spear (class build Wave 2B)
-
-Built by a parallel agent, merged into main on top of Wave 2A. The merge had 11
-conflicting files; both sides were kept everywhere. The synced state is now: statuses
-at index 27, forced movement at 28–30.
-
-Done:
-- **Forced movement:**
-  - Knockback, pull, push along facing and launch, on players (predicted, a server
-    event) and Husks (server-only).
-  - Being moved interrupts like a stagger.
-  - Never on allies, targets in i-frames, or blocked/evaded/parried/fatal hits.
-  - Walls stop it.
-  - `is_force_immune()` hook for the Juggernaut later. Limits in `combat.cfg` `[force]`.
-- **Rising Cut** (Broadsword, Keen Edge tier 2): staggers; a target that was already
-  staggered is launched 0.9 m up and pushed 0.8 m back. It chains from Shield Charge,
-  guard breaks or Riposte.
-- **Spear** (third Fighter weapon), Lancer and Impaler trees:
-  - Reach: light 2.8 m, heavy 3.2 m.
-  - Lunge: 4.5 m dash + thrust.
-  - Low Sweep: wide, 3 m knockback + 0.5 s stagger.
-  - Vault: 5 m backward dash.
-  - Skewer, Javelin Cast and Perforate come later.
-- **K panel:** "Equipped weapons" pickers to choose which two of the three you carry.
-- **Merge fixes:**
-  - The bot now rotates its focus weapon every cycle (default → Spear → Dual Axes →
-    Broadsword). Before, the Dual Axes never came out and the status checks always
-    failed.
-  - The smoke test runs 32 s (four cycles).
-  - `--tune` now takes strings without quotes.
-  - New keys that are off in the real data and on in the smoke run: Husk
-    `applies_status` (bleed) and Broadsword heavy `force_distance`.
-- Unit tests now wait for a real physics frame. This fixed the occasional unknown
-  unit-test failure (a dash test used a varying frame delta).
-- Tests: 283. Smoke after merge: default 5 of 6 passed (the fail was "no Husk was moved
-  by force"), `-Party` 3 of 3.
-
-Needs a hand playtest (`run_local_test.ps1`):
-- **K panel:** equip the Spear with the weapon pickers, then swap with X.
-- **Spear:**
-  - Reach.
-  - Lunge distance.
-  - Low Sweep knockback on Husks.
-  - Vault backward.
-- **Rising Cut:** use it after a Shield Charge stagger; the target should pop up.
-- **Getting knocked back:** add `--tune=enemy_husk/attack/force_distance=2` to the
-  server and client. Walls should stop you, nothing should rubber-band, and corrections
-  should stay 0.
-- **Tuning:** Low Sweep distance and duration, Rising Cut height, `[force]` limits.
-
-Known gaps:
-- Vault has no i-frames.
-- Blocked hits never push.
-- Bodies pass through each other when knocked back.
-
-### 2026-10-08 (14): Status effects (class build Wave 2A)
-
-Built by a parallel agent, merged into main. Wave 2B (forced movement + Spear) is still
-in progress.
-
-Done:
-- **Status effects** (`data/status_effects.cfg`, `game/status/`):
-  - Defined: bleed, slow, root, stun, Exposed, Empowered (damage up), Warded (damage
-    reduction), Bloodlust.
-  - They work on players (predicted where they change movement or actions) and on Husks
-    (server-only).
-  - Allies never debuff each other. Death clears them. Stun reuses stagger.
-  - Bleed shows dark-red damage numbers and can kill.
-- **New Fighter abilities:**
-  - **Opening Strike** (Broadsword): Exposed, +25% damage taken for 6 s. It's learned by
-    default but not slotted; use the K panel.
-  - **Bloodlust** (Dual Axes): your next 4 hits within 8 s each add a bleed stack.
-  - **Hamstring** (Dual Axes): 60% speed for 3 s. It now fills the axes' R slot.
-- **HUD:** a status row for you, and a status line under other players and Husks.
-- **Smoke test** now runs 24 s (three bot cycles; two left too little room for the
-  status checks). Bloodlust is tuned to last 30 s in the smoke run only.
-- Tests: 257. Smoke after merge: default 5 of 6 passed (the fail was the old guard
-  check), `-Party` 3 of 3.
-
-Needs a hand playtest (`run_local_test.ps1`):
-- Slot Opening Strike and hit a Husk: it should show "Exposed" and take bigger numbers.
-- Use Bloodlust on the axes, then hit Husks: they should show "Bleed xN" with ticks.
-- Hamstring: the target should visibly slow.
-- Tuning to judge: bleed 10/s per stack (max 5), slow 60%, Exposed +25%, cooldowns
-  12 / 14 / 9 s.
-
-Known gaps:
-- Root, stun, Empowered and Warded exist, but nothing applies them yet (Wave 2D/3).
-- Statuses only tick while the player's inputs arrive (keeps prediction exact; a lagging
-  player's bleed pauses).
-- Bloodlust survives a weapon swap.
-
-### 2026-10-08 (13): Wave 1 playtest fixes; startup lag found
-
-Playtest verdict (developer): ability timing, feel and distances are good as they are.
-
-Done:
-- **Startup lag fixed.** Cause: ENet's packet throttle. While clients start up, ping
-  spikes and ENet drops bursts of unreliable packets (several in a row, enough to beat
-  input redundancy), so the server skipped inputs and the client got corrections.
-  In a 9-bot stress test: 24 skipped inputs and 24 corrections in one bot's first few
-  seconds. Throttle now off (`core/net.gd`): 0 skipped inputs in 2 reruns; 1
-  correction, which was the known flat-ground issue below.
-- **K panel:** Esc now closes it like K. Closing it (either key) recaptures the mouse.
-  Scrolling the panel no longer hides the cursor: wheel scrolls never capture the
-  mouse, and no click does while a panel is open (`modal_ui` group).
-- `--perf-log` flag: logs frames slower than 50 ms and the worst physics step. With 9
-  bots, the server's worst physics step was 9–14 ms (limit at 60 ticks/s: 16.7 ms).
-- Tests: 211. Smoke: default 3 of 3 passed, `-Party` 3 of 3.
-
-Needs a hand playtest:
-- Launch with `run_local_test.ps1`: is the startup lag gone?
-- K panel: scroll it, close it with Esc.
-
-### 2026-10-07 (12): Abilities, weapon swap and the Fighter (class build Wave 1A)
-
-Built by a parallel agent from `design/classes.md`, merged into main after Wave 1B and
-the loot work.
-
-Done:
-- **Class:** Fighter only (`data/class_fighter.cfg`), from `--class=` (default fighter).
-  The server rejects weapons outside the class list.
-- **Weapons:**
-  - The sword is now the **Broadsword** (`weapon_broadsword.cfg`, same feel).
-  - New **Dual Axes** (`weapon_dual_axes.cfg`): faster, weaker lights, blocked hits cost
-    1.6× stamina.
-  - **X swaps** (0.35 s; buffered; not mid-attack, ability or roll).
-- **Abilities on Q/E/R:**
-  - Broadsword: Whirlwind Edge (hits all around), Shield Charge (dash, stops at and
-    staggers the first target), Riposte (parry stance: a frontal hit is negated with
-    "Parried!" and you counter, Husks included).
-  - Dual Axes: Frenzy (up to 4 hits), Crashing Leap (4 m leap, area slam). The third
-    axes slot stays empty until Wave 2.
-  - Cooldowns keep running while a weapon is holstered.
-- **Mastery trees** (`data/mastery*.cfg`):
-  - 2 branches per weapon, tier gates, 19 points (no XP yet).
-  - Free respecs any time except mid-action.
-  - Active nodes unlock abilities. Passives and upgrades are server-side damage/stamina
-    modifiers. Capstones are placeholders.
-  - **K** opens the tree panel.
-- **HUD:** ability bar with cooldowns, plus a weapon line.
-- **Bot and smoke test:** the bot uses abilities, swaps and respecs (8 s cycle). The
-  smoke test runs 16 s and requires ability hits, swaps and a build change.
-- Tests: 211 after the merge. Smoke: default 4 of 4 passed, `-Party` 4 of 4.
-
-Needs a hand playtest (`run_local_test.ps1`):
-- **Broadsword:** Q/E/R, especially Riposte against a Husk swing.
-- **Dual Axes** (swap with X): Frenzy, Crashing Leap.
-- **Swap:** how 0.35 s feels.
-- **K panel:** learn/unlearn, tier gates, moving abilities between slots.
-- **Corrections** should stay 0.
-- **Tuning:** `data/weapon_*.cfg` and `data/mastery*.cfg`.
-
-Known gaps:
-- Mastery allocations are lost on reconnect (persistence is milestone 5).
-- Crashing Leap's height is visual only, so it can't reach ledges.
-- Newly equipped weapons start with cooldowns at 0.
-- Snapshots grew by about 30 values per player.
-
-### 2026-10-07 (11): Parties and the ally rule (class build Wave 1B)
-
-Built by a parallel agent from `design/classes.md`, merged into main.
-
-Done:
-- **Parties:**
-  - Invite the player nearest your crosshair (**T**), join (**Y**), decline (**N**),
-    leave (**L**), kick (**Delete**, leader only).
-  - Up to 5 members; invites expire after 30 s; invite range 20 m (`data/party.cfg`).
-  - The server validates everything; pure rules in `PartyRules`.
-- **Ally rule:** `World.are_allies(a, b)` is the single source of truth. Party members
-  can't damage, stagger or block-drain each other. Enemies are unaffected.
-- **HUD:** party frames with health (left), an invite prompt, cyan nameplates for party
-  members.
-- **Testing:**
-  - `--bot-party` bots party up.
-  - `smoke_test.ps1 -Party` requires a party to form and 0 ally hits.
-  - `run_local_test.ps1 -Party` gives you a bot that joins your party.
-- Tests: 131. Smoke after merge: default 8 of 9 passed (the 1 fail is likely the known
-  "no hit landed on a guard" flake), `-Party` 3 of 3.
-
-Needs a hand playtest (`run_local_test.ps1 -Party`):
-- Invite/join/leave flow.
-- The bot's swings pass through you while partied.
-- Layout and colours of the party frames.
-- Key choices.
-
-### 2026-10-07 (10): Items and loot rolls (milestone 2, session 1)
-
-Done (pure logic and data; nothing in the game world yet, so no shared files touched
-besides two small helpers in `core/tuning.gd`):
-- Rarity tiers (Common, Rare, Epic, Legendary: 0–3 bonus stats), 7 items (Iron Broadsword, Iron
-  Hatchets for Dual Axes, five Padded armor pieces), 6 bonus stats (affixes), and the
-  Husk loot table: 60% drop chance, gear score 100–140.
-- `LootRoller` (seeded, server-side), `Item` (plain data for network/saves),
-  `ItemDatabase` with `validate()`.
-- `tools\roll_loot.ps1`: 50,000 Husk kills in about a second. Rarity and item spread
-  match the weights; Legendary is about 1 in 345 kills.
-- Tests: 90 (14 for loot, including one that validates the real data files).
-
-Developer decisions after the first sim run:
-- Removed the Uncommon tier, so rarities are Common 0 / Rare 1 / Epic 2 / Legendary 3
-  bonus stats. Weapons, hands and chest have 3+ eligible affixes, so their Legendaries
-  are full. **Still open:** head, legs and feet only have 2 eligible affixes, so their
-  Legendaries roll 2 (same as Epic).
-- Husk rarity weights set to Common 78 / Rare 18 / Epic 3.3 / Legendary 0.7 (% of drops).
-- Affix names: Blaze (damage), Sear (crit), Hearth (max health), Ferocity (max stamina),
-  Rage (stamina regen), Scorch (block stamina cost). Ids in `affixes.cfg` unchanged.
-
-### 2026-10-07 (9): First enemy (Husk)
-
-Done:
-- Husk: a slow, heavy-hitting melee enemy, fully server-controlled. Two of them at a
-  camp ~15 m north of spawn. They wander, notice players within 8 m, chase, and swing
-  (0.6 s windup telegraphed by glowing red, 120 damage, 0.3 s stagger on hit). Roll and
-  block work against them as against players.
-- Players hit Husks with the same attacks; heavies stagger them (interrupting their
-  windup). 600 health; dead Husks respawn at the camp after 10 s. Pulled more than 25 m
-  from camp, a Husk walks home and heals.
-- All values in `data/enemy_husk.cfg`. Camps are `Marker3D`s in `world.tscn`.
-- The bot fights the nearest Husk within 15 m (else you), so you can fight Husks
-  together, which is milestone 1's "done" check.
-- Tests: 76 (11 for the enemy brain). Smoke test: Husks and bots must hit each other;
-  0 corrections across 5 runs. Visuals checked from game frames (telegraph, club,
-  labels).
-
-Needs a hand playtest (milestone 1 check): fight the Husks with the bot (or a second
-person). Is it fun? Tune `data/enemy_husk.cfg`.
-
-### 2026-10-07 (8): Block
-
-Controls changed (developer's choice, New World layout): **tap left click = light,
-hold left click = heavy, hold right click = block.**
-
-Done:
-- Block: frontal arc (120°) blocks hits; blocked hits cost stamina
-  (`block_stamina_damage` per attack) instead of health. Slower movement and stamina
-  regen while blocking; the guard faces the camera. Attacking or rolling drops the
-  guard, and it comes back if right click is still held.
-- Guard break: heavy attacks always break a guard (`breaks_block`), and so does any hit
-  with more stamina damage than the blocker has. Guard break = 1.2 s stagger (raised
-  from 0.8: at 0.8 the stagger ended before the attacker could follow up after a heavy).
-- "Blocked" / "Guard broken!" labels; placeholder shield raises when blocking.
-- Fixed a real prediction bug: the client didn't restore the body's on-floor flag when
-  reconciling, so a correction that moved you into the air made the replay drift. The
-  flag is now part of `PlayerState`.
-- Bots take turns: one attacks (heavy, then two lights) while the other blocks. Smoke
-  test (now 12 s) requires blocks and guard breaks too. `--verbose` logs unexpected
-  corrections and dropped inputs.
-- Tests: 65.
-
-Needs a hand playtest: block feel, guard break length, stamina cost of blocked hits,
-and whether heavies should always break guard.
-
-### 2026-10-07 (7): Death, respawn and stagger
-
-Done:
-- Death at 0 health: the player drops (grey, face down), can't act or be hit. A
-  "Defeated / Respawning in N" banner counts down; after 5 s (`[death] respawn_time`)
-  they respawn at a random spawn point with full health and stamina.
-- Stagger: heavy hits stagger the target for 0.4 s (`stagger` per attack in
-  `weapon_sword.cfg`; light is 0). Interrupts their attack or roll; presses during it
-  are buffered. Body tilts back while staggered.
-- `--tune=file/section/key=value` launch option to override tuning for one run.
-- Fixed two sources of false prediction corrections: respawning in mid-air (now on the
-  ground) and two snapshots acknowledging the same input. Corrections caused by server
-  events (stagger/death/respawn) aren't counted.
-- Tests: 51 (11 new for stagger/death). Smoke test runs with 300 health and 0.5 s
-  respawn: 1–2 deaths and respawns per run, 0 corrections.
-
-Needs a hand playtest: respawn time, stagger length, whether light hits should stagger.
-
-### 2026-10-07 (6): Attack playtest feedback
-
-Playtest verdict (developer): hitbox size is fine for now (revisit with real animations);
-light attack recovery feels good.
-
-Done:
-- Heavy attack moved to right click; light attack (left click) now fires on press.
-  The tap/hold logic is gone. Note: New World uses right click for block, so block
-  will need a key decision when we build it.
-- Attacks track the camera during the whole swing (facing and hitbox turn toward the
-  aim at `turn_speed` in `weapon_sword.cfg`, 720°/s), instead of locking at the start.
-- Shorter reach: light 2.2 → 1.8 m, heavy 2.4 → 2.0 m.
-- `run_local_test.ps1` now makes the second window a bot by default (`-NoBot` for two
-  player windows). The bot fights the nearest player, circles, jumps and dodges.
-- Tests: 40, all pass. Smoke test: 0 corrections, all bot attacks land.
-
-Needs a hand playtest: right-click heavy, aim tracking speed during swings.
-
-### 2026-10-07 (5): Light and heavy sword attacks
-
-Done:
-- Left click: tap = light attack (starts on release), hold 0.25 s = heavy attack (starts
-  while still held; releasing afterwards does nothing). Attacks face the camera.
-- Each attack: windup → active (hitbox live) → recovery. Movement slowed during attacks,
-  no jumping. A dodge can cancel recovery only. Presses mid-attack/mid-roll are buffered.
-- Server-side hit detection: box hitbox vs capsule (`MeleeHitbox`), one hit per target
-  per attack, respects i-frames ("Evaded" shown on the target).
-- Health (1000), HUD health bar, health under other players' names, damage numbers,
-  red hit flash. At 0 health it refills and shows "Defeated!" (placeholder).
-- F3 (or `--hitboxes`) shows hitboxes: faint during the attack, bright while live.
-- All values in `data/weapon_sword.cfg` and `data/combat.cfg` [health].
-- Tests: 38 (12 attack rules, 6 hitbox math). Bots now fight; smoke test requires the
-  server to resolve hits. Result: 3–8 attacks per bot, all landed, 0 corrections.
-- `--screenshot-dir` flag so visuals can be checked from the game's own frames.
-
-Needs a hand playtest: attack feel (timings, reach, slow-down), tap vs hold threshold,
-whether dodge should also cancel windup, and hitting a player who's rolling.
-
-### 2026-10-07 (4): Neutral dodge rolls forward
-
-- Dodging with no movement input now rolls forward (the way the character faces)
-  instead of backstepping. Backstep removed entirely; every roll is a forward roll.
-
-### 2026-10-07 (3): Dodge playtest feedback, air dodge
-
-Playtest verdict (developer): roll distance/speed, recovery into movement, time between
-rolls, i-frame window and stamina values all feel right; keep them. Holding Shift
-rolling only once is intended. Stamina may later depend on equipped weapon/armor.
-
-Done:
-- Air dodge: allowed in the air, changes only horizontal movement; gravity and the jump
-  arc carry on. Limited to `air_dodges` per time in the air (default 1, resets on
-  landing; 0 = ground only) in `data/combat.cfg`.
-- Tests: 19 (air dodge rules, plus physics tests proving an air dodge leaves vertical
-  motion unchanged). Test runner now waits a frame so tests can add physics bodies.
-- Bot now jumps, air dodges and ground dodges; smoke test requires both kinds with
-  0 corrections. Result: 5 dodges (3–4 in the air) per bot, 0 corrections.
-
-Needs a hand playtest: air dodge feel, and whether 1 air dodge per jump is right.
-
-### 2026-10-07 (2): Stamina and dodge roll
-
-Done:
-- Dodge on **Shift**: rolls in the movement direction, or backsteps (straight back,
-  without turning) with no movement input (changed to forward in session 4). Costs stamina; can't dodge in the air or with
-  too little stamina. Presses up to `buffer` seconds early (mid-roll, or just before
-  landing) still fire.
-- I-frames for a window inside the roll (`PlayerState.is_invulnerable`). Nothing can hit
-  yet; for now the body flashes white during i-frames so the window is visible.
-- Stamina regenerates after a delay once the roll ends. Stamina bar on the HUD.
-- Placeholder roll visual: the capsule somersaults over the roll.
-- Fully predicted and reconciled: stamina, dodge and facing now live in `PlayerState`,
-  which the server sends in every snapshot.
-- All values in `data/combat.cfg`.
-- Unit tests: small in-repo runner (`tests/framework/`, `tools/run_tests.ps1`), 14 tests
-  for stamina/dodge rules. All pass.
-- Smoke test now also requires each bot to dodge with ≤ 2 corrections. Result: 5 dodges
-  per bot, 0 corrections.
-
-Needs a hand playtest: roll in both windows with `run_local_test.ps1`, check that it feels
-right and that the other window shows the roll, then tune `data/combat.cfg`.
-
-### 2026-10-07 (1): Project setup and networked movement
-
-- Godot 4.7.2, git, private GitHub repo (`EvnEssnce/Newer-World`), folder layout, docs.
-- Dedicated server (`--headless -- --server`), client connect screen.
-- Server-authoritative movement, client prediction + reconciliation, snapshot
-  interpolation for other players. Hand-tested with two windows: smooth.
-- Smoke test (`tools/smoke_test.ps1`).
-
-## Next
-
-Milestone 2, one session each. Checked against `design/classes.md` (another session is
-building its Wave 1 in parallel: 1A ability framework/weapon swap/Fighter, 1B parties):
-1. **Done (session 10):** items and loot rolls, pure logic + tests: item definitions,
-   rarity tiers, rolled stats, gear score ranges, Husk loot table, all in `data/`, plus a
-   script that rolls 50,000 drops and prints the real rarity distribution. **No
-   attributes** (design decision): gear stats are things like damage %, armor, max
-   health/stamina, crit. Weapon items name a weapon type (class-locked; attack timings
-   stay in 1A's `data/weapon_<name>.cfg`, not in loot data).
-2. **After Wave 1 merges** (touches `world.gd`, HUD): dead Husks drop **personal** loot
-   (everyone who damaged it gets their own server roll, so no party loot rules); pick up
-   with **F**, inventory screen on **I** (Wave 1 uses Q/E/R/X/K/Z/C).
-3. **After 1A merges:** equipping armor and weapons changes your numbers, built on 1A's
-   weapon slots, with gear bonuses feeding the same modifier path as mastery passives.
-
-Later / unscheduled:
+   Decided: blocks **only enemies** (the user and allies walk through; treat hostile
+   players as blocked unless that's hard), **stops hostile projectiles** (yours and
+   allies' pass), about **3 m in front**, **4.5 m wide × 2.5 m tall**, lasts **8 s**,
+   **18 s** cooldown, **doesn't move** once placed, not breakable yet but shaped so it
+   **can take health later**.
+   - Playtest steps 2–6 together.
+
+### Step C: Network headroom (before any test with more than 2 players)
+
+7. **Snapshot size:** with 2 players + 2 Husks a snapshot already reaches ~1.41–1.45 KB,
+   over ENet's 1392-byte MTU; a third player always goes over. Add **interest
+   management** (only nearby players/enemies) and **delta compression** (send what
+   changed since the last acknowledged snapshot). Measure with a 6–10 bot stress run.
+   Probably 2 sessions. Every later step adds players, enemies or state, so this comes
+   first.
+
+### Step D: Milestone 3, gathering and crafting
+
+Brief: two or three node types, one refining step, one crafting station, tradeskill XP.
+
+8. **Stackable resources in the inventory** (ore, wood, fiber, hide; stacks with a max
+   size) and **gathering nodes**: server-side nodes with a hit count, a tool requirement
+   (pickaxe, axe, sickle, skinning knife as tool items or a simple "has the tool" rule),
+   a gather time (walk-only lock like equipping), respawn timers, all in `data/`.
+   Gathering key: decide (F is pickup; maybe F on a node too).
+9. **Tradeskills:** XP curves per skill (`data/tradeskills.cfg`), XP from gathering,
+   higher skill = faster gathering or more yield. Pure logic + tests.
+10. **Refining and a crafting station:** one refining chain (ore → ingots), recipes in
+    `data/recipes.cfg`, a station object in the world, a crafting panel; the server
+    checks materials, station range and skill. Pure recipe logic + tests.
+11. **Crafted gear:** recipes that output gear through `LootRoller` (gear score range
+    from skill, rarity chance), so crafting feeds the same items as loot. Durability and
+    repair (with materials) if decided in §4.
+    - Playtest Milestone 3.
+
+### Step E: Milestone 5, persistence
+
+12. **Persistence module:** SQLite through one module (a Godot SQLite GDExtension such as
+    godot-sqlite; check it supports 4.7), schema for accounts and characters, migrations.
+    Pure save/load of `CharacterBuild`, `Inventory`, `Equipment`, tradeskills (unit
+    tested with a temporary database).
+13. **Accounts and character select:** simple login (name + password hash), create a
+    character (class picker instead of `--class`), choose it on connect.
+14. **Saving:** save on change and periodically; load on join; survive a server restart
+    (the brief's "done" check). Add a smoke check that restarts the server mid-run.
+
+### Step F: Progression (needed by the class design; not in the original milestones)
+
+15. **Character level and XP** (from kills and gathering), Wing tree points from level,
+    **weapon mastery XP** per weapon (1 point per level, cap 20, as in
+    `design/classes.md`). Today every tree has its points from the start. Pure logic +
+    tests; saved through the persistence module.
+
+### Step G: Milestone 6, one zone, then real people
+
+16. **Enemy navigation:** navmesh steering (Husks get stuck on crates today).
+17. **More enemies and camps:** 2–3 new enemy kinds with their own loot tables and gear
+    score ranges (today everything drops GS 100–140), placed as camps.
+18. **The zone:** a small map built from CC0 packs: mob camps, gathering node spawns, a
+    town with crafting stations, spawn points.
+19. **Internet readiness:** lag compensation for hits (rewind targets by the attacker's
+    interpolation delay), render smoothing after corrections, the server sending its
+    tuning on connect.
+20. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations
+    in place of the capsule (download the packs yourself; Mixamo needs an Adobe login).
+21. **Playtest with real people:** host on the developer's PC over Tailscale (free), or a
+    Hetzner CX23 billed by the hour (§7).
+
+### Class track (fits after Step E, or between steps when the developer wants)
+
+Order from `design/classes.md`: **Assassin** (Dual Talons first, then Throwing Knives)
+→ **Ranger** → **Mage** → **Paladin**. Each class is about 2–3 sessions (weapons,
+trees, Wings, models), plus the systems it needs:
+- `SUMMON` (built in step 6 for Shield Wall), `AREA` ground effects and traps (Ranger,
+  Mage), **stealth** (Assassin), **updraft hover** (Wings), weapon abilities that cost
+  Ember (Mage), and the Paladin's Rebirth hooks (already in `PlayerState`).
+- Each new class needs items in `data/items.cfg` (its weapons and a Wing Enhancement)
+  and loot table weights.
+
+### Later / unscheduled
+
+- Stamina gear stats (Ferocity, Rage): make max stamina and stamina regen synced
+  `PlayerState` values, then switch the affixes back on (`slots` in `affixes.cfg`).
 - Light attack combo chain (New World-style 3-hit string)?
-- Swap the capsule for a CC0 character with Mixamo idle/run/roll animations
-  (download the packs yourself; Mixamo needs an Adobe login).
+- Salvage, item levels beyond GS 140, perks with effects (not just stats).
+- Exports: `data/*` in the export filter; the "Dedicated Server" preset.
 
-## Known issues / notes
+---
 
-- Husks steer straight at their target (no navmesh), so a crate between you and a
-  Husk can stall it. Fine for the open test area; add navigation before real zones.
+## 4. Outstanding work
+
+### Needs a hand playtest (`run_local_test.ps1`)
+
+**Loot (session 27):**
+- Kill Husks: do drops read well (sack, beam, name, rarity colours)? Is the 2.5 m pickup
+  reach right?
+- The F prompt and the pickup feed; the I panel (scroll, Discard twice, I/Esc close,
+  mouse comes back).
+- With the bot (`-Party` too): you only see your own drops.
+
+**Gear (session 28):**
+- Equip armor: is ~20% less damage from a full set noticeable? Is 1 s to equip right?
+- Equip a weapon type you don't have out ("Replace ..."), then change weapons in K: the
+  item should follow its type or return to the bag.
+- A Wing Enhancement: Wing abilities hit a bit harder; Kindle gives more Ember.
+
+**Training dummy (session 30):** walk to z = +18 (past Crate3): does the "You: N dmg
+N DPS N s" readout above it read well and match what you dealt (bleed ticks too)? Does
+it heal and stand back up 4 s after you stop? It drops nothing.
+
+**Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
+
+**Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
+ran the real scripts under PowerShell 7 on Linux; Windows PowerShell 5.1 builds the
+command line the same way, but hasn't been tried with the fixed loot `--tune`.
+
+### Decisions to confirm (the defaults that were built)
+
+Loot and gear:
+- F takes every drop of yours in reach at once (no loot window); no pickup while
+  defeated; a discarded item is deleted, not dropped.
+- Damage over time counts as damaging an enemy (you get a loot roll); a Husk that walks
+  home and heals forgets who hit it.
+- Armor rating grows on the same gear score curve as weapons (the source only gives the
+  weapon formula); affix values still grow linearly with gear score.
+- Armor doesn't reduce damage over time (bleed).
+- Average gear score: empty armor slots count 0, a plain weapon counts 100.
+- While equipping you walk at full speed; a stagger doesn't interrupt it; raising max
+  health doesn't heal you.
+- New affixes **Tend** (healing received) and **Kindle** (Ember gained); Ferocity and
+  Rage (stamina) are off until stamina is synced.
+- The bot never equips weapons (it picks weapons per cycle in the K panel).
+
+Open questions for coming steps:
+- **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
+  limit that slows you?) or drop it?
+- **Durability:** gear wears down on death/use and is repaired with materials (needs
+  crafting)? Or skip?
+- **Gathering key:** F for nodes too, or a separate key?
+- **Mage vs Paladin "Great Staff":** the design calls the Paladin's the Longstaff; confirm
+  before the class track reaches them.
+
+### Known issues
+
+Gameplay:
+- Husks steer straight at their target (no navmesh): a crate between you and a Husk can
+  stall it (step 16).
 - A heavy's hitbox can hit both Husks at once when they stand together.
-
-- About 1 smoke run in 20 shows a few (≤4) small unexpected corrections on flat ground
-  (~0.1 m sideways), not near any server event. Cause unconfirmed; the server logged no
-  dropped inputs in 12 runs that tried to catch it. Smoke test tolerates ≤5. Run with
-  `--verbose` to get the details if it shows up in play. Seen again on 2026-10-08: one
-  ~9 cm position mismatch with an identical `PlayerState`, so it's in the physics step,
-  not the sim state.
-- The occasional unit-test failure under load was `test_abilities` dash tests using a
-  varying frame delta; fixed in Wave 2B (the runner waits for a physics frame). If a
-  unit test still fails now and then, note its name.
-- Smoke checks that depend on the bots' fights going a certain way still fail about 1
-  run in 10: "no hit landed on a guard" and "no Husk was moved by force".
-- When 9 bots quit at once, the server had one ~100 ms tick (disconnect handling).
-  Harmless now; look at it if mass disconnects matter later.
-
-- Movement and combat tuning are read separately by server and client. If they run
-  different `data/*.cfg` files, prediction will constantly correct. Later: the server
-  could send its values on connect.
-- Clients send input every physics tick (60/s) and get full snapshots of every player
-  (including their stamina). Fine for 50 players on a LAN; add interest management
-  and delta compression before a public playtest.
-- No render smoothing after a correction yet: a big correction snaps the local player.
+- Attacks pass through crates (hitboxes ignore world geometry).
+- Projectiles fly flat (no aim pitch); no impact effect; rarely a thrower sees its own
+  throw twice.
+- Statuses only tick while a player's inputs arrive (keeps prediction exact; a lagging
+  player's bleed pauses). Bloodlust survives a weapon swap.
+- Blocked hits never push; bodies pass through each other when knocked back.
+- Crashing Leap's height is cosmetic (can't reach ledges). F3 draws Vortex at its base
+  3.5 m even with Maelstrom. Hold the Line has no poke animation.
+- Newly equipped weapons start with cooldowns at 0.
+- The greataxe model is mostly hidden behind the body from the follow camera.
+- A drop scattered next to a crate can land inside it (still picked up from beside it).
 - Holding Space keeps jumping (jump is sent as "held").
-- Dodge recovery into movement was judged smooth in playtest (no recovery phase needed).
-- No lag compensation for hits: the server checks targets' current positions, while
-  the attacker sees them ~100 ms in the past. Fine on LAN; matters over the internet.
-- Hit events arrive before the attacker's swing is drawn on other clients (remote
-  players are drawn 100 ms in the past, hit events aren't delayed).
-- Attacks pass through crates (the hitbox ignores world geometry).
-- Placeholder sword swing/flash/damage-number constants live in `player.gd` (cosmetic
-  only, to be replaced by real animation and VFX).
+- Builds, inventories and gear are lost on disconnect (Step E).
+
+Networking:
+- Snapshots exceed the MTU at worst with 2 players + 2 Husks (Godot warns "above the
+  MTU"); a third player always does (step 7).
+- No lag compensation; hit events arrive before the attacker's swing is drawn on other
+  clients; no render smoothing after a correction (step 19).
+- Server and client read tuning separately: different `data/*.cfg` files mean constant
+  corrections (step 19: send tuning on connect).
+- About 1 smoke run in 20 shows a few (≤4) small unexpected corrections on flat ground
+  (~0.1 m sideways, identical `PlayerState`, so it's in the physics step). The smoke
+  test tolerates ≤5; run with `--verbose` for details.
+- When 9 bots quit at once the server had one ~100 ms tick (disconnect handling).
+
+Testing:
+- Bot-luck smoke checks still fail about 1 run in 10: "no hit landed on a guard", "no
+  Husk / no player was moved by force". Rerun once; a second failure is real.
+- Linux cloud runner only: two bots quitting at the same instant sometimes print
+  `party_members=0` for one of them (quit timing, not a party bug).
+
+Housekeeping:
+- Placeholder swing/flash/damage-number constants live in `player.gd` (cosmetic, to be
+  replaced by animation and VFX).
 - This repo has a local git `user.name`/`user.email` (no global identity configured).
+
+---
+
+## 5. How to work in this repo
+
+- One testable goal per session ("dodge roll with i-frames, tunable from one config
+  file", not "work on combat"). The developer is on Claude Pro: keep sessions focused,
+  don't re-explore the codebase (read `CLAUDE.md` and this file instead).
+- Every tuning value goes in `data/*.cfg` with a comment (what it does, units); the
+  developer tunes feel by editing those files.
+- Tests for anything that isn't feel (loot, damage formulas, crafting outputs, inventory
+  rules, stamina/dodge rules); feel is playtested by hand. Run the unit tests and both
+  smoke tests before committing (see `CLAUDE.md` "Running"; Linux cloud sessions have
+  their own notes there).
+- Git from the first commit, private GitHub repo (`EvnEssnce/Newer-World`).
+
+---
+
+## 6. Session log
+
+Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.md` (session 30: `git show 8f18730:PROGRESS.md`).
+
+| # | Date | What |
+|---|---|---|
+| 1 | 2026-10-07 | Project setup; dedicated server; networked movement with prediction |
+| 2 | 2026-10-07 | Stamina and dodge roll with i-frames |
+| 3 | 2026-10-07 | Dodge feedback; air dodge |
+| 4 | 2026-10-07 | Neutral dodge rolls forward |
+| 5 | 2026-10-07 | Light and heavy sword attacks, server hit detection, health |
+| 6 | 2026-10-07 | Attack feedback: camera-tracked swings, shorter reach |
+| 7 | 2026-10-07 | Death, respawn, stagger; `--tune` |
+| 8 | 2026-10-07 | Block and guard break; on-floor synced |
+| 9 | 2026-10-07 | First enemy (Husk); **Milestone 1 done** |
+| 10 | 2026-10-07 | Items and loot rolls (Milestone 2, part 1) |
+| 11 | 2026-10-07 | Parties and the ally rule (Wave 1B) |
+| 12 | 2026-10-07 | Abilities, weapon swap, mastery trees, the Fighter (Wave 1A); **Milestone 4 done** |
+| 13 | 2026-10-08 | Wave 1 fixes; startup lag (ENet throttle off); `--perf-log` |
+| 14 | 2026-10-08 | Status effects (Wave 2A) |
+| 15 | 2026-10-08 | Forced movement, Rising Cut, the Spear (Wave 2B) |
+| 16 | 2026-10-08 | Wave 2 feedback: dodge cooldown, Shield Charge groups, Vault |
+| 17 | 2026-10-08 | Shield Charge impact radius; Vault facing |
+| 18 | 2026-10-08 | Ember, Wings and Rebirth (Wave 2D) |
+| 19 | 2026-10-08 | Feather projectiles (Wave 2C); Wave 2 complete |
+| 20 | 2026-10-08 | Wave 2 feedback (plan) |
+| 21 | 2026-10-08 | Broadsword stab, Boomerang Axe visuals |
+| 22 | 2026-10-08 | Crashing Leap aimed by pitch; Diving Strike shape |
+| 23 | 2026-10-09 | Spear Skewer and Perforate |
+| 24 | 2026-10-09 | Finishing Thrust, Hold the Line, Rampage, Shield Wall; enemy threat |
+| 25 | 2026-10-09 | The Juggernaut: Halberd, Greataxe, War Hammer, Wings, crits |
+| 26 | 2026-10-09 | Wave 3 playtest feedback (Step B's plan) |
+| 27 | 2026-10-09 | Loot drops, F pickup, I inventory (Milestone 2, part 2) |
+| 28 | 2026-10-10 | Equipping gear: 6 slots, New World gear score, armor, 1 s equip (Milestone 2, part 3) |
+| 29 | 2026-10-10 | Merged the project handoff into this file; one build order (docs only) |
+| 30 | 2026-10-10 | Training dummy: stationary enemy, idle reset, per-player DPS readout (branch `training-dummy`) |
+| 31 | 2026-10-10 | Merged `training-dummy` and the loot branch; smoke tests run with PowerShell 7 on Linux; fixed the loot `--tune` quoting (it parsed as `{}`, so no drops) and made Tuning log unparseable overrides |
+
+---
+
+## 7. Costs
+
+| Stage | Cost |
+|---|---|
+| Building Steps A–G locally | $0 beyond Claude Pro ($20/mo) |
+| Playing with friends | $0: host on the developer's PC, connect over Tailscale's free plan or a forwarded port |
+| Always-on playtest server | Hetzner CX23, €5.49/mo, billed hourly; delete after a playtest |
+| Live, 50 players at once | about $70–90/mo: Hetzner CCX13 (€42.99) + DigitalOcean managed Postgres ($15.15) + backups |
+| Steam release | $100 one time, refunded after $1,000 in revenue |
+
+Prices as of October 2026; Hetzner raised prices twice in 2026, so check before
+ordering (OVH's Rise-1 at ~$64/mo is the alternative, with game-focused DDoS
+protection). Bandwidth is an estimate: about 10–30 KB/s per player with interest
+management. Paid anti-cheat can be skipped because the server decides every hit and
+loot roll. Hold off paying for anything until the game is fun to play with friends.

@@ -4,8 +4,9 @@ extends RefCounted
 ## data/items.cfg and data/affixes.cfg. The game uses current(); tests build
 ## their own and fill the dictionaries by hand.
 
-const SLOTS: PackedStringArray = ["weapon", "head", "chest", "hands", "legs", "feet"]
-const PRIMARY_STATS: PackedStringArray = ["weapon_power", "armor"]
+## Item slots ("wings" = a Wing Enhancement). Equipment maps them to equip slots.
+const SLOTS: PackedStringArray = ["weapon", "head", "chest", "legs", "wings"]
+const PRIMARY_STATS: PackedStringArray = ["weapon_power", "wing_power", "armor"]
 const TABLE_PREFIX := "table_"
 
 
@@ -24,9 +25,12 @@ class ItemDef:
 	var slot := ""
 	## Weapons only: the weapon type (data/weapon_<type>.cfg), which is class-locked.
 	var weapon_type := ""
+	## Wing Enhancements only: the one class that equips it.
+	var class_id := ""
 	## One of PRIMARY_STATS.
 	var primary_stat := ""
-	var primary_per_gear_score := 0.0
+	## Its value at the base gear score (GearScore.factor scales it).
+	var primary_base := 0.0
 
 
 class AffixDef:
@@ -58,6 +62,8 @@ var rarities: Dictionary[String, RarityDef] = {}
 var items: Dictionary[String, ItemDef] = {}
 var affixes: Dictionary[String, AffixDef] = {}
 var tables: Dictionary[String, LootTable] = {}
+## The gear score curve items' main stats follow.
+var gear := GearScore.new()
 
 static var _current: ItemDatabase
 
@@ -73,6 +79,7 @@ static func current() -> ItemDatabase:
 
 static func from_tuning() -> ItemDatabase:
 	var db := ItemDatabase.new()
+	db.gear = GearScore.current()
 	db.rarity_order = PackedStringArray(Tuning.get_value("loot", "rarities", "order"))
 	for id in db.rarity_order:
 		var r := RarityDef.new()
@@ -102,8 +109,9 @@ static func from_tuning() -> ItemDatabase:
 		item.slot = Tuning.get_value("items", id, "slot")
 		if Tuning.has_value("items", id, "weapon"):
 			item.weapon_type = Tuning.get_value("items", id, "weapon")
+		item.class_id = Tuning.get_optional("items", id, "class", "")
 		item.primary_stat = Tuning.get_value("items", id, "primary_stat")
-		item.primary_per_gear_score = Tuning.get_value("items", id, "primary_per_gear_score")
+		item.primary_base = Tuning.get_value("items", id, "primary_base")
 		db.items[id] = item
 
 	for id in Tuning.get_sections("affixes"):
@@ -143,6 +151,8 @@ func validate() -> PackedStringArray:
 		var has_weapon_type := not item.weapon_type.is_empty()
 		if is_weapon != has_weapon_type:
 			problems.append("item '%s': weapons need a weapon type, other slots mustn't have one" % item.id)
+		if (item.slot == "wings") != not item.class_id.is_empty():
+			problems.append("item '%s': Wing Enhancements need a class, other slots mustn't have one" % item.id)
 	for affix: AffixDef in affixes.values():
 		if affix.min_per_100_gs > affix.max_per_100_gs:
 			problems.append("affix '%s' has min above max" % affix.id)

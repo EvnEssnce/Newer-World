@@ -3,6 +3,19 @@ class_name LootRoller
 ## unit tested (tests/test_loot.gd) and the same seed reproduces the same drops.
 
 
+## Personal loot for a kill: every player who damaged the enemy (peer ids, in
+## order) gets their own roll of the table. Returns peer id -> items, leaving
+## out players whose roll dropped nothing.
+static func roll_kill(table: ItemDatabase.LootTable, db: ItemDatabase, contributors: Array[int],
+		rng: RandomNumberGenerator) -> Dictionary[int, Array]:
+	var result: Dictionary[int, Array] = {}
+	for peer in contributors:
+		var items := roll_table(table, db, rng)
+		if not items.is_empty():
+			result[peer] = items
+	return result
+
+
 ## One player's drop from a kill: nothing (drop_chance failed), or `rolls` items,
 ## each with its own item, rarity and gear score.
 static func roll_table(table: ItemDatabase.LootTable, db: ItemDatabase,
@@ -20,7 +33,8 @@ static func roll_table(table: ItemDatabase.LootTable, db: ItemDatabase,
 	return drops
 
 
-## An item of a known kind, rarity and gear score, with its affixes rolled: as
+## An item of a known kind, rarity and gear score: its main stat on the gear
+## score curve (ItemDatabase.gear), and its affixes rolled: as
 ## many as the rarity allows (fewer if the slot's pool is smaller), never the same
 ## one twice, each value rolled in its range and scaled by gear score / 100.
 static func roll_item(def: ItemDatabase.ItemDef, rarity: String, gear_score: int,
@@ -29,7 +43,7 @@ static func roll_item(def: ItemDatabase.ItemDef, rarity: String, gear_score: int
 	item.item_id = def.id
 	item.rarity = rarity
 	item.gear_score = gear_score
-	item.primary_value = def.primary_per_gear_score * gear_score
+	item.primary_value = def.primary_base * db.gear.factor(gear_score)
 	var pool := db.affixes_for_slot(def.slot)
 	var count := mini(db.rarities[rarity].affix_count, pool.size())
 	for i in count:

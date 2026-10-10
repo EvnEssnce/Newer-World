@@ -14,6 +14,8 @@ var respawn_ticks := 0
 ## Ticks without taking damage before it heals to full and goes back to its
 ## spot (0 = never). Also ends a fight on its DPS readout.
 var reset_ticks := 0
+## Its swings' gear score against players' armor (GearScore.mitigation).
+var gear_score := 100
 
 var aggro_range := 0.0
 var leash_range := 0.0
@@ -38,6 +40,8 @@ var threat_switch_ratio := 1.0
 var threat_decay_factor := 1.0
 
 var attack: AttackParams
+## Loot table id (data/loot.cfg [table_<id>]) its killers roll, or "" for none.
+var loot_table := ""
 
 static var _cache: Dictionary[String, EnemyParams] = {}
 
@@ -60,6 +64,7 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.stagger_multiplier = Tuning.get_value(file, "stats", "stagger_multiplier")
 	p.respawn_ticks = roundi(Tuning.get_value(file, "stats", "respawn_time") * tps)
 	p.reset_ticks = roundi(Tuning.get_value(file, "stats", "reset_time") * tps)
+	p.gear_score = Tuning.get_optional(file, "stats", "gear_score", 100)
 
 	p.aggro_range = Tuning.get_value(file, "ai", "aggro_range")
 	p.leash_range = Tuning.get_value(file, "ai", "leash_range")
@@ -77,4 +82,5 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.threat_decay_factor = pow(1.0 - decay, 1.0 / tps)
 
 	p.attack = AttackParams.from_tuning(file, "attack", tps)
+	p.loot_table = Tuning.get_optional(file, "loot", "table", "")
 	return p

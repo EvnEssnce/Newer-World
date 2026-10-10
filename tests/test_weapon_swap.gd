@@ -244,3 +244,54 @@ func test_network_round_trip_keeps_swap_state() -> void:
 	assert_eq(copy.weapons, state.weapons)
 	assert_eq(copy.equipped, 1)
 	assert_eq(copy.swap_tick, 3)
+
+
+# --- Equipping gear (PlayerState.start_equip, the server's 1 s equip time) ---
+
+func test_equipping_blocks_attacks_dodges_swaps_and_block_until_it_ends() -> void:
+	assert_true(state.start_equip(5))
+	_step(ATTACK)
+	_step(DODGE)
+	_step(SWAP)
+	_step(BLOCK)
+	assert_eq(state.attack_tick, -1, "no attack while equipping")
+	assert_eq(state.dodge_tick, -1, "no dodge")
+	assert_eq(state.equipped, 0, "no swap")
+	assert_false(state.blocking, "no guard")
+	_step()
+	assert_false(state.is_equipping(), "5 steps")
+	_steps(40)  # the dodge and swap presses were buffered and fire now
+	_step(BLOCK)
+	assert_true(state.blocking, "the guard works again once it's over")
+
+
+func test_nothing_starts_on_the_step_equipping_ends() -> void:
+	# The server changes the loadout right after that step (Player.equip_finished).
+	state.start_equip(1)
+	_step(Q)
+	assert_false(state.is_equipping())
+	assert_eq(state.attack_tick, -1, "the press is still buffered, not started")
+	_step()
+	assert_true(state.is_using_ability(), "and fires on the next step")
+
+
+func test_equipping_is_refused_mid_attack_and_while_dead() -> void:
+	_step(Q)
+	assert_false(state.start_equip(5), "mid-ability")
+	var other := PlayerState.new()
+	other.kill()
+	assert_false(other.start_equip(5), "dead")
+	var equipping := PlayerState.new()
+	equipping.start_equip(5)
+	assert_false(equipping.can_change_loadout(), "no build changes meanwhile")
+
+
+func test_equipping_is_a_server_event_synced_in_the_state() -> void:
+	var events := state.server_events
+	state.start_equip(7)
+	assert_eq(state.server_events, events + 1)
+	var copy := PlayerState.from_array(state.to_array())
+	assert_eq(copy.equip_left, 7)
+	assert_true(copy.matches(state))
+	state.kill()
+	assert_false(state.is_equipping(), "dying ends it")

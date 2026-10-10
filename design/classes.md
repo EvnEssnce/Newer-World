@@ -6,7 +6,7 @@ the real values go in `data/*.cfg`.
 
 ## How the pieces fit
 
-The brief (`newer-world-handoff.md`) says each character carries **two weapons with a swap
+The brief (`PROGRESS.md`) says each character carries **two weapons with a swap
 key, and each weapon has abilities on cooldowns and a mastery tree**. Classes sit on top of
 that:
 

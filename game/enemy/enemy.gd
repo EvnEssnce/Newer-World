@@ -44,6 +44,9 @@ var brain := EnemyBrain.new()
 var respawn_at_tick := -1
 ## Players the current swing has already been resolved against (see Player).
 var attack_results: Dictionary[int, bool] = {}
+## Peer ids of the players who damaged it since it (re)spawned or healed at
+## home: they each get a loot roll when it dies.
+var damaged_by: Dictionary[int, bool] = {}
 ## A knockback, pull or launch in progress (start_force).
 var force := ForcedMotion.new()
 ## Server: the player whose knockback is moving it and who has the Tempest
@@ -121,6 +124,7 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	move_and_slide()
 	if brain.arrived_home:
 		health = params.max_health
+		damaged_by.clear()
 	if params.reset_ticks > 0 and _ticks_since_damage < params.reset_ticks:
 		_ticks_since_damage += 1
 		if _ticks_since_damage == params.reset_ticks:
@@ -133,6 +137,8 @@ func server_step(targets: Dictionary, delta: float) -> void:
 ## attacker (a peer id; others are ignored) and stagger unless it's immune
 ## (a stagger_immune status). Returns true if it killed the enemy.
 func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
+	if damage > 0.0 and attacker_id > 0:
+		damaged_by[attacker_id] = true
 	health = maxf(0.0, health - damage)
 	_ticks_since_damage = 0
 	if health <= 0.0:
@@ -184,6 +190,7 @@ func respawn() -> void:
 	global_position = home
 	velocity = Vector3.ZERO
 	force.stop()
+	damaged_by.clear()
 	var switches := brain.target_switches
 	brain = EnemyBrain.new()
 	brain.target_switches = switches
@@ -193,13 +200,15 @@ func respawn() -> void:
 
 
 ## Server: params.reset_ticks without taking damage (the training dummy):
-## back to full health and its spot. Statuses run out on their own.
+## back to full health and its spot, forgetting who hit it (like a Husk that
+## walks home). Statuses run out on their own.
 func _reset() -> void:
 	health = params.max_health
 	global_position = home
 	velocity = Vector3.ZERO
 	force.stop()
 	wall_stun_source = 0
+	damaged_by.clear()
 
 
 # --- Forced movement (server) ---
