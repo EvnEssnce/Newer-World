@@ -2,7 +2,7 @@
 
 Small online action RPG (10–50 players per server) with combat, gathering, crafting and
 loot modeled on New World: Aeternum, using low-poly art. Godot 4.7, GDScript. The project
-brief and build order are in `newer-world-handoff.md` (Part 1).
+brief, build order and outstanding work are in `PROGRESS.md`.
 
 **Start every session by reading this file and `PROGRESS.md`. Don't re-explore the
 codebase.** Update `PROGRESS.md` at the end of every session.
