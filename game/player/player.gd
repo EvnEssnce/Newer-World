@@ -30,6 +30,11 @@ signal equip_finished(player: Player)
 signal projectile_released(player: Player)
 ## Server: a roll started this step (the Ranger's Parting Shot capstone).
 signal dodged(player: Player)
+## Server: the current attack reached its zone_tick (it places a zone).
+signal zone_placed(player: Player)
+
+## Body opacity while Veiled (stealth, Ember Double).
+const VEILED_ALPHA := 0.18
 
 const MAX_PENDING_INPUTS := 120
 const MAX_SNAPSHOTS := 30
@@ -273,6 +278,8 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, de
 	var current := state.current_attack(params)
 	if current and current.releases_projectile_at(state.attack_tick):
 		projectile_released.emit(self)
+	if server and current and not current.zone.is_empty() and state.attack_tick == current.zone_tick:
+		zone_placed.emit(self)
 	if server and state.swap_tick == 0:
 		swaps += 1
 		weapon_swapped.emit(self)
@@ -725,6 +732,13 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_material.albedo_color = PARRY_COLOR
 	else:
 		_material.albedo_color = _base_color
+	# Stealth (Veiled): faint to everyone, its own player included; others
+	# also lose its nameplate. Visual only: its position is still sent.
+	var veiled := view.statuses.veiled(params.statuses) and not view.dead
+	_material.transparency = (BaseMaterial3D.TRANSPARENCY_ALPHA if veiled
+			else BaseMaterial3D.TRANSPARENCY_DISABLED)
+	_material.albedo_color.a = VEILED_ALPHA if veiled else 1.0
+	_name_label.visible = not is_local and not veiled
 
 
 func _show_hitbox(attack: AttackParams, attack_tick: float) -> void:

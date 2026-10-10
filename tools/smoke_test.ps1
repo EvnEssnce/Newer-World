@@ -32,7 +32,9 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
-    '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=300',
+    # Husks at 500 health: low enough that they die (loot), high enough that
+    # most heavies land on a live one (a killing blow doesn't knock back).
+    '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=500',
     '--tune=enemy_husk/stats/respawn_time=2',
     # Bloodlust lasts the whole run, so any later hit proves bleed works.
     '--tune=status_effects/status_bloodlust/duration=30',
@@ -50,6 +52,11 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=weapon_broadsword/heavy/force_distance=0.4',
     '--tune=weapon_war_hammer/heavy/force_distance=0.4',
     '--tune=weapon_dual_talons/heavy/force_distance=0.4',
+    # Every Fighter weapon's heavy pushes, so the Husk check doesn't hang on
+    # which weapon was out when a heavy landed on a Husk.
+    '--tune=weapon_spear/heavy/force_distance=0.4',
+    '--tune=weapon_dual_axes/heavy/force_distance=0.4',
+    '--tune=weapon_throwing_knives/heavy/force_distance=0.4',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # More throws per run (each weapon is out for about one cycle), so a
     # projectile hit doesn't hang on one or two throws.
@@ -73,6 +80,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0',
+    # A 1.5 s Shield Wall (8 s in the real data): the bots plant it between
+    # themselves and the Husks, and a long one kept Husks off them often
+    # enough to fail the force check. Still placed (SUMMARY zones walls=).
+    '--tune=zones/zone_shield_wall/duration=1.5',
     # Every Husk kill drops something for each bot that damaged it (60% in the
     # real data), so the loot check doesn't hang on a few rolls.
     '--tune=loot/table_husk/drop_chance=1.0',

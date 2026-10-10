@@ -73,6 +73,14 @@ var read_status := ""
 var detonates_status := ""
 var detonate_damage := 0.0
 
+# Zones and summons (data/zones.cfg ids; "" = none; server, ZoneSystem)
+## Placed zone_tick after the start, zone_distance m ahead of the user.
+var zone := ""
+var zone_tick := 0
+var zone_distance := 0.0
+## A projectile of this attack places this zone where it stops.
+var zone_on_impact := ""
+
 # Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
 ## Thrown at projectile_tick (from the attack's start), projectile_count of
 ## them fanned over projectile_spread radians. Its hit uses this attack's
@@ -161,6 +169,10 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	read_status = Tuning.get_optional(file, section, "read_status", "")
 	detonates_status = Tuning.get_optional(file, section, "detonates_status", "")
 	detonate_damage = Tuning.get_optional(file, section, "detonate_damage", 0.0)
+	zone = Tuning.get_optional(file, section, "zone", "")
+	zone_tick = roundi(float(Tuning.get_optional(file, section, "zone_time", 0.0)) * tps)
+	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)
+	zone_on_impact = Tuning.get_optional(file, section, "zone_on_impact", "")
 
 
 ## The statuses this gives whoever it damages, as [id, stacks, duration ticks

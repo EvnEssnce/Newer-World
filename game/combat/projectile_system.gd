@@ -139,6 +139,9 @@ func server_step(delta: float) -> void:
 		if proj.returning != was_returning:
 			_send_event(proj, EVENT_TURN)
 		if proj.ended != Projectile.END_NONE:
+			if proj.attack and not proj.attack.zone_on_impact.is_empty():
+				world.zones.server_spawn(proj.attack.zone_on_impact, proj.owner_id, proj.position,
+						PlayerState.yaw_for_direction(Vector2(proj.velocity.x, proj.velocity.z)))
 			_send_event(proj, proj.ended)
 			_ended[proj.ended] = _ended.get(proj.ended, 0) + 1
 			_active.erase(proj)
@@ -170,6 +173,13 @@ func _collide(proj: Projectile) -> void:
 		if not hit.is_empty():
 			wall_point = hit.position
 			limit = a.distance_to(wall_point) / a.distance_to(b)
+	# Summoned walls (Shield Wall) stop hostile projectiles, even returning ones.
+	if not a.is_equal_approx(b):
+		var t := world.zones.wall_hit(a, b, proj.params.hit_radius, proj.owner_id)
+		if t >= 0.0 and t < limit:
+			limit = t
+			wall_point = a.lerp(b, t)
+			world.zones.note_projectile_stopped()
 	var candidates: Array[Array] = []  # [fraction, Player or Enemy]
 	var radius := proj.params.hit_radius
 	for target: Player in players.get_children():

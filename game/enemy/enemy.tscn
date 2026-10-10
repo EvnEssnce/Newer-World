@@ -32,7 +32,7 @@ resource_local_to_scene = true
 
 [node name="Enemy" type="CharacterBody3D"]
 collision_layer = 4
-collision_mask = 1
+collision_mask = 17
 script = ExtResource("1_enemy")
 
 [node name="Collision" type="CollisionShape3D" parent="."]

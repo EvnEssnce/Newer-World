@@ -96,6 +96,12 @@ game/
   items/loot_drop_visual.gd  Client look of a drop: sack, rarity beam, best item's name.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
+  zones/zone_params.gd       One zone/summon kind (data/zones.cfg [zone_<id>]).
+  zones/zone.gd              One placed zone: pulses, traps and re-arming, area test, wall
+                             box vs segment. Pure logic, unit tested.
+  zones/zone_system.gd       World/Zones: server placement, effects, decoys, wall bodies;
+                             spawn/move/trigger/end events; client copies.
+  zones/zone_visual.gd       Client look: disc, cloud, rain, trap, decoy, wall.
   status/status_def.gd       One status effect's tuning (data/status_effects.cfg).
   status/status_defs.gd      Every status, by index (what the network sends); validate().
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
@@ -115,7 +121,7 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
-                     armor, equip time), party, status_effects, projectiles (.cfg).
+                     armor, equip time), party, status_effects, projectiles, zones (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -232,6 +238,46 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   about projectiles touches the thrower's predicted sim beyond the attack timeline, so they
   cause no corrections.
 
+## Zones and summons (AREA, SUMMON)
+
+- `data/zones.cfg` `[zone_<id>]` (every key explained there): radius/height, duration,
+  `trigger` "pulse" (every `interval`, first after `first_pulse`), "trap" (armed after
+  `arm_time`, the first hostile inside sets it off, then `rearms` or ends) or "none";
+  `affects` "hostile"/"ally"; per pulse `damage` (like damage over time: no block,
+  crit or armor), `heal`, a status; `decoy`; `wall` with width/depth; `visual`, color.
+- **Server state only**, never in snapshots or the predicted sim. `World/Zones`
+  (`ZoneSystem`, both sides) sends reliable `_receive_zone(id, kind, position, yaw,
+  ticks_left)`, `_receive_zone_moved`, `_receive_zone_triggered`, `_receive_zone_end`
+  to every connected player; clients draw a `ZoneVisual` and count down their own
+  copy. Late joiners don't see zones placed before they joined (all last ≤ 30 s).
+- **Placing**: an attack/ability's `zone` (kind), `zone_time` (s from its start),
+  `zone_distance` (m ahead along the facing) → `Player.zone_placed` (server) →
+  `ZoneSystem.server_place_for_attack`; a projectile's `zone_on_impact` where it stops
+  (hit, wall or expiry; `ProjectileSystem.server_step`); a roll while a status has
+  `roll_zone` (`World._roll_zone`, uses a stack). Always snapped to the ground below.
+- **Effects**: `ZoneSystem.server_step` (each tick after projectiles) →
+  `World.zone_effect(zone, target)` for every target of the zone's side inside
+  (`Zone.contains`: circle + height band, or the wall's box); traps hit the first
+  hostile (enemies first). `World.trap_rearms`: the Trapper capstone (`trap_rearm`).
+- **Decoys** (`decoy=true`): `World._enemy_targets()` hands enemies the decoy's
+  position as its owner's while it lives, so Husks chase and swing at it (swings test
+  real positions, so they hit nobody there). `World.on_decoy_ended`: Mirror Image
+  (`decoy_burst`). **Stealth** is visual only: a `veils` status draws the owner faint
+  (`Player.VEILED_ALPHA`) and hides its nameplate from others; its position is still
+  in snapshots.
+- **Walls** (`wall=true`): a server `StaticBody3D` on `ZoneSystem.WALL_LAYER` (16),
+  which enemies mask (`enemy.tscn` mask 17) and players don't; `ZoneSystem.wall_hit`
+  stops projectiles not from the owner's side (`ProjectileSystem._collide`). Client
+  projectile copies fly on until the server's end event.
+- **Teleports** (Shadow Swap, `swap_places`): `World._shadow_swap` at ability start
+  moves the player (and the swapped enemy/player) and calls `PlayerState.note_teleport()`
+  (a server event, so prediction takes it without counting a correction).
+- Kinds: Arrow Rain (Longbow), Smoke Bolt's `smoke` (Smoked: `blind` 0.7), Tripwire
+  (trap: 30 damage + Root 2 s), Fire Trail (Burn), Ember Double (decoy), Shield Wall.
+- `SUMMARY zones spawned= pulses= affected= trap_triggers= decoys= walls=
+  projectiles_stopped=` and `SUMMARY summons decoy_bursts= shadow_swaps=` (no checks;
+  the bot slots zone abilities first, `BuildService.bot_slot_status_abilities`).
+
 ## Combat model
 
 - Tap left click = light (fires on release), hold left click `heavy_hold_time` = heavy
@@ -317,17 +363,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `resolve_strike` / `strike_enemy` (allies skipped; blocks, i-frames, parries,
   statuses, Ember, execute as usual). Never touches the holder's `PlayerState`, so
   nothing to predict. No poke animation yet (the hit label shows it).
-- **Shield Wall** (Broadsword Vanguard tier 2, ALLY): a short cast that self-buffs
-  `shield_wall` (6 s; `cover_depth` 2.5 m, `cover_width` 1.8 m in
-  `status_effects.cfg`). In `resolve_strike`, after the target's own parry, a target
-  not guarding the hit itself (`_guards_against`) is covered by a blocking ally with a
-  cover status (`StatusEffects.cover_box`) that faces the attacker within its block arc
-  and has the target inside the box straight behind it (`MeleeHitbox.is_behind`):
-  `_covered_hit` runs the normal blocked-hit path on the holder (stamina, guard break +
-  force, `block_damage_taken`) and the target takes nothing; both get a hit event (the
-  target a 0-damage `HIT_BLOCKED`) and `resolve_strike` returns `HIT_BLOCKED`, so
-  melee, Husk swings and projectiles (a guard-stopped one stops) are all covered.
-  Counted as `shield_wall_covers=` on the `SUMMARY party` line.
+- **Shield Wall** (Broadsword Vanguard tier 2; redesigned in session 34): summons a
+  wall of three tall shields 3 m ahead (`zone="shield_wall"`, see "Zones and summons"):
+  4.5 × 0.5 × 2.5 m, 8 s, 18 s cooldown; enemies can't walk through, projectiles from
+  outside the owner's party stop at it, the owner and party walk through. Not breakable
+  yet. **Hostile players in PvP aren't blocked** (players' collision mask is shared).
+  The old cover mechanic (`status_shield_wall`, `cover_depth`/`cover_width`,
+  `World._shield_wall_holder` / `_covered_hit`, `shield_wall_covers=`) is still in the
+  code but nothing applies that status any more.
 - **War Hammer** (Juggernaut, `data/weapon_war_hammer.cfg`, model "war_hammer"): slow
   and heavy (light 95 dmg 0.2 s stagger; heavy 240 dmg 0.7 s stagger, 0.6 s windup,
   `breaks_block=false`; turn speed 420°/s). Abilities: Seismic Slam (90° cone 4 m,
@@ -527,10 +570,13 @@ behind, bonus or not).
 - **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
   Trickster, 12 points): Ashstep (15 Ember, 6 s: 4.5 m blink the way you move, i-frames)
   and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
-  dealt 4 s + Slow 2.5 s). Defaults Z Ashstep, C Plumage Flash. **Not built:** Ember
-  Double (decoy + stealth) and Shadow Swap; both capstones (Second Step: a second
-  Ashstep charge; Mirror Image: decoys) are `effect="none"` until then. Wing
-  Enhancement item: Ashen Vanes. Weapon items: Iron Talons, Iron Knives.
+  dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
+  damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s: trade
+  places with your decoy, or the nearest target you Marked within 15 m). Defaults Z
+  Ashstep, C Plumage Flash. Capstones: **Mirror Image** (`decoy_burst`: the decoy
+  bursts as it ends, 80 damage + Dazzled within 3 m) and Second Step (a second Ashstep
+  charge: not built, needs ability charges). Wing Enhancement item: Ashen Vanes.
+  Weapon items: Iron Talons, Iron Knives.
 
 ## Ranger (Longbow, Crossbow, Firebolts)
 
@@ -544,8 +590,8 @@ Firebolts mechanics". Counters: `SUMMARY ranger ignites= ignited_stacks= loaded_
 piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
 
 - **Longbow** (Marksman / Skirmisher): light quick shot (45), heavy full draw (0.6 s,
-  140). Piercing Shot (pierce 4), Arrow Rain (7 arrows lobbed at 40° under heavy
-  gravity: they come down ~14 m ahead; no ground zone), Snare Arrow (Root 1.5 s),
+  140). Piercing Shot (pierce 4), Arrow Rain (a zone 12 m ahead: 35 damage every
+  0.5 s for 2.5 s), Snare Arrow (Root 1.5 s),
   Backstep Shot (3.5 m `dash_direction="back"` + arrow), Hunter's Mark (**Hunted**:
   `damage_taken_from_source` +15% from the marker, `World._hunted_scale`), Rapid Nock
   (self attack speed 1.7, 4 s). Capstones: **True Flight** (`heavy_pierce`: heavy arrows
@@ -562,8 +608,9 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   **Loaded Chamber** (`loaded_chamber`: a light/heavy shot ≥ `threshold` 2 s after
   your previous one deals ×2; `Player.last_release_tick`, `World.release_mods`, which
   `ProjectileSystem.server_fire_attack` calls once per release to scale
-  `damage_scale` and raise `pierce_left`). **Not built:** Tripwire (trap), Smoke Bolt
-  (cloud), the Trapper capstone (re-arming traps).
+  `damage_scale` and raise `pierce_left`). Tripwire (a trap at your feet) and Smoke
+  Bolt (a cloud where the bolt stops), Trapper tier 2; the Trapper capstone **Rearm**
+  (`trap_rearm` 1: traps re-arm once).
 - **Firebolts** (Kindling / Flashfire): light firebolt (26, 0.28 s, +1 **Burn**),
   heavy 3 bolts (60 each, Burn). Burn: 6 dps per stack, max 6, 4 s. Scatterflame (5
   bolts, 40°, Burn), **Ignite** (`detonates_status="burn"`, `detonate_damage` 35: on a
@@ -571,8 +618,9 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   the damage scales), Flare (**Flared**: `blind` 0.85, 2 s), Overheat (self attack speed
   1.6, 4 s; no lockout). Capstones: **Inferno** (`status_cap`: Burn you apply stacks to
   max_stacks × 2, `World._stack_cap` → `StatusEffects.apply(..., max_stacks)`) and
-  **Cinder Return** (`ignite_ember`: 3 Ember per stack Ignite uses). **Not built:**
-  Fire Trail (burning ground), Seeker Spark (homing).
+  **Cinder Return** (`ignite_ember`: 3 Ember per stack Ignite uses). Fire Trail
+  (Kindling tier 2: your next 3 rolls leave burning ground). **Not built:** Seeker
+  Spark (homing).
 - **Ranger Wings** (Windrider / Parting Shot, 12 points): Gust Roll (15 Ember: rolls
   1.8× as fast for 5 s, so 1.8× as far: `dodge_speed_multiplier`), Tailwind (20:
   `move_multiplier` 1.3 haste + `dodge_cost_multiplier` 0.5, 6 s; `PlayerState.
@@ -989,7 +1037,9 @@ can be overridden, strings need no quotes). The smoke test uses `--tune` for low
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword, War Hammer and Dual Talons heavies push) so its
 status and force checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`)
-so a reborn bot is back in the fight quickly, 2 s Javelin Cast / Boomerang Axe /
+so a reborn bot is back in the fight quickly, 500-health Husks (they die, but most
+heavies land on a live one), every class's heavy pushing (0 m knockback keys in the
+real data), a 1.5 s Shield Wall (a long one kept Husks off the bots), 2 s Javelin Cast / Boomerang Axe /
 Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` on the
 `SUMMARY juggernaut` line, no check), Skewer applying Taunted instead of Root so Husks get taunted
 (counted, not checked), and a 6 m Hold the Line reach so pokes (`line_pokes=` on the

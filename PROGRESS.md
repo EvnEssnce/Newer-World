@@ -50,7 +50,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|---|
 | Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
-| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin, Ranger built (not yet: decoys/stealth, traps, ground zones, homing) |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin, Ranger built (not yet: homing, ability charges, true stealth) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
 | Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
@@ -116,7 +116,8 @@ and playtested). Each numbered item is roughly one session with one testable goa
 5. **Small ones:** **Hooked** only applied when the Warden capstone is learned;
    **Shatter** cooldown 12 → ~6 s; **Meteor Drop** rises slower (~30% longer climb, same
    fast crash); **Upheaval** animation reads as slamming the ground, not a swing.
-6. **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
+6. **Done (session 34)**, except that hostile players in PvP walk through it (the
+   players' collision mask is shared). **Shield Wall redesign** (the cover-allies version is hard to use): summon a wall of
    three tall shields in front that blocks enemies' movement. The first `SUMMON`: a
    server-spawned obstacle with spawn/despawn events to clients (like projectiles).
    Decided: blocks **only enemies** (the user and allies walk through; treat hostile
@@ -193,10 +194,12 @@ Order from `design/classes.md`: ~~Assassin~~ (built in session 32 except Ember D
 Shadow Swap, Ricochet and Recall, which need decoys/stealth/new projectile kinds)
 → ~~Ranger~~ (session 33 except Tripwire, Smoke Bolt, Fire Trail, Seeker Spark, the
 Trapper and Windrider capstones and Updraft's real hover) → **Mage** → **Paladin**.
-Systems the unbuilt pieces wait for: `SUMMON` (decoys, traps), `AREA` ground zones
-(Smoke Bolt, Fire Trail, Arrow Rain's zone), homing projectiles, ability charges. Each class is about 2–3 sessions (weapons,
+Zones and summons (session 34) built Tripwire, Smoke Bolt, Fire Trail, Arrow Rain's
+zone, Ember Double, Shadow Swap and the Trapper and Mirror Image capstones. Still
+waiting: homing projectiles (Seeker Spark), ability charges (Second Step, Second Wind),
+Updraft's real hover, Ricochet and Recall. Each class is about 2–3 sessions (weapons,
 trees, Wings, models), plus the systems it needs:
-- `SUMMON` (built in step 6 for Shield Wall), `AREA` ground effects and traps (Ranger,
+- `SUMMON` and `AREA` (built in session 34: `data/zones.cfg`), traps (Ranger,
   Mage), **stealth** (Assassin), **updraft hover** (Wings), weapon abilities that cost
   Ember (Mage), and the Paladin's Rebirth hooks (already in `PlayerState`).
 - Each new class needs items in `data/items.cfg` (its weapons and a Wing Enhancement)
@@ -259,6 +262,16 @@ it heal and stand back up 4 s after you stop? It drops nothing.
   fall (shoot while floating).
 - Models: bow on the left hand, crossbow, glowing wraps.
 
+**Zones and summons (session 34; no screenshot of them yet, so check the looks):**
+- Shield Wall (Broadsword, K to slot it): three tall shields 3 m ahead. Husks walk
+  around it, never through; you and a party member walk through; the bot's
+  Javelin/Boomerang (`-NoBot` second window) stops at it.
+- Ranger: Arrow Rain's circle of falling arrows 12 m ahead; Tripwire (dim while arming,
+  then roots the first Husk across it); Smoke Bolt's cloud (Husks in it mostly miss);
+  Fire Trail (rolls leave burning discs).
+- Assassin: Ember Double (Husks turn to the burning copy; you're faint for 2 s) and
+  Shadow Swap (back to the copy, or onto a Husk you Marked).
+
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
 
 **Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
@@ -306,6 +319,17 @@ Ranger (session 33):
 - Overheat has no lockout. Quick Reload's slow rides on the next hit of any weapon.
 - Ignite uses up the stacks even if the hit is blocked (base damage before the block).
 - Running Shot covers lights and heavies of the Longbow (not abilities).
+
+Zones and summons (session 34):
+- Zone damage works like damage over time: no block, crit, armor or backstab, but
+  damage-taken statuses count. Zones snap to the ground below where they're placed.
+- Mirror Image (Assassin Wing capstone) changed: decoys aren't hittable, so instead the
+  decoy bursts as it ends (80 damage + Dazzled within 3 m), like Predator's change.
+- Stealth is visual only (faint, no nameplate); the position is still sent.
+- Arrow Rain is a zone 12 m straight ahead (no aim pitch yet), not a volley.
+- Shadow Swap with no decoy takes the nearest target you Marked within 15 m (enemy or
+  player); with neither, it does nothing (the Ember is still spent).
+- Late joiners don't see zones placed before they joined.
 
 Open questions for coming steps:
 - **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
@@ -415,6 +439,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 31 | 2026-10-10 | Merged `training-dummy` and the loot branch; smoke tests run with PowerShell 7 on Linux; fixed the loot `--tune` quoting (it parsed as `{}`, so no drops) and made Tuning log unparseable overrides |
 | 32 | 2026-10-10 | The Assassin: Dual Talons (backstabs, Feint/Primed, Talon Storm), Throwing Knives (knife projectile, poison, Marked, Festering Wounds, Endless Flurry), Wings Ashstep and Plumage Flash, models, items. 460 tests; smoke (Fighter, -Party, Juggernaut, Assassin, Assassin -Party) passes on Linux/PowerShell 7 with 0 corrections (the -Party "party of 2" line is the known Linux quit race) |
 | 33 | 2026-10-10 | Plumage Flash blinds (`blind`: HUD haze, enemy misses). The Ranger: Longbow (Hunter's Mark, True Flight pierce, Running Shot free movement in the sim), Crossbow (Loaded Chamber), Firebolts (Burn, Ignite, Flare, Inferno), Wings Gust Roll, Tailwind, Backdraft, Updraft (new sim statuses: haste, roll speed/cost, slow fall; a real self-launch). 472 tests; smoke Fighter, -Party, Juggernaut, Assassin, Ranger, Ranger -Party pass with 0 corrections (Linux quit race aside) |
+| 34 | 2026-10-10 | Zones and summons (`data/zones.cfg`, World/Zones): pulse zones, traps, decoys, walls. Shield Wall redesign (a wall enemies can't pass, stops hostile projectiles); Arrow Rain zone, Tripwire + Rearm, Smoke Bolt, Fire Trail, Ember Double (decoy, visual stealth), Shadow Swap, Mirror Image. Smoke: zone abilities slotted first by the bot; 500-health Husks, every heavy pushes and a 1.5 s wall so the force check isn't luck. 478 tests; smoke all classes pass (Linux quit race aside) |
 
 ---
 

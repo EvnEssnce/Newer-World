@@ -314,6 +314,15 @@ func blind_amount(defs: StatusDefs) -> float:
 	return result
 
 
+## True while a stealth status is on (Veiled: drawn faint, no nameplate).
+func veiled(defs: StatusDefs) -> bool:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.veils:
+			return true
+	return false
+
+
 ## The index of a mark (marked_bonus > 0: Marked) that source_id applied, or -1.
 func mark_from(defs: StatusDefs, source_id: int) -> int:
 	for e in entries:

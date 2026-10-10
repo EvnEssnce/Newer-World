@@ -232,10 +232,11 @@ func bot_respec(weapon_id: String, cycle: int) -> void:
 	request_mastery(weapon_id, nodes, slots)
 
 
-## Test bot: slots each of its class's weapons' unlocked status abilities
-## first (self-buffs like Bloodlust, Rampage and Shield Wall, then those with
-## applies_status), keeping one slot for a projectile ability if the weapon has
-## one, then its other slotted ones, so the bot applies statuses, buffs itself
+## Test bot: slots each of its class's weapons' unlocked zone and status
+## abilities first (zones and summons like Shield Wall and Tripwire, then
+## self-buffs like Bloodlust and Rampage, then those with applies_status),
+## keeping one slot for a projectile ability if the weapon has one, then its
+## other slotted ones, so the bot places zones, applies statuses, buffs itself
 ## and throws projectiles. Keeps the allocation.
 func bot_slot_status_abilities(params: PlayerParams) -> void:
 	if local_build == null:
@@ -250,7 +251,9 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 			if ability.id in unlocked and not ability.internal and not ability.projectile.is_empty():
 				throws.append(ability.id)
 		var status_room := PlayerState.ABILITY_SLOTS - mini(throws.size(), 1)
-		for key in ["self_status", "applies_status"]:
+		# Summons and zones first (Shield Wall, Tripwire, Arrow Rain), so the smoke
+		# test places them; then self-buffs, then status abilities.
+		for key in ["zone", "self_status", "applies_status"]:
 			for ability in params.weapon(weapon_id).abilities:
 				if (ability.id in unlocked and not ability.internal and not ability.id in slots
 						and not ability.id in throws and not str(ability.get(key)).is_empty()

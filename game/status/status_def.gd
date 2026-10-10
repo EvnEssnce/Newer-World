@@ -63,6 +63,11 @@ var damage_taken_from_source := 0.0
 ## (fading out at the end); an enemy's swings miss with this chance (Dazzled,
 ## Flare). 0 = none.
 var blind := 0.0
+## Fire Trail: each roll places this zone (data/zones.cfg) and uses a stack.
+var roll_zone := ""
+## Stealth (visual only for now): other players see the owner faint, with no
+## nameplate (Ember Double's Veiled).
+var veils := false
 ## Shield Wall: while the owner blocks, allies inside a box this deep (m,
 ## straight behind them) and cover_width wide (m) are covered: hits on them
 ## from within the owner's block arc are blocked by the owner. 0 = none.
@@ -143,6 +148,8 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.next_hit_crits = Tuning.get_optional(file, section, "next_hit_crits", false)
 	s.marked_bonus = Tuning.get_optional(file, section, "marked_bonus", 0.0)
 	s.blind = clampf(Tuning.get_optional(file, section, "blind", 0.0), 0.0, 1.0)
+	s.roll_zone = Tuning.get_optional(file, section, "roll_zone", "")
+	s.veils = Tuning.get_optional(file, section, "veils", false)
 	s.forces_target = Tuning.get_optional(file, section, "forces_target", false)
 	s.force_immune = Tuning.get_optional(file, section, "force_immune", false)
 	s.stagger_immune = Tuning.get_optional(file, section, "stagger_immune", false)

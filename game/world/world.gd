@@ -152,6 +152,9 @@ var _loaded_shots := 0
 var _piercing_heavies := 0
 var _parting_shots := 0
 var _hunted_hits := 0
+## Zones (server): Mirror Image decoy bursts, Shadow Swaps.
+var _decoy_bursts := 0
+var _shadow_swaps := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -159,6 +162,8 @@ var party: PartySystem
 var loot: LootSystem
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
+## World/Zones: ground zones and summons (the AREA and SUMMON tags).
+var zones: ZoneSystem
 
 # Client
 var _hud: Hud
@@ -202,6 +207,7 @@ func _ready() -> void:
 	_verbose = LaunchArgs.has_flag("verbose")
 	_add_party_system()
 	_add_projectile_system()
+	_add_zone_system()
 	_builds = BuildService.new()
 	_builds.name = "Builds"
 	add_child(_builds)
@@ -275,10 +281,7 @@ func _server_tick(delta: float) -> void:
 		_check_wall_stun(player)
 		_apply_player_status_damage(player)
 		_apply_player_status_heal(player)
-	var targets := {}
-	for player: Player in _players.get_children():
-		if not player.state.dead:
-			targets[player.peer_id] = player.global_position
+	var targets := _enemy_targets()
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead:
 			if _tick >= enemy.respawn_at_tick:
@@ -292,6 +295,7 @@ func _server_tick(delta: float) -> void:
 	for player: Player in _players.get_children():
 		_hold_the_line(player)
 	_projectiles.server_step(delta)
+	zones.server_step()
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
 
@@ -337,6 +341,9 @@ func _client_ready(class_id: String) -> void:
 	player.projectile_released.connect(_projectiles.server_fire)
 	player.projectile_released.connect(_knife_flurry)
 	player.dodged.connect(_parting_shot)
+	player.dodged.connect(_roll_zone)
+	player.zone_placed.connect(func(p: Player) -> void:
+		zones.server_place_for_attack(p, p.state.current_attack(p.params)))
 	player.equip_finished.connect(loot.finish_equip)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
@@ -456,6 +463,9 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 
 
 func _on_ability_started(player: Player) -> void:
+	var started := player.state.current_ability(player.params)
+	if started and started.swap_places:
+		_shadow_swap(player, started)
 	if player.state.is_using_wing():
 		_on_wing_started(player)
 		return
@@ -1091,6 +1101,147 @@ func _parting_shot(player: Player) -> void:
 		_parting_shots += 1
 
 
+# --- Zones and summons (server; ZoneSystem places and ticks them) ---
+
+## Where each living player stands, as enemies see it (peer id -> position):
+## a player with a live decoy (Ember Double) is seen at the decoy instead.
+func _enemy_targets() -> Dictionary:
+	var targets := {}
+	for player: Player in _players.get_children():
+		if player.state.dead:
+			continue
+		var decoy := zones.decoy_for(player.peer_id)
+		targets[player.peer_id] = decoy.position if decoy else player.global_position
+	return targets
+
+
+## A zone's pulse (or a trap firing) reaches `target` (a Player or an Enemy):
+## its damage (like damage over time: no block, crit or armor; × damage taken),
+## healing (_heal_player), and status (_give_status, which refuses debuffs on
+## allies), all from the zone's owner.
+func zone_effect(zone: Zone, target: Node3D) -> void:
+	var p := zone.params
+	var player := target as Player
+	var enemy := target as Enemy
+	if p.damage > 0.0:
+		if player:
+			var damage := (p.damage * player.state.statuses.damage_taken_multiplier(player.params.statuses)
+					* player.damage_taken_multiplier() * _crowd_multiplier(player))
+			player.health = maxf(0.0, player.health - damage)
+			_ember_from_damage(zone.owner_id, player, damage)
+			var result := HIT_STATUS_DAMAGE
+			if player.health <= 0.0:
+				result = HIT_DEFEATED
+				_kill_player(player)
+			_send_hit(zone.owner_id, player.peer_id, damage, result)
+		elif enemy:
+			var damage := p.damage * enemy.statuses.damage_taken_multiplier(enemy.status_defs)
+			_ember_from_damage(zone.owner_id, null, damage)
+			if _damage_enemy(enemy, damage, 0, zone.owner_id, HIT_STATUS_DAMAGE):
+				return
+	if p.heal > 0.0 and player:
+		_heal_player(player, p.heal, zone.owner_id)
+	if not p.applies_status.is_empty() and not (player and player.state.dead):
+		_give_status(zone.owner_id, target, StatusDefs.current().index_of(p.applies_status),
+				p.status_stacks, p.status_duration_ticks)
+
+
+## Extra re-arms for a trap `owner_id` places (the Crossbow's Trapper capstone,
+## "trap_rearm" in the tree of one of its equipped weapons). 0 for other zones.
+func trap_rearms(owner_id: int, p: ZoneParams) -> int:
+	var owner := _player_by_id(owner_id)
+	if owner == null or owner.build == null or p.trigger != ZoneParams.TRIGGER_TRAP:
+		return 0
+	for weapon_id in owner.build.weapons:
+		var node := owner.build.weapon_effect(weapon_id, "trap_rearm")
+		if node:
+			return roundi(node.amount)
+	return 0
+
+
+## A decoy ended. The Assassin Wings' Mirror Image capstone ("decoy_burst"):
+## it bursts, dealing the node's amount to every hostile within its threshold
+## (m) and giving them its status.
+func on_decoy_ended(zone: Zone) -> void:
+	var owner := _player_by_id(zone.owner_id)
+	var node := owner.build.wing_effect("decoy_burst") if owner and owner.build else null
+	if node == null:
+		return
+	_decoy_bursts += 1
+	var status := StatusDefs.current().index_of(node.status)
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.dead or enemy.global_position.distance_to(zone.position) > node.threshold:
+			continue
+		if not _damage_enemy(enemy, node.amount * enemy.statuses.damage_taken_multiplier(
+				enemy.status_defs), 0, owner.peer_id, HIT_DAMAGED) and status >= 0:
+			_give_status(owner.peer_id, enemy, status, 1, -1)
+	for player: Player in _players.get_children():
+		if (player.state.dead or are_allies(owner.peer_id, player.peer_id)
+				or player.global_position.distance_to(zone.position) > node.threshold):
+			continue
+		player.health = maxf(0.0, player.health - node.amount)
+		if player.health <= 0.0:
+			_kill_player(player)
+			_send_hit(owner.peer_id, player.peer_id, node.amount, HIT_DEFEATED)
+			continue
+		_send_hit(owner.peer_id, player.peer_id, node.amount, HIT_DAMAGED)
+		if status >= 0:
+			_give_status(owner.peer_id, player, status, 1, -1)
+
+
+## Fire Trail: a roll while the player has a status with roll_zone places that
+## zone where the roll starts and uses up one stack.
+func _roll_zone(player: Player) -> void:
+	var defs := player.params.statuses
+	for e in player.state.statuses.entries:
+		var def := defs.get_def(e.status)
+		if def and not def.roll_zone.is_empty():
+			zones.server_spawn(def.roll_zone, player.peer_id, player.global_position, player.state.yaw)
+			player.state.use_status_stack(e.status)
+			return
+
+
+## Shadow Swap ("swap_places"): the player trades places with its newest decoy,
+## or else with the nearest living target it Marked (StatusEffects.mark_from)
+## within swap_range. Teleports are server events (PlayerState.note_teleport).
+func _shadow_swap(player: Player, ability: AbilityParams) -> void:
+	var from := player.global_position
+	var decoy := zones.decoy_for(player.peer_id)
+	if decoy:
+		_teleport(player, decoy.position)
+		zones.server_move(decoy, from)
+		_shadow_swaps += 1
+		return
+	var best: Node3D = null
+	var best_distance := ability.swap_range
+	for enemy: Enemy in _enemies.get_children():
+		var d := enemy.global_position.distance_to(from)
+		if not enemy.dead and d <= best_distance and enemy.statuses.mark_from(enemy.status_defs, player.peer_id) >= 0:
+			best = enemy
+			best_distance = d
+	for other: Player in _players.get_children():
+		var d := other.global_position.distance_to(from)
+		if (other != player and not other.state.dead and d <= best_distance
+				and other.state.statuses.mark_from(other.params.statuses, player.peer_id) >= 0):
+			best = other
+			best_distance = d
+	if best == null:
+		return
+	var to := best.global_position
+	_teleport(player, to)
+	if best is Player:
+		_teleport(best as Player, from)
+	else:
+		best.global_position = from
+	_shadow_swaps += 1
+
+
+func _teleport(player: Player, to: Vector3) -> void:
+	player.global_position = to
+	player.velocity = Vector3.ZERO
+	player.state.note_teleport()
+
+
 # --- Juggernaut: War Hammer capstones, Wing tree effects (server only) ---
 
 ## Server, every live tick of a player's attack: the War Hammer capstones of
@@ -1199,6 +1350,7 @@ func _print_juggernaut_summary() -> void:
 	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d wall_stuns=%d roar_guards=%d" % [
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
 			_roar_guards])
+	print("SUMMARY summons decoy_bursts=%d shadow_swaps=%d" % [_decoy_bursts, _shadow_swaps])
 	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
 			_ignites, _ignited_stacks, _loaded_shots, _piercing_heavies, _parting_shots, _hunted_hits])
 	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d" % [
@@ -1600,6 +1752,16 @@ func _add_party_system() -> void:
 	party.name = "Party"
 	party.players = _players
 	add_child(party)
+
+
+## World/Zones must exist on the server and every client (RPCs by path).
+func _add_zone_system() -> void:
+	zones = ZoneSystem.new()
+	zones.name = "Zones"
+	zones.world = self
+	zones.players = _players
+	zones.enemies = _enemies
+	add_child(zones)
 
 
 ## World/Loot must exist on the server and every client (RPCs by path).
@@ -2258,6 +2420,7 @@ func print_summary() -> void:
 		_print_force_summary()
 		_print_ember_summary()
 		_print_juggernaut_summary()
+		zones.print_summary()
 		_projectiles.print_summary()
 		loot.print_summary()
 		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [

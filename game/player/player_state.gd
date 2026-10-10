@@ -729,6 +729,23 @@ func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
 			and (attack_tick < 0 or is_attack_recovering(params)))
 
 
+## Server: uses up one stack of a status (Fire Trail's rolls); a server event.
+func use_status_stack(index: int) -> void:
+	var e := statuses.find(index)
+	if e == null:
+		return
+	e.stacks -= 1
+	if e.stacks <= 0:
+		statuses.remove(index)
+	server_events += 1
+
+
+## Server: the player was moved somewhere else (Shadow Swap): a server event,
+## so the client's prediction takes the new position without counting it.
+func note_teleport() -> void:
+	server_events += 1
+
+
 ## Stamina a roll costs now: [dodge] stamina_cost times the cheapest roll
 ## status (Tailwind).
 func dodge_cost(params: PlayerParams) -> float:
