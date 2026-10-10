@@ -77,7 +77,9 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=loot/table_husk/drop_chance=1.0',
     # ...and only armor, which every class can wear, so the gear check (the bots
     # equip what they pick up) doesn't hang on class-locked drops.
-    '--tune=loot/table_husk/items={"padded_cap": 1, "padded_jerkin": 1, "padded_leggings": 1}')
+    # No spaces, and quotes escaped as \": Start-Process joins the arguments into
+    # one command line, and a bare quote or space there turned this into {}.
+    '--tune=loot/table_husk/items={\"padded_cap\":1,\"padded_jerkin\":1,\"padded_leggings\":1}')
 
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }

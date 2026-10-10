@@ -44,7 +44,13 @@ func _apply_override(override: String) -> void:
 	if current == null:
 		return
 	# Strings are taken as written (no quotes needed on the command line).
-	var value: Variant = raw if current is String else type_convert(str_to_var(raw), typeof(current))
+	var parsed: Variant = raw if current is String else str_to_var(raw)
+	if parsed == null:
+		# A shell that ate the quotes in a dictionary or array value: without this
+		# it would quietly become empty.
+		push_error("Tuning: can't parse --tune=%s (quotes lost on the command line?)" % override)
+		return
+	var value: Variant = type_convert(parsed, typeof(current))
 	_files[path[0]].set_value(path[1], path[2], value)
 	print("Tuning: %s/%s/%s = %s (launch override)" % [path[0], path[1], path[2], value])
 
