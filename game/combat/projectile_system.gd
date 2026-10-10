@@ -32,6 +32,11 @@ extends Node3D
 ## so a small difference in the return path is harmless.
 
 const EVENT_TURN := 0  # otherwise an event's type is a Projectile.END_* reason
+## The server changed its course (Ricochet, Seeker Spark): position + velocity.
+const EVENT_REDIRECT := 5
+## Homing: a redirect is sent once it has turned this much (radians) since the
+## last one, so clients' copies stay close.
+const HOMING_SYNC_ANGLE := 0.07
 ## Ticks an unconfirmed cosmetic copy waits for the server's spawn.
 const UNCONFIRMED_TICKS := 30
 ## Meters back along a projectile's path that a guard, parry or knockback
@@ -53,6 +58,11 @@ var _hits_enemies := 0
 var _ally_hits := 0
 var _ally_ignored := 0
 var _ended := {}  # Projectile.END_* -> count
+## Stuck projectiles (params.sticks): [owner id, position, server tick it's gone].
+var _stuck: Array[Array] = []
+var _bounces := 0
+var _recalled := 0
+var _redirects := 0
 # Client
 var _flying: Array[Flying] = []
 var _by_id: Dictionary[int, Flying] = {}
@@ -154,11 +164,20 @@ static func spread_offset(i: int, count: int, spread: float) -> float:
 func server_step(delta: float) -> void:
 	for proj: Projectile in _active.duplicate():
 		var was_returning := proj.returning
+		if proj.params.homing_turn > 0.0 and not proj.returning:
+			_home(proj, delta)
 		proj.step(delta, _return_target(proj.owner_id, proj))
 		_collide(proj)
 		if proj.returning != was_returning:
 			_send_event(proj, EVENT_TURN)
+		if proj.redirected and proj.ended == Projectile.END_NONE:
+			proj.redirected = false
+			proj.turned_since_sync = 0.0
+			_send_redirect(proj)
 		if proj.ended != Projectile.END_NONE:
+			if proj.params.sticks and proj.ended in [Projectile.END_WALL, Projectile.END_EXPIRED]:
+				_stuck.append([proj.owner_id, proj.position,
+						world.server_tick() + proj.params.stick_ticks])
 			if proj.attack and not proj.attack.zone_on_impact.is_empty():
 				world.zones.server_spawn(proj.attack.zone_on_impact, proj.owner_id, proj.position,
 						PlayerState.yaw_for_direction(Vector2(proj.velocity.x, proj.velocity.z)))
@@ -247,10 +266,14 @@ func _source(proj: Projectile, at: Vector3) -> Array:
 
 ## Server: resolves a hit on a player. Returns false if it stopped (or turned).
 func _hit_player(proj: Projectile, target: Player, at: Vector3) -> bool:
-	var source := _source(proj, at)
 	if world.deflects(target, proj.owner_id):
 		proj.hit_wall(at)  # deflected (Spinning Staves): stops, no damage
 		return false
+	return _maybe_bounce(proj, at, _resolve_player_hit(proj, target, at))
+
+
+func _resolve_player_hit(proj: Projectile, target: Player, at: Vector3) -> bool:
+	var source := _source(proj, at)
 	var allied := world.are_allies(proj.owner_id, target.peer_id)
 	var result := world.resolve_strike(proj.owner_id, source[0], source[1], proj.attack,
 			proj.results, target, proj.damage_scale, proj.execute)
@@ -279,7 +302,87 @@ func _hit_enemy(proj: Projectile, enemy: Enemy, at: Vector3) -> bool:
 	var keeps_going := proj.register_hit(enemy.enemy_id, false)
 	world.strike_enemy(proj.owner_id, source[0], source[1], proj.attack, enemy,
 			proj.damage_scale, _on_hit_for.bind(proj), proj.execute)
-	return keeps_going
+	return _maybe_bounce(proj, at, keeps_going)
+
+
+## Ricochet: a hit stopped a projectile with bounces left: it flies on toward
+## the nearest living hostile it hasn't hit within bounce_range of `at`.
+## Returns keeps_going (false either way after a bounce: the step ends there).
+func _maybe_bounce(proj: Projectile, at: Vector3, keeps_going: bool) -> bool:
+	if keeps_going or proj.ended != Projectile.END_HIT or proj.bounces_left <= 0:
+		return keeps_going
+	var next := _nearest_hostile(proj, at, proj.params.bounce_range, Vector2.ZERO)
+	if next:
+		proj.position = at
+		proj.bounce_to(next.global_position + Vector3.UP * 1.0)
+		_bounces += 1
+	return false
+
+
+## Seeker Spark: steers toward the nearest living hostile in front within
+## homing_range.
+func _home(proj: Projectile, delta: float) -> void:
+	var target := _nearest_hostile(proj, proj.position, proj.params.homing_range,
+			Vector2(proj.velocity.x, proj.velocity.z))
+	if target == null:
+		return
+	proj.steer_toward(target.global_position + Vector3.UP * 1.0, delta)
+	if proj.turned_since_sync >= HOMING_SYNC_ANGLE:
+		proj.redirected = true
+
+
+## The nearest living enemy, or player not allied with the projectile's owner,
+## within `radius` of `from` that it hasn't hit, and (with a non-zero heading)
+## within 90 degrees of it. Null if none.
+func _nearest_hostile(proj: Projectile, from: Vector3, radius: float, heading: Vector2) -> Node3D:
+	var best: Node3D = null
+	var best_d := radius
+	var candidates: Array[Node3D] = []
+	for enemy: Enemy in enemies.get_children():
+		if not enemy.dead and proj.can_hit(enemy.enemy_id):
+			candidates.append(enemy)
+	for player: Player in players.get_children():
+		if (not player.state.dead and player.peer_id != proj.owner_id and proj.can_hit(player.peer_id)
+				and not world.are_allies(proj.owner_id, player.peer_id)):
+			candidates.append(player)
+	for c in candidates:
+		var to := c.global_position - from
+		var d := to.length()
+		if d > best_d:
+			continue
+		if not heading.is_zero_approx() and absf(heading.angle_to(Vector2(to.x, to.z))) > PI / 2.0:
+			continue
+		best = c
+		best_d = d
+	return best
+
+
+## Server: Recall. Each of `player`'s stuck projectiles flies back to it as
+## attack.recall_projectile (a returning kind), hitting with `attack`.
+func server_recall(player: Player, attack: AttackParams) -> void:
+	var now := world.server_tick()
+	var keep: Array[Array] = []
+	for stuck in _stuck:
+		if stuck[2] <= now:
+			continue
+		if stuck[0] != player.peer_id:
+			keep.append(stuck)
+			continue
+		var at: Vector3 = stuck[1]
+		var to := Vector2(player.global_position.x - at.x, player.global_position.z - at.z)
+		var recall := attack.copy()
+		recall.projectile = attack.recall_projectile
+		server_fire_from(player, recall, at + Vector3.UP * 0.5,
+				PlayerState.yaw_for_direction(to) if not to.is_zero_approx() else 0.0,
+				player.damage_multiplier(attack))
+		_recalled += 1
+	_stuck = keep
+
+
+func _send_redirect(proj: Projectile) -> void:
+	_redirects += 1
+	for peer_id in world._connected_player_ids():
+		_receive_redirect.rpc_id(peer_id, proj.id, proj.age, proj.position, proj.velocity)
 
 
 ## The thrower's on-hit statuses (Bloodlust's bleed) for a damaging hit: taken
@@ -301,10 +404,11 @@ func _send_event(proj: Projectile, type: int) -> void:
 
 
 func print_summary() -> void:
-	print("SUMMARY projectiles fired=%d hits=%d on_players=%d on_enemies=%d ally_hits=%d ally_ignored=%d stopped=%d walls=%d caught=%d expired=%d" % [
+	print("SUMMARY projectiles fired=%d hits=%d on_players=%d on_enemies=%d ally_hits=%d ally_ignored=%d stopped=%d walls=%d caught=%d expired=%d bounces=%d recalled=%d redirects=%d" % [
 			_fired, _hits_players + _hits_enemies, _hits_players, _hits_enemies, _ally_hits,
 			_ally_ignored, _ended.get(Projectile.END_HIT, 0), _ended.get(Projectile.END_WALL, 0),
-			_ended.get(Projectile.END_CAUGHT, 0), _ended.get(Projectile.END_EXPIRED, 0)])
+			_ended.get(Projectile.END_CAUGHT, 0), _ended.get(Projectile.END_EXPIRED, 0),
+			_bounces, _recalled, _redirects])
 
 
 # --- Client ---
@@ -347,6 +451,13 @@ func _receive_spawn(id: int, kind: String, owner_id: int, origin: Vector3, veloc
 	f.flight.id = id
 	f.spawn_tick = tick
 	_by_id[id] = f
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_redirect(id: int, age: int, position_: Vector3, velocity: Vector3) -> void:
+	var f: Flying = _by_id.get(id)
+	if f:
+		f.events.append([age, EVENT_REDIRECT, position_, velocity])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -394,6 +505,17 @@ func _apply_events(f: Flying, delta: float) -> void:
 	while not f.events.is_empty() and f.events[0][0] <= f.flight.age:
 		var event: Array = f.events.pop_front()
 		var age: int = event[0]
+		if event[1] == EVENT_REDIRECT:
+			# A bounce or homing turn: rewind to it and fly the difference again.
+			var since := f.flight.age - age
+			f.flight.age = age
+			f.flight.position = event[2]
+			f.flight.prev_position = event[2]
+			f.flight.velocity = event[3]
+			f.flight.ended = Projectile.END_NONE
+			for i in since:
+				f.flight.step(delta, _return_target(f.flight.owner_id, f.flight))
+			continue
 		if event[1] != EVENT_TURN:
 			f.end_age = age
 			f.end_position = event[2]

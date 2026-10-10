@@ -175,6 +175,16 @@ func fall_gravity_multiplier(defs: StatusDefs) -> float:
 	return result
 
 
+## Hover: the slowest max_fall_speed of the owner's statuses (m/s), or 0 for none.
+func max_fall_speed(defs: StatusDefs) -> float:
+	var result := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.max_fall_speed > 0.0 and (result == 0.0 or def.max_fall_speed < result):
+			result = def.max_fall_speed
+	return result
+
+
 ## Multiplier on damage the owner takes from source_id: 1 + the sum of
 ## damage_taken_from_source x stacks of statuses that source applied
 ## (Hunter's Mark).

@@ -504,6 +504,8 @@ func _on_ability_started(player: Player) -> void:
 		_shadow_swap(player, started)
 	if started:
 		_mage_ability_started(player, started)
+	if started and not started.recall_projectile.is_empty():
+		_projectiles.server_recall(player, started)
 	if player.state.is_using_wing():
 		_on_wing_started(player)
 		return

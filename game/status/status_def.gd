@@ -25,8 +25,10 @@ var move_multiplier := 1.0
 var dodge_speed_multiplier := 1.0
 ## Roll stamina cost multiplier (Tailwind: cheaper rolls). 1 = none.
 var dodge_cost_multiplier := 1.0
-## Gravity multiplier while falling (Updraft's slow descent). 1 = none.
+## Gravity multiplier while falling (a slower descent). 1 = none.
 var fall_gravity_multiplier := 1.0
+## Hover: falling is capped at this many m/s (Updraft). 0 = none.
+var max_fall_speed := 0.0
 ## Root: no walking, dodging, jumping or dashing.
 var stops_movement := false
 ## Silence: no weapon or Wing abilities (light, heavy and block still work).
@@ -144,6 +146,7 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.dodge_speed_multiplier = Tuning.get_optional(file, section, "dodge_speed_multiplier", 1.0)
 	s.dodge_cost_multiplier = Tuning.get_optional(file, section, "dodge_cost_multiplier", 1.0)
 	s.fall_gravity_multiplier = Tuning.get_optional(file, section, "fall_gravity_multiplier", 1.0)
+	s.max_fall_speed = Tuning.get_optional(file, section, "max_fall_speed", 0.0)
 	s.damage_taken_from_source = Tuning.get_optional(file, section, "damage_taken_from_source", 0.0)
 	s.stops_movement = Tuning.get_optional(file, section, "stops_movement", false)
 	s.stuns = Tuning.get_optional(file, section, "stuns", false)

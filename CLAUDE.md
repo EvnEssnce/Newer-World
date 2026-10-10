@@ -208,9 +208,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   31 = `dodge_cooldown` (ticks after a roll before the next, `[dodge] cooldown`);
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
-  rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask, Wing
-  cooldowns by pool index without trailing zeros]` (`PACKED_WING_HEADER` = 8; new
-  small ints can go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
+  rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
+  charge_mask, spare_charges, Wing cooldowns by pool index without trailing zeros]`
+  (`PACKED_WING_HEADER` = 10; new small ints can go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
   speed" under Status effects). Append new fields at the end. A player's snapshot entry is
   about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
   player already goes over it (Godot warns "above the MTU"); interest management /
@@ -237,7 +237,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   server's spawn confirms the oldest unconfirmed copy of that kind (unconfirmed after 0.5 s:
   removed), and late events rewind it to the event and re-fly the difference. Nothing
   about projectiles touches the thrower's predicted sim beyond the attack timeline, so they
-  cause no corrections.
+  cause no corrections. **Server-steered** kinds (`bounces`: Ricochet, `homing_turn`:
+  Seeker Spark) send `_receive_redirect(id, age, position, velocity)` (event type
+  `EVENT_REDIRECT` 5) when the server changes their course (each bounce; homing every
+  `HOMING_SYNC_ANGLE` of turn); clients rewind their copy to it like a TURN.
+  `sticks` kinds (knives) that hit a wall or run out stay on the server for
+  `stick_time` (`ProjectileSystem._stuck`, no visual) until Recall (`recall_projectile`)
+  fires each back as a returning kind (`server_recall` → `server_fire_from`).
 
 ## Zones and summons (AREA, SUMMON)
 
@@ -563,7 +569,8 @@ behind, bonus or not).
   stops at the first target or a guard): light 1 knife (32), heavy 3 fanned 16° (42
   each). Fan of Knives (5 over 50°), Pinning Knife (Slow 3 s), Marked Blade (Marked),
   Venom Coat (self: next 5 hits poison, like Bloodlust). Defaults: all four learned,
-  Q/E/R = Fan of Knives, Pinning Knife, Venom Coat. **Not built:** Ricochet and Recall.
+  Q/E/R = Fan of Knives, Pinning Knife, Venom Coat. Ricochet (`[projectile_knife_ricochet]`,
+  2 bounces within 7 m) and Recall (stuck knives fly back) are Flurry tier 2.
 - **Marked** (`marked_bonus` 0.5, `StatusEffects.mark_from(defs, source)`): the
   marker's next *melee* hit (an attack without `projectile`) on the target deals +50%
   and removes the mark (`World._marked_scale`, players via `remove_status`).
@@ -581,8 +588,8 @@ behind, bonus or not).
   damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s: trade
   places with your decoy, or the nearest target you Marked within 15 m). Defaults Z
   Ashstep, C Plumage Flash. Capstones: **Mirror Image** (`decoy_burst`: the decoy
-  bursts as it ends, 80 damage + Dazzled within 3 m) and Second Step (a second Ashstep
-  charge: not built, needs ability charges). Wing Enhancement item: Ashen Vanes.
+  bursts as it ends, 80 damage + Dazzled within 3 m) and **Second Step**
+  (`extra_charge`, applies_to ashstep: see "Charges"). Wing Enhancement item: Ashen Vanes.
   Weapon items: Iron Talons, Iron Knives.
 
 ## Ranger (Longbow, Crossbow, Firebolts)
@@ -626,18 +633,25 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   1.6, 4 s; no lockout). Capstones: **Inferno** (`status_cap`: Burn you apply stacks to
   max_stacks × 2, `World._stack_cap` → `StatusEffects.apply(..., max_stacks)`) and
   **Cinder Return** (`ignite_ember`: 3 Ember per stack Ignite uses). Fire Trail
-  (Kindling tier 2: your next 3 rolls leave burning ground). **Not built:** Seeker
-  Spark (homing).
+  (Kindling tier 2: your next 3 rolls leave burning ground), Seeker Spark (Flashfire
+  tier 2: `[projectile_seeker_spark]`, 14 m/s, turns 220°/s toward the nearest hostile
+  in front within 16 m, Burn ×2).
 - **Ranger Wings** (Windrider / Parting Shot, 12 points): Gust Roll (15 Ember: rolls
   1.8× as fast for 5 s, so 1.8× as far: `dodge_speed_multiplier`), Tailwind (20:
   `move_multiplier` 1.3 haste + `dodge_cost_multiplier` 0.5, 6 s; `PlayerState.
   dodge_cost`), Backdraft (20: 4 m radial knockback 3 m), Updraft (25: a real jump,
   `launch_height` 3.5 m at `launch_time`, `PlayerMovement._self_launch_speed`, then
-  **Updraft** `fall_gravity_multiplier` 0.2 for 2.5 s: a slow descent; no true hover).
+  **Updraft** `max_fall_speed` 0.4 m/s for 2.5 s: a hover, sinking slowly).
   Defaults Z Gust Roll, C Backdraft. Capstones: **Parting Gift** (`roll_empower`:
   `Player.dodged` (server) → `World._parting_shot` gives **Parting Shot**, +30%
-  damage dealt consumed by the next hit) and Second Wind (a second roll charge: not
-  built, `effect="none"`). Items: Ashwood Longbow, Iron Crossbow, Cinder Wraps,
+  damage dealt consumed by the next hit) and **Second Wind** (`extra_charge`, applies_to
+  roll: see "Charges").
+- **Charges** (sim): a Wing-tree node `extra_charge` (`applies_to` "roll" or a Wing
+  ability id) → `CharacterBuild.charge_mask` → `PlayerState.set_charge_mask` (server
+  event, in `apply_to_state` like `free_draw`), synced with `spare_charges` in the packed
+  header. A spare lets a roll (bit 0) or that Wing ability (bit 1 + pool index) be used
+  again while its cooldown runs (a Wing spare doesn't restart the cooldown); it comes
+  back when the cooldown is 0 (`_refill_charges` in `step`). Items: Ashwood Longbow, Iron Crossbow, Cinder Wraps,
   Galeborn Plumes.
 
 ## Mage (Great Staff, Gauntlet)
@@ -757,7 +771,8 @@ deflections= reflections= shared_damage= kindled= judgments=` (no checks).
 - **Players**: `PlayerState.statuses` (synced in `to_array()`), ticked down at the top of
   `PlayerState.step`. Sim keys besides slow/root/stun/attack speed: hastes
   (`move_multiplier` > 1, times the strongest slow), `dodge_speed_multiplier`,
-  `dodge_cost_multiplier`, `fall_gravity_multiplier` (Ranger Wings). `blind` (0..1) is
+  `dodge_cost_multiplier`, `fall_gravity_multiplier`, `max_fall_speed` (a hover:
+  Updraft) (Ranger Wings). `blind` (0..1) is
   a HUD haze for players and a per-swing miss chance for enemies
   (`StatusEffects.blind_amount`, `Enemy.swing_misses`). Slow scales walking speed and root stops walking/dodging/jumping/
   dashing in `PlayerMovement`/`can_dodge`. **Stun = stagger**: applying a stun staggers

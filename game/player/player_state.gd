@@ -137,6 +137,12 @@ var equip_left := 0
 ## Bit per weapon slot: with that weapon out, light and heavy attacks don't
 ## slow walking (the Longbow's Skirmisher capstone, "free_draw").
 var free_move_mask := 0
+## Bit 0: rolls have a second charge (Second Wind); bit 1 + i: the Wing ability at
+## pool index i does (Second Step: Ashstep).
+var charge_mask := 0
+## Which of those spare charges are ready now (same bits). A spare lets the thing
+## be used again while its cooldown runs; it comes back when the cooldown is 0.
+var spare_charges := 0
 
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
@@ -216,6 +222,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	for i in wing_cooldowns.size():
 		if wing_cooldowns[i] > 0:
 			wing_cooldowns[i] -= 1
+	_refill_charges()
 	_step_ember_and_rebirth(params)
 	status_damage = statuses.tick(params.statuses)
 	status_heal = statuses.heal_due
@@ -731,11 +738,40 @@ func _handle_swap_input(buttons: int, params: PlayerParams) -> void:
 ## on the floor or with an air dodge left, not rooted, and not mid-attack
 ## (except during recovery, which the dodge cancels).
 func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
-	return (can_act() and can_move(params) and dodge_tick < 0 and dodge_cooldown == 0
+	return (can_act() and can_move(params) and dodge_tick < 0
+			and (dodge_cooldown == 0 or has_spare_charge(0))
 			and swap_tick < 0 and equip_left == 0
 			and stamina >= dodge_cost(params)
 			and (on_floor or air_dodges_used < params.max_air_dodges)
 			and (attack_tick < 0 or is_attack_recovering(params)))
+
+
+## True if spare charge `bit` (0 = roll, 1 + i = Wing pool index i) is ready.
+func has_spare_charge(bit: int) -> bool:
+	return spare_charges & (1 << bit) != 0
+
+
+## Server: which things have a second charge (charge_mask bits); a server event
+## when it changes. Spares for things that lost theirs go too.
+func set_charge_mask(mask: int) -> void:
+	if mask == charge_mask:
+		return
+	charge_mask = mask
+	spare_charges &= mask
+	server_events += 1
+
+
+## Every step: a thing with a second charge gets its spare back once its own
+## cooldown is 0 (rolls: and not rolling).
+func _refill_charges() -> void:
+	if charge_mask == 0:
+		return
+	if charge_mask & 1 and dodge_cooldown == 0 and dodge_tick < 0:
+		spare_charges |= 1
+	for i in wing_cooldowns.size():
+		var bit := 1 << (1 + i)
+		if charge_mask & bit and wing_cooldowns[i] == 0:
+			spare_charges |= bit
 
 
 ## Server: uses up one stack of a status (Fire Trail's rolls); a server event.
@@ -818,6 +854,8 @@ func _handle_dodge_input(move: Vector2, buttons: int, on_floor: bool, params: Pl
 	queued_attack = ATTACK_NONE
 	dodge_tick = 0
 	dodge_buffer = 0
+	if dodge_cooldown > 0:
+		spare_charges &= ~1  # the second roll charge
 	stamina -= dodge_cost(params)
 	stamina_regen_wait = params.stamina_regen_delay_ticks
 	if not on_floor:
@@ -961,8 +999,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		if wing == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if (can_attack() and wing_cooldowns[wing_index] == 0 and can_afford(wing)
-				and not statuses.silenced(params.statuses)):
+		if (can_attack() and (wing_cooldowns[wing_index] == 0 or has_spare_charge(1 + wing_index))
+				and can_afford(wing) and not statuses.silenced(params.statuses)):
 			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
 			queued_attack = ATTACK_NONE
 			return
@@ -1000,7 +1038,10 @@ func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: Player
 	# the length of ability_dir, which PlayerMovement doesn't normalize.
 	ability_dir *= started.dash_fraction(aim_pitch)
 	if wing:
-		wing_cooldowns[index] = started.cooldown_ticks
+		if wing_cooldowns[index] > 0:
+			spare_charges &= ~(1 << (1 + index))  # a spare charge: the cooldown runs on
+		else:
+			wing_cooldowns[index] = started.cooldown_ticks
 	else:
 		cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
 	ember = maxf(0.0, ember - started.ember_cost)
@@ -1111,14 +1152,14 @@ static func from_array(data: Array) -> PlayerState:
 
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
-## C slot, equip_left, free_move_mask, then Wing cooldowns by pool index,
-## without trailing zeros].
-const PACKED_WING_HEADER := 8
+## C slot, equip_left, free_move_mask, charge_mask, spare_charges, then Wing
+## cooldowns by pool index, without trailing zeros].
+const PACKED_WING_HEADER := 10
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
-			wing_slots[0], wing_slots[1], equip_left, free_move_mask])
+			wing_slots[0], wing_slots[1], equip_left, free_move_mask, charge_mask, spare_charges])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1135,6 +1176,8 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	wing_slots[1] = packed[5]
 	equip_left = packed[6]
 	free_move_mask = packed[7]
+	charge_mask = packed[8]
+	spare_charges = packed[9]
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
@@ -1170,6 +1213,7 @@ func matches(other: PlayerState) -> bool:
 			and swap_tick == other.swap_tick
 			and equip_left == other.equip_left
 			and free_move_mask == other.free_move_mask
+			and charge_mask == other.charge_mask and spare_charges == other.spare_charges
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot

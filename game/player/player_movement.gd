@@ -65,8 +65,11 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	elif not on_floor:
 		var gravity := params.gravity
 		if vertical < 0.0:
-			gravity *= state.statuses.fall_gravity_multiplier(params.statuses)  # Updraft
+			gravity *= state.statuses.fall_gravity_multiplier(params.statuses)
 		vertical -= gravity * delta
+		var hover := state.statuses.max_fall_speed(params.statuses)  # Updraft
+		if hover > 0.0 and vertical < -hover:
+			vertical = -hover
 
 	body.velocity = Vector3(horizontal.x, vertical, horizontal.z)
 	body.move_and_slide()

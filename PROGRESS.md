@@ -50,7 +50,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|---|
 | Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
-| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | All six classes built (not yet: homing, ability charges, true stealth, Updraft's hover, Ricochet/Recall) |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | All six classes built, everything in `design/classes.md` (stealth is visual only) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
 | Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
@@ -193,11 +193,11 @@ Order from `design/classes.md`: ~~Assassin~~ (built in session 32 except Ember D
 Shadow Swap, Ricochet and Recall, which need decoys/stealth/new projectile kinds)
 → ~~Ranger~~ (session 33 except Tripwire, Smoke Bolt, Fire Trail, Seeker Spark, the
 Trapper and Windrider capstones and Updraft's real hover) → ~~Mage~~ (session 35, everything in the design) → ~~Paladin~~ (session 36, everything in
-the design). **The class track is done** apart from the small leftovers below.
+the design). **The class track is done**: session 37 built the leftovers (ability charges
+for Second Step / Second Wind, Updraft's hover, Ricochet, Recall, Seeker Spark).
 Zones and summons (session 34) built Tripwire, Smoke Bolt, Fire Trail, Arrow Rain's
-zone, Ember Double, Shadow Swap and the Trapper and Mirror Image capstones. Still
-waiting: homing projectiles (Seeker Spark), ability charges (Second Step, Second Wind),
-Updraft's real hover, Ricochet and Recall. Each class is about 2–3 sessions (weapons,
+zone, Ember Double, Shadow Swap and the Trapper and Mirror Image capstones; session 37
+the rest. The one simplification left: stealth is visual only (positions still sent). Each class is about 2–3 sessions (weapons,
 trees, Wings, models), plus the systems it needs:
 - `SUMMON` and `AREA` (built in session 34: `data/zones.cfg`), traps (Ranger,
   Mage), **stealth** (Assassin), **updraft hover** (Wings), weapon abilities that cost
@@ -298,6 +298,12 @@ it heal and stand back up 4 s after you stop? It drops nothing.
   Blessing (an extra Rebirth that ignores the cooldown, taken back after 30 s), Kindle
   Life (raise the fallen bot), Ember Vigil (allies near you Rebirth with 10 less Ember).
 
+**Leftovers (session 37):** Second Wind (Ranger Wing capstone: roll twice in a row),
+Second Step (Assassin: two Ashsteps), Updraft's hover (you sink at 0.4 m/s for 2.5 s),
+Ricochet (a knife jumping between up to 3 targets), Recall (miss a few knives into a
+wall, then pull them back through a Husk), Seeker Spark (the spark curving onto a Husk;
+watch for visible kinks from the server's course corrections).
+
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
 
 **Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
@@ -378,6 +384,13 @@ Paladin (session 36):
 - Phoenix Blessing's extra Rebirth is taken back after 30 s if unused; Kindle Life
   raises the fallen at 30% health (the Rebirth's) without using their Rebirth.
 - Guardian Link moves 30% of hit damage (not damage over time or zones) to the Paladin.
+
+Leftovers (session 37):
+- A second charge lets you use the thing again while its cooldown runs; a Wing ability's
+  spare doesn't restart the cooldown, and the spare comes back when it ends.
+- Stuck knives have no visual (they're server-side for 10 s); Recall brings back every
+  one you have, wherever it is.
+- Seeker Spark only homes on hostiles within 90° of its heading.
 
 Open questions for coming steps:
 - **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
@@ -494,6 +507,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 34 | 2026-10-10 | Zones and summons (`data/zones.cfg`, World/Zones): pulse zones, traps, decoys, walls. Shield Wall redesign (a wall enemies can't pass, stops hostile projectiles); Arrow Rain zone, Tripwire + Rearm, Smoke Bolt, Fire Trail, Ember Double (decoy, visual stealth), Shadow Swap, Mirror Image. Smoke: zone abilities slotted first by the bot; 500-health Husks, every heavy pushes and a 1.5 s wall so the force check isn't luck. 478 tests; smoke all classes pass (Linux quit race aside) |
 | 35 | 2026-10-10 | The Mage: Great Staff (Meteor Fall, Flame Wall, Searing Ray channel ramp, Blink, Pyroclasm; Wildfire Spread, Clear Mind), Gauntlet (Mending Beam, Renewal Pulse, Siphon lifesteal, Ward absorb shields, Life Spore ally trap, Withering Touch; Overflowing Life, Shared Vitality), Wings (Phoenix Aura, Binding Embers, Searing Glare silence, Wingfall; Rekindle, Hushing Embers). Weapon abilities cost Ember; Mage Ember gain ×2. Zones: solid flag, ally traps, growth. Smoke: Mage heavies push, 400-health Husks. 489 tests; smoke all classes pass (Linux quit race aside) |
 | 36 | 2026-10-10 | The Paladin: Dual Shortstaffs (Consecrating Strikes, Twin Guard, Uplifting Blow, Spinning Staves deflecting, Rush to Aid, Rebuke; Radiant Rhythm, Guarded Grace), Longstaff (Sanctified Ground both-sides zone, Sweeping Rebuke, Guardian's Leap, Staff Spin, Smite, Benediction; Sanctuary, Judgment), Wings (Sheltering Wings, Cleansing Flame, Guardian Wing damage share, Phoenix Blessing, Kindle Life; Purifier Rebirth passives, Mirror Aegis reflect, Everflame). The class track is complete. Smoke skips projectiles for classes that throw nothing. 496 tests; smoke all classes pass apart from known luck checks and the Linux quit race |
+| 37 | 2026-10-10 | Class track leftovers: ability charges in the sim (Second Wind, Second Step; `charge_mask`/`spare_charges` in the packed header), Updraft's hover (`max_fall_speed`), server-steered projectiles with a redirect event (Ricochet bounces, Seeker Spark homing), sticking knives and Recall. 504 tests; smoke Assassin/Ranger pass with 0 corrections; a one-off run with the light attacks turned into Ricochet/Seeker Spark and Recall on Pinning Knife saw 4 bounces, 10 recalls, 16 redirects |
 
 ---
 

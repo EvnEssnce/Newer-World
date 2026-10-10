@@ -130,6 +130,27 @@ func apply_to_state(state: PlayerState, params: PlayerParams) -> void:
 	state.set_loadout(weapons, state_slots(params))
 	state.set_wings(wing_set_id(), wing_state_slots(params))
 	state.set_free_move(free_move_mask())
+	state.set_charge_mask(charge_mask(params))
+
+
+## PlayerState.charge_mask from the Wing tree's "extra_charge" nodes:
+## applies_to "roll" (Second Wind) sets bit 0, a Wing ability id (Second Step:
+## Ashstep) bit 1 + its pool index. Like free_draw, it reaches the sim through
+## apply_to_state.
+func charge_mask(params: PlayerParams) -> int:
+	if wing_tree == null:
+		return 0
+	var mask := 0
+	var pool := params.wing_set(wing_set_id())
+	for id in wing_nodes:
+		var n := wing_tree.get_node(id)
+		if n == null or n.kind == MasteryTree.KIND_ACTIVE or n.effect != "extra_charge":
+			continue
+		if n.applies_to == "roll":
+			mask |= 1
+		elif pool and pool.ability_index(n.applies_to) >= 0:
+			mask |= 1 << (1 + pool.ability_index(n.applies_to))
+	return mask
 
 
 ## Bit per weapon slot whose tree has a "free_draw" node (the Longbow's

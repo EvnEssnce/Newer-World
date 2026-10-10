@@ -267,3 +267,37 @@ func test_boomerang_wall_turns_it_back() -> void:
 	assert_true(proj.returning)
 	assert_eq(proj.ended, Projectile.END_NONE)
 	assert_eq(proj.position, Vector3(0.0, 0.0, -0.2))
+
+
+# --- Ricochet and homing (server-steered extras) ---
+
+func _bare(speed: float) -> ProjectileParams:
+	var p := ProjectileParams.new()
+	p.id = "test"
+	p.speed = speed
+	p.lifetime_ticks = 600
+	p.bounces = 2
+	p.homing_turn = PI  # 180 degrees per second
+	return p
+
+
+func test_bounce_heads_for_the_next_target() -> void:
+	var proj := Projectile.new(_bare(20.0), Vector3.ZERO, Vector3(0, 0, -20))
+	proj.ended = Projectile.END_HIT
+	proj.bounce_to(Vector3(10, 0, 0))
+	assert_eq(proj.ended, Projectile.END_NONE, "flies on")
+	assert_eq(proj.bounces_left, 1)
+	assert_true(proj.redirected)
+	assert_almost(proj.velocity.x, 20.0, 0.001, "same speed, toward it")
+	assert_almost(proj.velocity.z, 0.0)
+
+
+func test_homing_turns_at_most_its_rate() -> void:
+	var proj := Projectile.new(_bare(10.0), Vector3.ZERO, Vector3(0, 0, -10))
+	var turned := proj.steer_toward(Vector3(10, 0, 0), 0.1)
+	assert_almost(absf(turned), PI * 0.1, 0.001, "18 degrees in 0.1 s")
+	assert_almost(proj.velocity.length(), 10.0, 0.001, "speed kept")
+	for i in 20:
+		proj.steer_toward(Vector3(10, 0, 0), 0.1)
+	assert_almost(proj.velocity.normalized().x, 1.0, 0.001, "lined up, then holds")
+

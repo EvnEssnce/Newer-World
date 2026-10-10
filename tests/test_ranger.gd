@@ -70,6 +70,17 @@ func test_tailwind_rolls_cost_half_in_the_sim() -> void:
 	assert_almost(state.dodge_cost(params), 15.0)
 
 
+func test_hover_caps_falling() -> void:
+	var s := StatusEffects.new()
+	assert_almost(s.max_fall_speed(defs), 0.0, 0.001, "none")
+	var d := _def("hover", func(x: StatusDef) -> void:
+		x.affects = StatusDef.AFFECTS_SIM
+		x.max_fall_speed = 0.4)
+	var hover := defs.add(d)
+	s.apply(defs, hover)
+	assert_almost(s.max_fall_speed(defs), 0.4)
+
+
 func test_movement_statuses_must_be_sim() -> void:
 	var d := _def("bad", func(x: StatusDef) -> void: x.dodge_speed_multiplier = 1.5)
 	var bad := StatusDefs.new()

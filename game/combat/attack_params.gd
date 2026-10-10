@@ -110,6 +110,10 @@ var zone_tick := 0
 var zone_distance := 0.0
 ## A projectile of this attack places this zone where it stops.
 var zone_on_impact := ""
+## Recall: as it starts, each of the user's stuck projectiles (params.sticks)
+## flies back to it as this projectile kind, hitting what's between with this
+## attack's damage.
+var recall_projectile := ""
 
 # Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
 ## Thrown at projectile_tick (from the attack's start), projectile_count of
@@ -216,6 +220,7 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	zone_tick = roundi(float(Tuning.get_optional(file, section, "zone_time", 0.0)) * tps)
 	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)
 	zone_on_impact = Tuning.get_optional(file, section, "zone_on_impact", "")
+	recall_projectile = Tuning.get_optional(file, section, "recall_projectile", "")
 
 
 ## The statuses this gives whoever it damages, as [id, stacks, duration ticks

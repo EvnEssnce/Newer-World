@@ -42,6 +42,12 @@ var returning := false
 var ended := END_NONE
 ## Targets it can still pass through on this leg (below 0 = stopped).
 var pierce_left := 0
+## Ricochets left (params.bounces), and whether the server changed its course
+## this step (a bounce or homing turn; ProjectileSystem sends a redirect).
+var bounces_left := 0
+var redirected := false
+## Homing: radians turned since the last redirect was sent.
+var turned_since_sync := 0.0
 ## Targets on this leg: id -> true once hit, false after an evade (i-frames: it
 ## can still hit them later on the same leg). Ids are peer ids or enemy ids.
 var results: Dictionary[int, bool] = {}
@@ -65,6 +71,7 @@ func _init(p: ProjectileParams, from: Vector3, launch_velocity: Vector3) -> void
 	prev_position = from
 	velocity = launch_velocity
 	pierce_left = p.pierce
+	bounces_left = p.bounces
 
 
 ## The launch velocity for a thrower facing `yaw` (forward is -Z rotated by
@@ -103,6 +110,34 @@ func step(delta: float, return_target: Vector3) -> void:
 		position += velocity * delta
 	if ended == END_NONE and age >= params.lifetime_ticks:
 		ended = END_EXPIRED
+
+
+## Ricochet: a hit that stopped it sends it on toward `target` instead, at its
+## speed, from where it is; uses a bounce.
+func bounce_to(target: Vector3) -> void:
+	var to := target - position
+	if to.is_zero_approx():
+		return
+	velocity = to.normalized() * maxf(velocity.length(), params.speed)
+	ended = END_NONE
+	bounces_left -= 1
+	redirected = true
+
+
+## Homing: turns the horizontal velocity toward `target` by at most
+## params.homing_turn x delta radians (the vertical part is kept). Returns the
+## angle it turned.
+func steer_toward(target: Vector3, delta: float) -> float:
+	var flat := Vector2(velocity.x, velocity.z)
+	var want := Vector2(target.x - position.x, target.z - position.z)
+	if flat.is_zero_approx() or want.is_zero_approx():
+		return 0.0
+	var angle := flat.angle_to(want)
+	var turn := clampf(angle, -params.homing_turn * delta, params.homing_turn * delta)
+	flat = flat.rotated(turn)
+	velocity = Vector3(flat.x, velocity.y, flat.y)
+	turned_since_sync += absf(turn)
+	return turn
 
 
 ## Turns a returning projectile back: a new leg, so every target can be hit
