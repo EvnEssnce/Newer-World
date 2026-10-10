@@ -611,8 +611,9 @@ func rebirth_ember_needed(params: PlayerParams) -> float:
 
 ## True if dying now would start a Rebirth: enough Ember, and Rebirth off
 ## cooldown or an extra charge (rebirth_charges) to use.
-func can_rebirth(params: PlayerParams) -> bool:
-	return (ember >= rebirth_ember_needed(params)
+## discount: Ember the server lets off (a Paladin's Purifier passive nearby).
+func can_rebirth(params: PlayerParams, discount := 0.0) -> bool:
+	return (ember >= rebirth_ember_needed(params) - discount
 			and (rebirth_cooldown == 0 or rebirth_charges > 0))
 
 
@@ -631,8 +632,8 @@ func rebirth_progress(params: PlayerParams) -> float:
 ## Ember; on cooldown it uses an extra charge instead (the cooldown is left
 ## alone), otherwise it starts the cooldown, which only counts down once the
 ## player has risen. Returns false (normal respawn) if not eligible.
-func start_rebirth(params: PlayerParams) -> bool:
-	if not dead or is_rebirthing() or not can_rebirth(params):
+func start_rebirth(params: PlayerParams, discount := 0.0) -> bool:
+	if not dead or is_rebirthing() or not can_rebirth(params, discount):
 		return false
 	if rebirth_cooldown > 0:
 		rebirth_charges -= 1
@@ -668,6 +669,14 @@ func grant_rebirth_charge(count: int = 1) -> void:
 	if count <= 0:
 		return
 	rebirth_charges += count
+	server_events += 1
+
+
+## Server: takes one extra Rebirth away (Phoenix Blessing's ran out unused).
+func remove_rebirth_charge() -> void:
+	if rebirth_charges <= 0:
+		return
+	rebirth_charges -= 1
 	server_events += 1
 
 

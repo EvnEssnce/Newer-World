@@ -116,8 +116,9 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
-                     Ranger: longbow, crossbow, firebolts; Mage: great_staff, gauntlet),
-                     class_<id> (fighter, juggernaut, assassin, ranger, mage),
+                     Ranger: longbow, crossbow, firebolts; Mage: great_staff, gauntlet;
+                     Paladin: dual_shortstaffs, longstaff),
+                     class_<id> (fighter, juggernaut, assassin, ranger, mage, paladin),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
@@ -276,7 +277,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (trap: 30 damage + Root 2 s), Fire Trail (Burn), Ember Double (decoy), Shield Wall;
   Mage: Meteor Fall, Flame Wall (a box that isn't `solid`), Renewal Pulse (ally
   heal), Life Spore (an ally trap), Binding Embers.
-- `wall=true` makes the area a box; only `solid=true` collides and stops projectiles.
+- `wall=true` makes the area a box; only `solid=true` stops projectiles, and collides
+  with enemies unless `blocks_enemies=false` (Sheltering Wings). `affects="both"`:
+  allies get its heal, hostiles its damage and status (Sanctified Ground).
   Traps hit the first target of their `affects` side (allies for Life Spore).
 - `SUMMARY zones spawned= pulses= affected= trap_triggers= decoys= walls=
   projectiles_stopped=` and `SUMMARY summons decoy_bursts= shadow_swaps=` (no checks;
@@ -685,6 +688,62 @@ ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
   Wing ability while silenced (presses stay buffered). No effect on Husks (no abilities).
 - Items: Emberwood Staff, Lifeweave Gauntlet, Sunfire Pinions.
 
+## Paladin (Dual Shortstaffs, Longstaff)
+
+`data/class_paladin.cfg` (`--class=paladin`, `-Class paladin`). Melee tank/healer; no
+projectiles (the smoke test skips its projectile check for a class whose weapons throw
+nothing). Placeholder models in `player.gd` (a short staff in each hand, or one long
+staff, swung like the axes). World helpers: "Paladin: healing hits, deflection,
+sharing, blessings". Counters: `SUMMARY paladin heal_pulses= cleanses= blessings=
+deflections= reflections= shared_damage= kindled= judgments=` (no checks).
+
+- **Support keys** (attack/ability, server; `World._ally_support` → `_support_one`,
+  and once for the user at the attack's first live step): `self_heal`, `ally_status`
+  (allies only, never the user), `cleanses` (`PlayerState.cleanse`), `grants_rebirth`
+  + `blessing_time` (an extra Rebirth via `grant_rebirth_charge`; `Player.
+  blessing_until_tick`, taken back unused by `remove_rebirth_charge` in the server
+  tick), `revives` (the last hit window raises fallen allies it touches:
+  `World._kindle_life` → `_rebirth`, no Ember or cooldown needed), plus the Mage's
+  `ally_heal`/`ally_shield`/`allies_only`. `heals_lowest_ally` + `heal_radius`: a
+  connecting step heals the lowest-health ally (the user included).
+- **Dual Shortstaffs** (Devotion / Discipline): light 45 (0.34 s), heavy 130 (breaks
+  blocks). Consecrating Strikes (self **Consecrating**: `hit_heal` 15 within 6 m per
+  connecting step, 6 s), Twin Guard (parry 140° + internal `twin_guard_counter`),
+  Uplifting Blow (80 to the lowest ally within 10 m), Spinning Staves (3 radial
+  windows, `deflects`), Rush to Aid (7 m dash, Ward 100 to your side at the end),
+  Rebuke (0.8 s stagger). Capstones: **Radiant Rhythm** (`hit_pulse_heal`: every
+  `count` 4th attack that connects heals 50 within 6 m; `Player.hit_counter`, a
+  `HeavyCounter`; `MasteryNode.count`) and **Guarded Grace** (`parry_heal` 120 to you
+  and your nearest ally, `World._parry_heal` from `_try_parry`).
+- **Longstaff** (Sanctuary / Judgment): light 60 sweep (2.8 m), heavy 160. Sanctified
+  Ground (zone `sanctified_ground`, `affects="both"`: allies healed 12 per 0.5 s,
+  hostiles 10 + Burn; 4 m, 8 s), Sweeping Rebuke (5 m wide, knockback 3.5 m),
+  Guardian's Leap (7 m leap, 60 damage around the landing, Ward 80 to allies there),
+  Staff Spin (5 windows while walking, `deflects`), Smite (Stun 1.2 s), Benediction
+  (200 to you and allies within 8 m, 40 s). Capstones: **Sanctuary**
+  (`zone_ally_status`: allies on your ground get **Sanctified**, −15% damage taken)
+  and **Judgment** (`judgment_mark`: an enemy whose swing reaches an ally on your
+  ground is **Judged**, +20% damage taken 5 s; `World._judgment`,
+  `ZoneSystem.zones_at`).
+- **Deflection** (`deflects`, `World.deflects` from `ProjectileSystem._hit_player`):
+  while such an ability is in its windup or hit windows, a hostile projectile reaching
+  the user stops (0-damage `HIT_BLOCKED`).
+- **Paladin Wings** (Aegis / Purifier, 12 points): Sheltering Wings (20 Ember: zone
+  `sheltering_wings`, a `solid` wall with `blocks_enemies=false`: projectiles stop,
+  people pass, 4 s), Cleansing Flame (15: cleanses you and allies within 8 m),
+  Guardian Wing (20: **Guardian Link** on allies in a 12 m line: `damage_share` 0.3 of
+  each hit's damage goes to you, `World._guardian_share` in `resolve_strike`),
+  Phoenix Blessing (40, 90 s: an extra Rebirth for you and allies within 8 m for 30 s),
+  Kindle Life (30, 60 s: a 2 s channel that raises fallen allies within 3 m). Defaults
+  Z Sheltering Wings, C Cleansing Flame. Passives `cleanse_rebirth` (30 s off each
+  cleansed ally's Rebirth cooldown) and `rebirth_discount` (allies dying within 10 m
+  need 10 less Ember: `World._rebirth_discount` → `start_rebirth(params, discount)`).
+  Capstones: **Mirror Aegis** (`wall_reflect`: a projectile stopped by your Sheltering
+  Wings flies back, now yours: `World.reflect_projectile` →
+  `ProjectileSystem.server_fire_from`) and **Everflame** (`blessing_ember`: Phoenix
+  Blessing refills Ember to ≥ 50).
+- Items: Oakheart Shortstaffs, Dawnwood Longstaff, Halo Pinions.
+
 ## Status effects
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
@@ -1013,7 +1072,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headl
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage)
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage / paladin)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
@@ -1032,7 +1091,8 @@ timing, not a party bug.
 Alternatively, PowerShell 7 for Linux (`powershell-7.x-linux-x64.tar.gz` from the
 PowerShell GitHub releases) runs the real `smoke_test.ps1`/`run_tests.ps1` with
 `GODOT` set, after swapping the `find_godot.ps1` line for `$ProjectRoot`/`$Godot`
-and `\` for `/` in the `build\smoke`, `build\tests` and `data\class_$Class.cfg` paths.
+and `\` for `/` in the `build\smoke`, `build\tests`, `data\class_$Class.cfg` and
+`data\weapon_$_.cfg` paths.
 That also exercises the script's own argument quoting (a bare quote or space inside
 one `--tune` breaks under `Start-Process`; Tuning now logs an error for it).
 Both smoke scripts take `-Port N` (default 24599) so parallel runs (e.g. two worktrees)
@@ -1091,7 +1151,8 @@ in the real data (Husk swings bleed, Broadsword, War Hammer and Dual Talons heav
 status and force checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`)
 so a reborn bot is back in the fight quickly, 400-health Husks (they die, for loot
 and gear, but most heavies land on a live one), every class's heavy pushing (0 m knockback keys in the
-real data; Mage heavies too), a 1.5 s Shield Wall (a long one kept Husks off the bots), 2 s Javelin Cast / Boomerang Axe /
+real data; Mage and Paladin heavies too), the Paladin's Shortstaffs heavy applying
+Exposed (an empty `applies_status` in the real data), a 1.5 s Shield Wall (a long one kept Husks off the bots), 2 s Javelin Cast / Boomerang Axe /
 Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` on the
 `SUMMARY juggernaut` line, no check), Skewer applying Taunted instead of Root so Husks get taunted
 (counted, not checked), and a 6 m Hold the Line reach so pokes (`line_pokes=` on the

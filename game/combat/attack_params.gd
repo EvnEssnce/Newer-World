@@ -87,6 +87,21 @@ var ally_heal := 0.0
 var ally_shield := 0.0
 ## Its hitbox only reaches allies (Mending Beam, Ward): hostiles are skipped.
 var allies_only := false
+## Paladin support (server): heals the user once (Benediction); allies it
+## touches (and the user) get ally_status; cleanses (removes debuffs from) the
+## user and the allies it touches; grants the user and the allies it touches an
+## extra Rebirth for blessing_ticks (Phoenix Blessing); its last hit window
+## raises fallen allies it touches (Kindle Life).
+var self_heal := 0.0
+var ally_status := ""
+var cleanses := false
+var grants_rebirth := false
+var blessing_ticks := 0
+var revives := false
+## A damaging hit also heals the lowest-health ally (the user included) within
+## heal_radius m by this much (Uplifting Blow).
+var heals_lowest_ally := 0.0
+var heal_radius := 0.0
 
 # Zones and summons (data/zones.cfg ids; "" = none; server, ZoneSystem)
 ## Placed zone_tick after the start, zone_distance m ahead of the user.
@@ -189,6 +204,14 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	ally_heal = Tuning.get_optional(file, section, "ally_heal", 0.0)
 	ally_shield = Tuning.get_optional(file, section, "ally_shield", 0.0)
 	allies_only = Tuning.get_optional(file, section, "allies_only", false)
+	self_heal = Tuning.get_optional(file, section, "self_heal", 0.0)
+	ally_status = Tuning.get_optional(file, section, "ally_status", "")
+	cleanses = Tuning.get_optional(file, section, "cleanses", false)
+	grants_rebirth = Tuning.get_optional(file, section, "grants_rebirth", false)
+	blessing_ticks = roundi(float(Tuning.get_optional(file, section, "blessing_time", 0.0)) * tps)
+	revives = Tuning.get_optional(file, section, "revives", false)
+	heals_lowest_ally = Tuning.get_optional(file, section, "heals_lowest_ally", 0.0)
+	heal_radius = Tuning.get_optional(file, section, "heal_radius", 0.0)
 	zone = Tuning.get_optional(file, section, "zone", "")
 	zone_tick = roundi(float(Tuning.get_optional(file, section, "zone_time", 0.0)) * tps)
 	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)

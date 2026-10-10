@@ -77,6 +77,13 @@ var healing_dealt := 0.0
 ## Ward: a damage-absorbing shield while the status lasts (the amount is on the
 ## server, Player.absorb).
 var absorbs := false
+## Consecrating Strikes: each step the owner's attack connects heals the owner
+## and its allies within hit_heal_radius m this much.
+var hit_heal := 0.0
+var hit_heal_radius := 0.0
+## Guardian Wing: this fraction of the damage hits deal to the owner goes to
+## whoever applied it instead (while that player lives).
+var damage_share := 0.0
 ## Shield Wall: while the owner blocks, allies inside a box this deep (m,
 ## straight behind them) and cover_width wide (m) are covered: hits on them
 ## from within the owner's block arc are blocked by the owner. 0 = none.
@@ -144,6 +151,9 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.healing_taken = Tuning.get_optional(file, section, "healing_taken", 0.0)
 	s.healing_dealt = Tuning.get_optional(file, section, "healing_dealt", 0.0)
 	s.absorbs = Tuning.get_optional(file, section, "absorbs", false)
+	s.hit_heal = Tuning.get_optional(file, section, "hit_heal", 0.0)
+	s.hit_heal_radius = Tuning.get_optional(file, section, "hit_heal_radius", 0.0)
+	s.damage_share = clampf(Tuning.get_optional(file, section, "damage_share", 0.0), 0.0, 1.0)
 	s.attack_speed = Tuning.get_optional(file, section, "attack_speed", 1.0)
 	s.attack_speed_min_stamina = Tuning.get_optional(file, section, "attack_speed_min_stamina", 0.0)
 	s.cover_depth = Tuning.get_optional(file, section, "cover_depth", 0.0)

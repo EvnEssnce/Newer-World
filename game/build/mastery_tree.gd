@@ -53,6 +53,8 @@ class MasteryNode:
 	## "wall_stun" / "roar_guard": the status (data/status_effects.cfg id) it
 	## applies.
 	var status := ""
+	## "hit_pulse_heal": every count-th attack that connects.
+	var count := 0
 
 
 ## The weapon id, or "wings_<class>" for a class's Wing tree.
@@ -125,6 +127,7 @@ static func from_tuning(weapon: String) -> MasteryTree:
 		n.amount = Tuning.get_optional(file, section, "amount", 0.0)
 		n.threshold = Tuning.get_optional(file, section, "threshold", 0.0)
 		n.status = Tuning.get_optional(file, section, "status", "")
+		n.count = Tuning.get_optional(file, section, "count", 0)
 	return t
 
 

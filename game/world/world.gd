@@ -164,6 +164,17 @@ var _shields := 0
 var _absorbed := 0.0
 var _focus_refunds := 0
 var _aura_refunds := 0
+## Paladin (server): Devotion heal pulses, cleansed debuffs, blessings given,
+## deflected and reflected projectiles, damage Guardian Wing moved, Kindle Life
+## revivals, Judgment marks.
+var _heal_pulses := 0
+var _cleanses := 0
+var _blessings := 0
+var _deflections := 0
+var _reflections := 0
+var _shared_damage := 0.0
+var _kindled := 0
+var _judgments := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -287,6 +298,9 @@ func _server_tick(delta: float) -> void:
 		if player.state.dead:
 			_server_dead_player(player)
 		player.server_process_inputs(_max_inputs_per_tick, delta)
+		if player.blessing_until_tick >= 0 and _tick >= player.blessing_until_tick:
+			player.blessing_until_tick = -1
+			player.state.remove_rebirth_charge()  # Phoenix Blessing ran out unused
 		_check_wall_stun(player)
 		_apply_player_status_damage(player)
 		_apply_player_status_heal(player)
@@ -411,9 +425,14 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	var connected := 0
 	var read := false
 	var execute := attacker.execute_bonus()
-	if attack.ally_shield > 0.0 and not attacker.attack_results.has(attacker.peer_id):
-		attacker.attack_results[attacker.peer_id] = true  # Ward: the caster too
-		_shield_player(attacker, attack.ally_shield, attacker.peer_id)
+	if not attacker.attack_results.has(attacker.peer_id) and (_supports_allies(attack)
+			or attack.self_heal > 0.0):
+		# Ward, Cleansing Flame, Phoenix Blessing, Benediction: the user too.
+		attacker.attack_results[attacker.peer_id] = true
+		if attack.self_heal > 0.0:
+			_heal_player(attacker, attack.self_heal * attacker.damage_multiplier(attack), attacker.peer_id)
+		if _supports_allies(attack):
+			_support_one(attacker, attack, attacker)
 	for target: Player in _players.get_children():
 		if target == attacker:
 			continue
@@ -500,6 +519,7 @@ func _on_ability_started(player: Player) -> void:
 
 ## Server: a player's attack or ability connected with `count` targets this step.
 func _on_player_attack_connected(attacker: Player, attack: AttackParams, count: int) -> void:
+	_paladin_hit_heals(attacker, attack)
 	if attacker.state.is_using_ability():
 		_ability_hits += count
 	elif attacker.state.attack_type == PlayerState.ATTACK_HEAVY:
@@ -530,6 +550,7 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 				enemy.params.attack, enemy.attack_results, target, damage_scale)
 		if result >= 0 and result != HIT_EVADED:
 			_enemy_hits += 1
+			_judgment(enemy, target)
 		if result == HIT_DAMAGED:
 			_give_hit_statuses(enemy.enemy_id, enemy.params.attack,
 					enemy.statuses.take_on_hit_statuses(enemy.status_defs), target)
@@ -611,6 +632,7 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 			_guard_breaks += 1
 		else:
 			_blocks += 1
+	damage -= _guardian_share(target, damage, attacker_id)
 	var absorbed := _absorb(target, damage)
 	damage -= absorbed
 	target.health = maxf(0.0, target.health - damage)
@@ -1135,21 +1157,54 @@ func _parting_shot(player: Player) -> void:
 ## itself) that the hitbox touches is healed or shielded once per hit window
 ## instead of struck. Returns true if `target` is such an ally (handled or not).
 func _ally_support(attacker: Player, attack: AttackParams, target: Player) -> bool:
-	if attack.ally_heal <= 0.0 and attack.ally_shield <= 0.0:
+	if not _supports_allies(attack):
 		return false
 	if not are_allies(attacker.peer_id, target.peer_id):
 		return false
-	if (target.state.dead or attacker.attack_results.has(target.peer_id)
+	if (attacker.attack_results.has(target.peer_id)
 			or not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
 				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT)):
 		return true
+	if target.state.dead:
+		# Kindle Life: its last hit window raises a fallen ally it touches.
+		if attack.revives and attack.window_at(attacker.state.attack_tick) == attack.windows - 1:
+			attacker.attack_results[target.peer_id] = true
+			_kindle_life(target)
+		return true
 	attacker.attack_results[target.peer_id] = true
-	if attack.ally_heal > 0.0:
+	_support_one(attacker, attack, target)
+	_ally_supports += 1
+	return true
+
+
+## Whether an attack does anything for allies (_ally_support handles it).
+func _supports_allies(attack: AttackParams) -> bool:
+	return (attack.ally_heal > 0.0 or attack.ally_shield > 0.0 or not attack.ally_status.is_empty()
+			or attack.cleanses or attack.grants_rebirth or attack.revives)
+
+
+## What an ally-support attack does for one ally (or the user itself): heal,
+## Ward, its ally_status, a cleanse (with the Purifier passive "cleanse_rebirth",
+## also seconds off the Rebirth cooldown), an extra Rebirth (Phoenix Blessing).
+func _support_one(attacker: Player, attack: AttackParams, target: Player) -> void:
+	if attack.ally_heal > 0.0 and target != attacker:
 		_heal_player(target, attack.ally_heal * attacker.damage_multiplier(attack), attacker.peer_id)
 	if attack.ally_shield > 0.0:
 		_shield_player(target, attack.ally_shield, attacker.peer_id)
-	_ally_supports += 1
-	return true
+	if not attack.ally_status.is_empty() and target != attacker:  # a link to someone else
+		_give_status(attacker.peer_id, target, target.params.statuses.index_of(attack.ally_status), 1, -1)
+	if attack.cleanses:
+		_cleanses += target.state.cleanse(target.params)
+		var node := attacker.build.wing_effect("cleanse_rebirth") if attacker.build else null
+		if node:
+			target.state.reduce_rebirth_cooldown(roundi(node.amount * Engine.physics_ticks_per_second))
+	if attack.grants_rebirth:
+		target.state.grant_rebirth_charge()
+		target.blessing_until_tick = _tick + attack.blessing_ticks
+		_blessings += 1
+		var refill := attacker.build.wing_effect("blessing_ember") if attacker.build else null
+		if refill and target.state.ember < refill.amount:
+			target.state.gain_ember(target.params, refill.amount - target.state.ember, false)
 
 
 ## Ward: gives `target` the absorb status (absorbs) and an absorb pool of at
@@ -1227,6 +1282,177 @@ func _mage_ability_started(player: Player, started: AbilityParams) -> void:
 		_aura_refunds += 1
 
 
+# --- Paladin: healing hits, deflection, sharing, blessings (server only) ---
+
+## Each step a player's attack connects: Consecrating Strikes (a hit_heal
+## status heals it and allies within its radius), Uplifting Blow
+## (heals_lowest_ally: the lowest-health ally within heal_radius, the user
+## included) and the Devotion capstone ("hit_pulse_heal": every count-th attack
+## that connects heals the user and allies within threshold m by amount).
+func _paladin_hit_heals(attacker: Player, attack: AttackParams) -> void:
+	var defs := attacker.params.statuses
+	var consecrate := attacker.state.statuses.hit_heal(defs)
+	if consecrate.x > 0.0:
+		_heal_around(attacker, consecrate.x, consecrate.y)
+	if attack.heals_lowest_ally > 0.0:
+		var lowest: Player = null
+		for ally: Player in _players.get_children():
+			if (ally.state.dead or not are_allies(attacker.peer_id, ally.peer_id)
+					or ally.global_position.distance_to(attacker.global_position) > attack.heal_radius):
+				continue
+			if lowest == null or ally.health / ally.max_health() < lowest.health / lowest.max_health():
+				lowest = ally
+		if lowest:
+			_heal_player(lowest, attack.heals_lowest_ally * attacker.damage_multiplier(attack),
+					attacker.peer_id)
+	var pulse := attacker.build.weapon_effect(attacker.state.weapon_id(), "hit_pulse_heal") if attacker.build else null
+	if pulse and attacker.hit_counter.register(attacker.state.attack_serial, pulse.count):
+		_heal_around(attacker, pulse.amount, pulse.threshold)
+		_heal_pulses += 1
+
+
+## Heals `healer` and its living allies within `radius` m by `amount`.
+func _heal_around(healer: Player, amount: float, radius: float) -> void:
+	for ally: Player in _players.get_children():
+		if (not ally.state.dead and are_allies(healer.peer_id, ally.peer_id)
+				and ally.global_position.distance_to(healer.global_position) <= radius):
+			_heal_player(ally, amount, healer.peer_id)
+
+
+## The Discipline capstone ("parry_heal", the weapon that's out): a successful
+## parry heals the parrier and its nearest living ally (within 15 m) by amount.
+func _parry_heal(parrier: Player) -> void:
+	var node := parrier.build.weapon_effect(parrier.state.weapon_id(), "parry_heal") if parrier.build else null
+	if node == null:
+		return
+	_heal_player(parrier, node.amount, parrier.peer_id)
+	var nearest: Player = null
+	for ally: Player in _players.get_children():
+		if ally == parrier or ally.state.dead or not are_allies(parrier.peer_id, ally.peer_id):
+			continue
+		var d := ally.global_position.distance_to(parrier.global_position)
+		if d <= 15.0 and (nearest == null or d < nearest.global_position.distance_to(parrier.global_position)):
+			nearest = ally
+	if nearest:
+		_heal_player(nearest, node.amount, parrier.peer_id)
+
+
+## Spinning Staves / Staff Spin ("deflects"): true if `target` is in such an
+## ability (windup through its last hit window) and the projectile isn't an
+## ally's. Reported as a 0-damage block.
+func deflects(target: Player, owner_id: int) -> bool:
+	var ability := target.state.current_ability(target.params)
+	if (ability == null or not ability.deflects or are_allies(owner_id, target.peer_id)
+			or target.state.attack_tick >= ability.recovery_start_tick()):
+		return false
+	_deflections += 1
+	_send_hit(owner_id, target.peer_id, 0.0, HIT_BLOCKED)
+	return true
+
+
+## The Paladin Wings' Aegis capstone ("wall_reflect", on the wall owner's Wing
+## tree, applies_to = the wall's zone kind): a projectile stopped by that wall
+## flies back the way it came, now its owner's.
+func reflect_projectile(wall: Zone, proj: Projectile, at: Vector3) -> void:
+	var owner := _player_by_id(wall.owner_id)
+	var node := owner.build.wing_effect("wall_reflect") if owner and owner.build else null
+	if node == null or node.applies_to != wall.params.id or proj.attack == null:
+		return
+	var back := -Vector2(proj.velocity.x, proj.velocity.z)
+	if back.is_zero_approx():
+		return
+	_reflections += 1
+	_projectiles.server_fire_from(owner, proj.attack, at - Vector3(proj.velocity.normalized().x,
+			0.0, proj.velocity.normalized().z) * 0.6, PlayerState.yaw_for_direction(back),
+			proj.damage_scale)
+
+
+## Guardian Wing ("damage_share" on the target, applied by a living player):
+## that fraction of a hit's damage goes to the guardian instead. Returns the
+## amount taken off the target.
+func _guardian_share(target: Player, damage: float, attacker_id: int) -> float:
+	var share := target.state.statuses.damage_share(target.params.statuses)
+	if share[0] < 0 or damage <= 0.0:
+		return 0.0
+	var guardian := _player_by_id(target.state.statuses.source_of(share[0]))
+	if guardian == null or guardian == target or guardian.state.dead:
+		return 0.0
+	var taken: float = damage * share[1]
+	guardian.health = maxf(0.0, guardian.health - taken)
+	_shared_damage += taken
+	if guardian.health <= 0.0:
+		_kill_player(guardian)
+		_send_hit(attacker_id, guardian.peer_id, taken, HIT_DEFEATED)
+	else:
+		_send_hit(attacker_id, guardian.peer_id, taken, HIT_STATUS_DAMAGE)
+	return taken
+
+
+## Kindle Life: raises a fallen ally where it lies, like a Rebirth, whatever its
+## Ember or Rebirth cooldown (it doesn't start the cooldown either).
+func _kindle_life(target: Player) -> void:
+	target.respawn_at_tick = -1
+	_rebirth(target)
+	_kindled += 1
+
+
+## Ember a dying player is let off its Rebirth (the Paladin Wings' Purifier
+## passive "rebirth_discount": amount, from a living ally within threshold m
+## who has it). The largest counts.
+func _rebirth_discount(dying: Player) -> float:
+	var best := 0.0
+	for ally: Player in _players.get_children():
+		if ally == dying or ally.state.dead or ally.build == null or not are_allies(ally.peer_id, dying.peer_id):
+			continue
+		var node := ally.build.wing_effect("rebirth_discount")
+		if node and ally.global_position.distance_to(dying.global_position) <= node.threshold:
+			best = maxf(best, node.amount)
+	return best
+
+
+## The Longstaff's Sanctuary capstone ("zone_ally_status", applies_to = a zone
+## kind): allies in the owner's zone of that kind get the node's status.
+func _sanctuary(zone: Zone, ally: Player) -> void:
+	var owner := _player_by_id(zone.owner_id)
+	if owner == null or owner.build == null:
+		return
+	for weapon_id in owner.build.weapons:
+		var node := owner.build.weapon_effect(weapon_id, "zone_ally_status")
+		if node and node.applies_to == zone.params.id:
+			_give_status(zone.owner_id, ally, ally.params.statuses.index_of(node.status), 1, -1)
+			return
+
+
+## The Longstaff's Judgment capstone ("judgment_mark", applies_to = a zone
+## kind): an enemy whose swing reaches a player standing in such a zone of a
+## player with the node gets the node's status from that player.
+func _judgment(enemy: Enemy, target: Player) -> void:
+	for kind in _judgment_kinds():
+		for zone in zones.zones_at(target.global_position, kind):
+			var owner := _player_by_id(zone.owner_id)
+			if owner == null or not are_allies(owner.peer_id, target.peer_id):
+				continue
+			for weapon_id in owner.build.weapons:
+				var node := owner.build.weapon_effect(weapon_id, "judgment_mark")
+				if node and node.applies_to == kind and _give_status(owner.peer_id, enemy,
+						enemy.status_defs.index_of(node.status), 1, -1):
+					_judgments += 1
+					return
+
+
+## Zone kinds some player's Judgment capstone watches.
+func _judgment_kinds() -> PackedStringArray:
+	var kinds := PackedStringArray()
+	for player: Player in _players.get_children():
+		if player.build == null:
+			continue
+		for weapon_id in player.build.weapons:
+			var node := player.build.weapon_effect(weapon_id, "judgment_mark")
+			if node and not node.applies_to in kinds:
+				kinds.append(node.applies_to)
+	return kinds
+
+
 # --- Zones and summons (server; ZoneSystem places and ticks them) ---
 
 ## Where each living player stands, as enemies see it (peer id -> position):
@@ -1249,6 +1475,13 @@ func zone_effect(zone: Zone, target: Node3D) -> void:
 	var p := zone.params
 	var player := target as Player
 	var enemy := target as Enemy
+	if p.affects == ZoneParams.AFFECTS_BOTH and player and are_allies(zone.owner_id, player.peer_id):
+		# Sanctified Ground: allies are healed (and, with the Sanctuary capstone,
+		# protected), never hurt.
+		if p.heal > 0.0:
+			_heal_player(player, p.heal, zone.owner_id)
+		_sanctuary(zone, player)
+		return
 	if p.damage > 0.0:
 		if player:
 			var damage := (p.damage * player.state.statuses.damage_taken_multiplier(player.params.statuses)
@@ -1265,7 +1498,7 @@ func zone_effect(zone: Zone, target: Node3D) -> void:
 			_ember_from_damage(zone.owner_id, null, damage)
 			if _damage_enemy(enemy, damage, 0, zone.owner_id, HIT_STATUS_DAMAGE):
 				return
-	if p.heal > 0.0 and player:
+	if p.heal > 0.0 and player and p.affects != ZoneParams.AFFECTS_BOTH:
 		_heal_player(player, p.heal, zone.owner_id)
 	if not p.applies_status.is_empty() and not (player and player.state.dead):
 		_give_status(zone.owner_id, target, StatusDefs.current().index_of(p.applies_status),
@@ -1498,6 +1731,9 @@ func _print_juggernaut_summary() -> void:
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
 			_roar_guards])
 	print("SUMMARY summons decoy_bursts=%d shadow_swaps=%d" % [_decoy_bursts, _shadow_swaps])
+	print("SUMMARY paladin heal_pulses=%d cleanses=%d blessings=%d deflections=%d reflections=%d shared_damage=%d kindled=%d judgments=%d" % [
+			_heal_pulses, _cleanses, _blessings, _deflections, _reflections, roundi(_shared_damage),
+			_kindled, _judgments])
 	print("SUMMARY mage ally_supports=%d shields=%d absorbed=%d focus_refunds=%d aura_refunds=%d" % [
 			_ally_supports, _shields, roundi(_absorbed), _focus_refunds, _aura_refunds])
 	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
@@ -1512,7 +1748,7 @@ func _print_juggernaut_summary() -> void:
 func _kill_player(target: Player) -> void:
 	target.state.kill()
 	_deaths += 1
-	if target.state.start_rebirth(target.params):
+	if target.state.start_rebirth(target.params, _rebirth_discount(target)):
 		target.respawn_at_tick = -1
 		_rebirths_started += 1
 		print("[server] peer %d rebirth started" % target.peer_id)
@@ -1550,6 +1786,7 @@ func _try_parry(attacker_id: int, attacker_pos: Vector3, target: Player) -> bool
 		face = PlayerState.yaw_for_direction(to_attacker)
 	target.state.start_counter(target.params, face)
 	_parries += 1
+	_parry_heal(target)
 	_send_hit(attacker_id, target.peer_id, 0.0, HIT_PARRIED)
 	return true
 

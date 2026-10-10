@@ -46,6 +46,10 @@ var launch_tick := 0
 ## with the nearest target you Marked within swap_range m.
 var swap_places := false
 var swap_range := 0.0
+## While it's active (windup to the end of its last hit window), hostile
+## projectiles that reach the user are deflected: stopped, no damage (Spinning
+## Staves, Staff Spin). Server.
+var deflects := false
 ## Parry: during the hit windows, a hit from within parry_arc (full width,
 ## radians) in front is negated and answered with the `counter` ability.
 var parry_arc := 0.0
@@ -132,6 +136,7 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 	a.launch_tick = roundi(float(Tuning.get_optional(file, section, "launch_time", 0.0)) * tps)
 	a.swap_places = Tuning.get_optional(file, section, "swap_places", false)
 	a.swap_range = Tuning.get_optional(file, section, "swap_range", 0.0)
+	a.deflects = Tuning.get_optional(file, section, "deflects", false)
 	a.iframe_start_tick = roundi(float(Tuning.get_optional(file, section, "iframe_start", 0.0)) * tps)
 	a.iframe_end_tick = roundi(float(Tuning.get_optional(file, section, "iframe_end", 0.0)) * tps)
 	a.parry_arc = deg_to_rad(Tuning.get_optional(file, section, "parry_arc", 0.0))

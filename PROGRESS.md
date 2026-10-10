@@ -50,7 +50,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|---|
 | Combat | Action combat: light/heavy, block, dodge with i-frames, stamina, hitbox melee | Built |
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (6 weapons) |
-| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | Fighter, Juggernaut, Assassin, Ranger, Mage built (not yet: the Paladin; homing, ability charges, true stealth) |
+| Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | All six classes built (not yet: homing, ability charges, true stealth, Updraft's hover, Ricochet/Recall) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
 | Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
@@ -72,8 +72,8 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 5. Persistence | Not started |
 | 6. One zone, then playtest with real people | Not started |
 
-**Sessions 32–35:** the **Assassin**, **Ranger**, zones and summons, and the **Mage**,
-all unplaytested; see §4.
+**Sessions 32–36:** the **Assassin**, **Ranger**, zones and summons, the **Mage** and
+the **Paladin**: every class in `design/classes.md` is built. All unplaytested; see §4.
 
 **Latest state (session 28):** Husks drop personal loot; F picks it up; I opens the
 inventory with equipped gear; gear changes damage, crits, armor, max health, block
@@ -192,7 +192,8 @@ Brief: two or three node types, one refining step, one crafting station, tradesk
 Order from `design/classes.md`: ~~Assassin~~ (built in session 32 except Ember Double,
 Shadow Swap, Ricochet and Recall, which need decoys/stealth/new projectile kinds)
 → ~~Ranger~~ (session 33 except Tripwire, Smoke Bolt, Fire Trail, Seeker Spark, the
-Trapper and Windrider capstones and Updraft's real hover) → ~~Mage~~ (session 35, everything in the design) → **Paladin**.
+Trapper and Windrider capstones and Updraft's real hover) → ~~Mage~~ (session 35, everything in the design) → ~~Paladin~~ (session 36, everything in
+the design). **The class track is done** apart from the small leftovers below.
 Zones and summons (session 34) built Tripwire, Smoke Bolt, Fire Trail, Arrow Rain's
 zone, Ember Double, Shadow Swap and the Trapper and Mirror Image capstones. Still
 waiting: homing projectiles (Seeker Spark), ability charges (Second Step, Second Wind),
@@ -284,6 +285,19 @@ it heal and stand back up 4 s after you stop? It drops nothing.
   Q/E/R/Z/C), Wingfall.
 - Models: the staff with its orb, the glowing gauntlet.
 
+**Paladin (session 36, `run_local_test.ps1 -Class paladin`, `-Party` for the support):**
+- Shortstaffs: Consecrating Strikes healing you/the bot as you hit; Uplifting Blow;
+  Twin Guard's parry + counter (Guarded Grace capstone heals); Spinning Staves
+  deflecting the bot's throws ("Blocked"); Rush to Aid's Ward; Rebuke; Radiant Rhythm
+  (every 4th hit heals).
+- Longstaff: Sanctified Ground (allies healed, Husks burning; Sanctuary and Judgment
+  capstones), Sweeping Rebuke, Guardian's Leap, Staff Spin while walking, Smite's stun,
+  Benediction.
+- Wings: Sheltering Wings (projectiles stop, people pass; Mirror Aegis reflects them),
+  Cleansing Flame, Guardian Wing (you take 30% of the linked ally's hits), Phoenix
+  Blessing (an extra Rebirth that ignores the cooldown, taken back after 30 s), Kindle
+  Life (raise the fallen bot), Ember Vigil (allies near you Rebirth with 10 less Ember).
+
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
 
 **Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
@@ -356,6 +370,15 @@ Mage (session 35):
 - Searing Ray and Siphon are channels: hit windows on the normal attack timeline (a dodge
   cancels the recovery only).
 
+Paladin (session 36):
+- Rush to Aid and Guardian's Leap go straight ahead (aim at the ally): there's no
+  ally targeting. Guardian Wing links the allies in a 12 m line in front.
+- Spinning Staves and Staff Spin deflect hostile projectiles from any direction while
+  they're active.
+- Phoenix Blessing's extra Rebirth is taken back after 30 s if unused; Kindle Life
+  raises the fallen at 30% health (the Rebirth's) without using their Rebirth.
+- Guardian Link moves 30% of hit damage (not damage over time or zones) to the Paladin.
+
 Open questions for coming steps:
 - **Item weight / encumbrance:** in the original brief. Build it (and how: a carry
   limit that slows you?) or drop it?
@@ -392,8 +415,11 @@ Networking:
   clients; no render smoothing after a correction (step 19).
 - Server and client read tuning separately: different `data/*.cfg` files mean constant
   corrections (step 19: send tuning on connect).
-- About 1 smoke run in 15–20 shows a few (≤4) small unexpected corrections on flat ground
-  (session 35 also saw one at seq 8, right after spawning)
+- About 1 smoke run in 15–20 shows a few (≤4) small unexpected corrections on flat ground.
+  **To chase (sessions 34–36):** in long back-to-back matrices about 1 run in 4 showed
+  one correction, mostly at seq 7–8 right after spawning (server y 0.0008 on the
+  floor, predicted 0.0), in Juggernaut, Mage and Paladin runs; 6 isolated runs each of
+  this morning's code and today's head showed none
   (~0.1 m sideways, identical `PlayerState`, so it's in the physics step). The smoke
   test tolerates ≤5; run with `--verbose` for details.
 - When 9 bots quit at once the server had one ~100 ms tick (disconnect handling).
@@ -467,6 +493,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 33 | 2026-10-10 | Plumage Flash blinds (`blind`: HUD haze, enemy misses). The Ranger: Longbow (Hunter's Mark, True Flight pierce, Running Shot free movement in the sim), Crossbow (Loaded Chamber), Firebolts (Burn, Ignite, Flare, Inferno), Wings Gust Roll, Tailwind, Backdraft, Updraft (new sim statuses: haste, roll speed/cost, slow fall; a real self-launch). 472 tests; smoke Fighter, -Party, Juggernaut, Assassin, Ranger, Ranger -Party pass with 0 corrections (Linux quit race aside) |
 | 34 | 2026-10-10 | Zones and summons (`data/zones.cfg`, World/Zones): pulse zones, traps, decoys, walls. Shield Wall redesign (a wall enemies can't pass, stops hostile projectiles); Arrow Rain zone, Tripwire + Rearm, Smoke Bolt, Fire Trail, Ember Double (decoy, visual stealth), Shadow Swap, Mirror Image. Smoke: zone abilities slotted first by the bot; 500-health Husks, every heavy pushes and a 1.5 s wall so the force check isn't luck. 478 tests; smoke all classes pass (Linux quit race aside) |
 | 35 | 2026-10-10 | The Mage: Great Staff (Meteor Fall, Flame Wall, Searing Ray channel ramp, Blink, Pyroclasm; Wildfire Spread, Clear Mind), Gauntlet (Mending Beam, Renewal Pulse, Siphon lifesteal, Ward absorb shields, Life Spore ally trap, Withering Touch; Overflowing Life, Shared Vitality), Wings (Phoenix Aura, Binding Embers, Searing Glare silence, Wingfall; Rekindle, Hushing Embers). Weapon abilities cost Ember; Mage Ember gain ×2. Zones: solid flag, ally traps, growth. Smoke: Mage heavies push, 400-health Husks. 489 tests; smoke all classes pass (Linux quit race aside) |
+| 36 | 2026-10-10 | The Paladin: Dual Shortstaffs (Consecrating Strikes, Twin Guard, Uplifting Blow, Spinning Staves deflecting, Rush to Aid, Rebuke; Radiant Rhythm, Guarded Grace), Longstaff (Sanctified Ground both-sides zone, Sweeping Rebuke, Guardian's Leap, Staff Spin, Smite, Benediction; Sanctuary, Judgment), Wings (Sheltering Wings, Cleansing Flame, Guardian Wing damage share, Phoenix Blessing, Kindle Life; Purifier Rebirth passives, Mirror Aegis reflect, Everflame). The class track is complete. Smoke skips projectiles for classes that throw nothing. 496 tests; smoke all classes pass apart from known luck checks and the Linux quit race |
 
 ---
 

@@ -59,6 +59,11 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=weapon_throwing_knives/heavy/force_distance=0.4',
     '--tune=weapon_great_staff/heavy/force_distance=0.4',
     '--tune=weapon_gauntlet/heavy/force_distance=0.4',
+    '--tune=weapon_dual_shortstaffs/heavy/force_distance=0.4',
+    '--tune=weapon_longstaff/heavy/force_distance=0.4',
+    # The Paladin's own statuses on Husks (Smite, Sanctified Ground) depend on
+    # its focus cycle, so its Shortstaffs heavy marks Exposed in this test.
+    '--tune=weapon_dual_shortstaffs/heavy/applies_status=exposed',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # More throws per run (each weapon is out for about one cycle), so a
     # projectile hit doesn't hang on one or two throws.
@@ -253,7 +258,12 @@ if (-not $emberSummary) {
 # at range (and in the ability phase); at least one must hit a player or a
 # Husk, and party members' projectiles must never hit each other.
 $projSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY projectiles fired=(\d+) hits=(\d+) on_players=(\d+) on_enemies=(\d+) ally_hits=(\d+) ally_ignored=(\d+)'
-if (-not $projSummary) {
+# A class whose weapons throw nothing (the Paladin) skips this check.
+$throws = @($classWeapons | Where-Object {
+    Select-String -Path (Join-Path $ProjectRoot "data\weapon_$_.cfg") -Pattern '^projectile=' -Quiet })
+if ($throws.Count -eq 0) {
+    Write-Host "SKIP projectiles: no $Class weapon throws anything" -ForegroundColor Yellow
+} elseif (-not $projSummary) {
     Write-Host "FAIL projectiles: no summary" -ForegroundColor Red
     $failed = $true
 } elseif ([int]$projSummary.Matches[0].Groups[1].Value -lt 1) {

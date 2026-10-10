@@ -79,7 +79,8 @@ func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float) -> Zone:
 	if p.decoy:
 		_decoys += 1
 	if p.wall and p.solid:
-		_add_wall_body(zone)
+		if p.blocks_enemies:
+			_add_wall_body(zone)
 		_walls_placed += 1
 	for peer_id in world._connected_player_ids():
 		_receive_zone.rpc_id(peer_id, zone.id, kind, zone.position, yaw, zone.ticks_left)
@@ -119,6 +120,16 @@ func server_step() -> void:
 			_end(zone)
 
 
+## Server: the live zones of `kind` standing on `point` (Sanctified Ground's
+## Judgment capstone).
+func zones_at(point: Vector3, kind: String) -> Array[Zone]:
+	var result: Array[Zone] = []
+	for zone in _active:
+		if zone.params.id == kind and not zone.ended and zone.contains(point):
+			result.append(zone)
+	return result
+
+
 ## Server: the newest live decoy `peer_id` placed, or null.
 func decoy_for(peer_id: int) -> Zone:
 	for i in range(_active.size() - 1, -1, -1):
@@ -135,17 +146,20 @@ func server_move(zone: Zone, to: Vector3) -> void:
 		_receive_zone_moved.rpc_id(peer_id, zone.id, to)
 
 
-## Server: the fraction (0..1) along a -> b where a projectile of `radius`
-## thrown by owner_id first meets a wall that isn't its own side's, or -1.
-func wall_hit(a: Vector3, b: Vector3, radius: float, owner_id: int) -> float:
+## Server: [fraction (0..1) along a -> b where a projectile of `radius` thrown
+## by owner_id first meets a wall that isn't its own side's, that Zone], or
+## [-1, null].
+func wall_hit(a: Vector3, b: Vector3, radius: float, owner_id: int) -> Array:
 	var best := -1.0
+	var hit: Zone = null
 	for zone in _active:
 		if not zone.params.solid or world.are_allies(zone.owner_id, owner_id):
 			continue
 		var t := zone.blocks_segment(a, b, radius)
 		if t >= 0.0 and (best < 0.0 or t < best):
 			best = t
-	return best
+			hit = zone
+	return [best, hit]
 
 
 ## Server: a projectile stopped at a wall (counted for the summary).
@@ -174,11 +188,12 @@ func _end(zone: Zone) -> void:
 ## enemies standing in it.
 func _targets_in(zone: Zone) -> Array[Node3D]:
 	var result: Array[Node3D] = []
-	var hostile := zone.params.affects == ZoneParams.AFFECTS_HOSTILE
+	var both := zone.params.affects == ZoneParams.AFFECTS_BOTH
+	var hostile := zone.params.affects == ZoneParams.AFFECTS_HOSTILE or both
 	for player: Player in players.get_children():
 		if player.state.dead or not zone.contains(player.global_position):
 			continue
-		if world.are_allies(zone.owner_id, player.peer_id) != hostile:
+		if both or world.are_allies(zone.owner_id, player.peer_id) != hostile:
 			result.append(player)
 	if hostile:
 		for enemy: Enemy in enemies.get_children():

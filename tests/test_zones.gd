@@ -91,7 +91,8 @@ func test_every_zone_in_data_loads() -> void:
 		assert_true(p != null, section)
 		assert_true(p.trigger in [ZoneParams.TRIGGER_PULSE, ZoneParams.TRIGGER_TRAP,
 				ZoneParams.TRIGGER_NONE], section + " trigger")
-		assert_true(p.affects in [ZoneParams.AFFECTS_HOSTILE, ZoneParams.AFFECTS_ALLY],
+		assert_true(p.affects in [ZoneParams.AFFECTS_HOSTILE, ZoneParams.AFFECTS_ALLY,
+				ZoneParams.AFFECTS_BOTH],
 				section + " affects")
 		if not p.applies_status.is_empty():
 			assert_true(StatusDefs.current().index_of(p.applies_status) >= 0,

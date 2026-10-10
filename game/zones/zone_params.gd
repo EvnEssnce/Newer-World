@@ -6,6 +6,9 @@ extends RefCounted
 
 const AFFECTS_HOSTILE := "hostile"
 const AFFECTS_ALLY := "ally"
+## Both sides: allies get its heal, hostiles its damage and status
+## (Sanctified Ground).
+const AFFECTS_BOTH := "both"
 const TRIGGER_PULSE := "pulse"
 const TRIGGER_TRAP := "trap"
 const TRIGGER_NONE := "none"
@@ -45,6 +48,9 @@ var wall_depth := 0.0
 ## Solid (with `wall`): enemies collide with it and hostile projectiles stop at
 ## it (Shield Wall). A wall that isn't solid is just a box-shaped area (Flame Wall).
 var solid := false
+## (with solid) false = projectiles stop at it but enemies walk through
+## (Sheltering Wings).
+var blocks_enemies := true
 ## Client look: "disc", "cloud", "rain", "trap", "decoy" or "wall", and its color.
 var visual := "disc"
 var color := Color.WHITE
@@ -85,6 +91,7 @@ static func from_tuning(kind: String, tps: float) -> ZoneParams:
 	p.wall_width = Tuning.get_optional(f, s, "width", 0.0)
 	p.wall_depth = Tuning.get_optional(f, s, "depth", 0.0)
 	p.solid = Tuning.get_optional(f, s, "solid", false)
+	p.blocks_enemies = Tuning.get_optional(f, s, "blocks_enemies", true)
 	p.visual = Tuning.get_optional(f, s, "visual", "disc")
 	p.color = Tuning.get_optional(f, s, "color", Color.WHITE)
 	return p

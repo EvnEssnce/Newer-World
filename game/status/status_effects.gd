@@ -314,6 +314,26 @@ func blind_amount(defs: StatusDefs) -> float:
 	return result
 
 
+## Consecrating Strikes: (heal per connecting step, radius) of the strongest
+## hit_heal status; zero without one.
+func hit_heal(defs: StatusDefs) -> Vector2:
+	var result := Vector2.ZERO
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.hit_heal > result.x:
+			result = Vector2(def.hit_heal, def.hit_heal_radius)
+	return result
+
+
+## Guardian Wing: [index, fraction] of a damage_share status, or [-1, 0].
+func damage_share(defs: StatusDefs) -> Array:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.damage_share > 0.0:
+			return [e.status, def.damage_share]
+	return [-1, 0.0]
+
+
 ## True while silenced (no abilities).
 func silenced(defs: StatusDefs) -> bool:
 	for e in entries:

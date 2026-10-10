@@ -123,6 +123,26 @@ func server_fire_attack(player: Player, attack: AttackParams) -> void:
 			print("[server] peer %d throws %s #%d" % [player.peer_id, p.id, proj.id])
 
 
+## Server: throws `attack`'s projectile(s) owned by `player` from `origin` along
+## `yaw`, with damage_scale already worked out (a reflection: Sheltering Wings).
+func server_fire_from(player: Player, attack: AttackParams, origin: Vector3, yaw: float,
+		damage_scale: float) -> void:
+	var p := ProjectileParams.get_kind(attack.projectile) if attack else null
+	if p == null:
+		return
+	var proj := Projectile.new(p, origin, Projectile.launch_velocity_for(p, yaw, 0.0))
+	proj.id = _next_id
+	_next_id += 1
+	proj.owner_id = player.peer_id
+	proj.attack = attack
+	proj.damage_scale = damage_scale
+	_active.append(proj)
+	_fired += 1
+	for peer_id in world._connected_player_ids():
+		_receive_spawn.rpc_id(peer_id, proj.id, p.id, proj.owner_id, origin, proj.velocity,
+				world.server_tick())
+
+
 ## Yaw offset of projectile i of count, fanned evenly over spread radians.
 static func spread_offset(i: int, count: int, spread: float) -> float:
 	if count <= 1:
@@ -174,11 +194,14 @@ func _collide(proj: Projectile) -> void:
 			wall_point = hit.position
 			limit = a.distance_to(wall_point) / a.distance_to(b)
 	# Summoned walls (Shield Wall) stop hostile projectiles, even returning ones.
+	var summoned: Zone = null
 	if not a.is_equal_approx(b):
-		var t := world.zones.wall_hit(a, b, proj.params.hit_radius, proj.owner_id)
+		var wall := world.zones.wall_hit(a, b, proj.params.hit_radius, proj.owner_id)
+		var t: float = wall[0]
 		if t >= 0.0 and t < limit:
 			limit = t
 			wall_point = a.lerp(b, t)
+			summoned = wall[1]
 			world.zones.note_projectile_stopped()
 	var candidates: Array[Array] = []  # [fraction, Player or Enemy]
 	var radius := proj.params.hit_radius
@@ -209,6 +232,8 @@ func _collide(proj: Projectile) -> void:
 			return
 	if limit < 1.0:
 		proj.hit_wall(wall_point)
+		if summoned:
+			world.reflect_projectile(summoned, proj, wall_point)
 
 
 ## Where the projectile came from (for guards, parries and knockback): a point
@@ -223,6 +248,9 @@ func _source(proj: Projectile, at: Vector3) -> Array:
 ## Server: resolves a hit on a player. Returns false if it stopped (or turned).
 func _hit_player(proj: Projectile, target: Player, at: Vector3) -> bool:
 	var source := _source(proj, at)
+	if world.deflects(target, proj.owner_id):
+		proj.hit_wall(at)  # deflected (Spinning Staves): stops, no damage
+		return false
 	var allied := world.are_allies(proj.owner_id, target.peer_id)
 	var result := world.resolve_strike(proj.owner_id, source[0], source[1], proj.attack,
 			proj.results, target, proj.damage_scale, proj.execute)

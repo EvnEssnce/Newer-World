@@ -178,6 +178,12 @@ var last_heavy_hit_tick := -1
 ## Server: what's left of this player's Ward shield (only while it has the
 ## absorb status; World._absorb).
 var absorb := 0.0
+## Server: counts this player's attacks that connect, once each (the Dual
+## Shortstaffs' Devotion capstone, "hit_pulse_heal").
+var hit_counter := HeavyCounter.new()
+## Server: server_tick when this player's Phoenix Blessing extra Rebirth runs
+## out (taken back if unused); -1 = none.
+var blessing_until_tick := -1
 ## Server: the player whose knockback is moving this one and who has the
 ## Tempest Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
@@ -672,7 +678,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	var ability_id := ability.id if ability else ""
 
 	var spin := 0.0
-	if ability_id in ["whirlwind_edge", "vortex", "talon_spin"]:
+	if ability_id in ["whirlwind_edge", "vortex", "talon_spin", "spinning_staves"]:
 		spin = _spin_offset(ability, attack_tick)
 	var lift := ability.leap_lift(attack_tick) if ability else 0.0
 	_model.rotation.y = yaw + spin
@@ -900,7 +906,7 @@ static func _frenzy_pitches(attack: AttackParams, tick: float, chop: float) -> V
 # Built in code: a claw (three blades) on each fist, or a knife in each hand.
 # They swing like the Dual Axes (_axe_pitches: pitch on a pivot at each hand).
 
-const ASSASSIN_MODELS := ["dual_talons", "throwing_knives"]
+const ASSASSIN_MODELS := ["dual_talons", "throwing_knives", "dual_shortstaffs", "longstaff"]
 const TALON_RIGHT_PIVOT := Vector3(0.42, 0.2, -0.15)
 const TALON_LEFT_PIVOT := Vector3(-0.42, 0.2, -0.15)
 
@@ -908,6 +914,11 @@ var _talon_right: Node3D
 var _talon_left: Node3D
 var _knife_right: Node3D
 var _knife_left: Node3D
+## The Paladin's (built and swung the same way): a short staff in each hand, or
+## one long staff in the right.
+var _shortstaff_right: Node3D
+var _shortstaff_left: Node3D
+var _longstaff: Node3D
 
 
 func _build_assassin_models() -> void:
@@ -923,28 +934,47 @@ func _build_assassin_models() -> void:
 			[Vector3(0.04, 0.04, 0.12), Vector3(0.0, 0.0, -0.02), wrap],
 			[Vector3(0.015, 0.06, 0.24), Vector3(0.0, 0.0, -0.2), steel],
 		])
+		var gold := _flat_material(Color(0.95, 0.8, 0.35), 0.5, 0.4)
+		var staff := _weapon_pivot(TALON_RIGHT_PIVOT if side > 0.0 else TALON_LEFT_PIVOT, [
+			[Vector3(0.05, 0.05, 0.9), Vector3(0.0, 0.0, -0.3), wrap],
+			[Vector3(0.08, 0.08, 0.08), Vector3(0.0, 0.0, -0.75), gold],
+		])
 		if side > 0.0:
 			_talon_right = talon
 			_knife_right = knife
+			_shortstaff_right = staff
 		else:
 			_talon_left = talon
 			_knife_left = knife
+			_shortstaff_left = staff
+	_longstaff = _weapon_pivot(TALON_RIGHT_PIVOT, [
+		[Vector3(0.06, 0.06, 2.2), Vector3(0.0, 0.0, -0.5), _flat_material(Color(0.55, 0.4, 0.25), 0.0, 0.8)],
+		[Vector3(0.12, 0.12, 0.12), Vector3(0.0, 0.0, -1.6), _flat_material(Color(0.95, 0.8, 0.35), 0.5, 0.4)],
+	])
 
 
-## Shows the Talons or Knives (hidden for other models), swung like the axes.
+## Shows the Talons, Knives or the Paladin's staves (hidden for other models),
+## swung like the axes.
 func _show_assassin(model: String, attack: AttackParams, attack_type: int, ability_id: String,
 		attack_tick: float, lowered: float) -> void:
 	var talons := model == "dual_talons"
 	var knives := model == "throwing_knives"
+	var shortstaffs := model == "dual_shortstaffs"
 	_talon_right.visible = talons
 	_talon_left.visible = talons
 	_knife_right.visible = knives
 	_knife_left.visible = knives
-	if not talons and not knives:
+	_shortstaff_right.visible = shortstaffs
+	_shortstaff_left.visible = shortstaffs
+	_longstaff.visible = model == "longstaff"
+	if not model in ASSASSIN_MODELS:
 		return
 	var pitches := _axe_pitches(attack, attack_type, ability_id, attack_tick)
-	var right := _talon_right if talons else _knife_right
-	var left := _talon_left if talons else _knife_left
+	if model == "longstaff":
+		_longstaff.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
+		return
+	var right := _talon_right if talons else (_knife_right if knives else _shortstaff_right)
+	var left := _talon_left if talons else (_knife_left if knives else _shortstaff_left)
 	right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
 	left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
 
