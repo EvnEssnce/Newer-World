@@ -32,9 +32,9 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
-    # Husks at 500 health: low enough that they die (loot), high enough that
+    # Husks at 400 health: low enough that they die (loot), high enough that
     # most heavies land on a live one (a killing blow doesn't knock back).
-    '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=500',
+    '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=400',
     '--tune=enemy_husk/stats/respawn_time=2',
     # Bloodlust lasts the whole run, so any later hit proves bleed works.
     '--tune=status_effects/status_bloodlust/duration=30',
@@ -57,6 +57,8 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=weapon_spear/heavy/force_distance=0.4',
     '--tune=weapon_dual_axes/heavy/force_distance=0.4',
     '--tune=weapon_throwing_knives/heavy/force_distance=0.4',
+    '--tune=weapon_great_staff/heavy/force_distance=0.4',
+    '--tune=weapon_gauntlet/heavy/force_distance=0.4',
     '--tune=wings_fighter/ability_diving_strike/force_distance=0.5',
     # More throws per run (each weapon is out for about one cycle), so a
     # projectile hit doesn't hang on one or two throws.

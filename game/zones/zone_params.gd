@@ -20,7 +20,8 @@ var height := 2.0
 var duration_ticks := 60
 ## "pulse": every interval_ticks (the first after first_pulse_ticks) its effect
 ## reaches everything of `affects` inside. "trap": once armed (arm_ticks), the
-## first hostile inside triggers it once; then it re-arms (rearms) or ends.
+## first target of its `affects` side inside triggers it once (a heal orb for
+## allies: Life Spore); then it re-arms (rearms) or ends.
 ## "none": no effect of its own (a decoy, a wall).
 var trigger := TRIGGER_PULSE
 var interval_ticks := 30
@@ -41,6 +42,9 @@ var decoy := false
 var wall := false
 var wall_width := 0.0
 var wall_depth := 0.0
+## Solid (with `wall`): enemies collide with it and hostile projectiles stop at
+## it (Shield Wall). A wall that isn't solid is just a box-shaped area (Flame Wall).
+var solid := false
 ## Client look: "disc", "cloud", "rain", "trap", "decoy" or "wall", and its color.
 var visual := "disc"
 var color := Color.WHITE
@@ -80,6 +84,7 @@ static func from_tuning(kind: String, tps: float) -> ZoneParams:
 	p.wall = Tuning.get_optional(f, s, "wall", false)
 	p.wall_width = Tuning.get_optional(f, s, "width", 0.0)
 	p.wall_depth = Tuning.get_optional(f, s, "depth", 0.0)
+	p.solid = Tuning.get_optional(f, s, "solid", false)
 	p.visual = Tuning.get_optional(f, s, "visual", "disc")
 	p.color = Tuning.get_optional(f, s, "color", Color.WHITE)
 	return p

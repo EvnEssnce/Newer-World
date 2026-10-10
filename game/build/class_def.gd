@@ -12,6 +12,9 @@ var display_name := ""
 var weapons := PackedStringArray()
 ## Equipped weapon ids for a new character, one per weapon slot.
 var default_loadout := PackedStringArray()
+## Multiplies every Ember gain (the Mage spends Ember on weapon abilities, so it
+## gains more). 1 = normal.
+var ember_gain := 1.0
 
 static var _cache: Dictionary[String, ClassDef] = {}
 
@@ -32,6 +35,7 @@ static func from_tuning(class_id: String) -> ClassDef:
 	c.display_name = Tuning.get_value(file, "class", "name")
 	c.weapons = PackedStringArray(Tuning.get_value(file, "class", "weapons"))
 	c.default_loadout = PackedStringArray(Tuning.get_value(file, "class", "default_loadout"))
+	c.ember_gain = Tuning.get_optional(file, "class", "ember_gain", 1.0)
 	return c
 
 

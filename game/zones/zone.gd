@@ -18,6 +18,8 @@ var age := 0
 var rearms_left := 0
 var armed_at := 0
 var ended := false
+## Size multiplier on its radius and wall width (Conflagration grows it).
+var scale := 1.0
 
 
 func _init(p: ZoneParams, at: Vector3, facing: float, owner: int, extra_rearms := 0) -> void:
@@ -66,21 +68,22 @@ func contains(point: Vector3) -> bool:
 		return false
 	if params.wall:
 		var local := _to_local(point)
-		return absf(local.x) <= params.wall_width / 2.0 and absf(local.y) <= params.wall_depth / 2.0
-	return Vector2(point.x - position.x, point.z - position.z).length() <= params.radius
+		return (absf(local.x) <= params.wall_width * scale / 2.0
+				and absf(local.y) <= params.wall_depth / 2.0)
+	return Vector2(point.x - position.x, point.z - position.z).length() <= params.radius * scale
 
 
 ## Walls: the fraction (0..1) along a -> b where a sphere of `radius` first
 ## meets the box (wall_width x wall_depth, from the ground to height), or -1 if
 ## it doesn't. Slab test in the wall's frame.
 func blocks_segment(a: Vector3, b: Vector3, radius: float) -> float:
-	if not params.wall:
+	if not params.wall or not params.solid:
 		return -1.0
 	var la := _to_local(a)
 	var lb := _to_local(b)
-	var lo := Vector3(-params.wall_width / 2.0 - radius, position.y - radius,
+	var lo := Vector3(-params.wall_width * scale / 2.0 - radius, position.y - radius,
 			-params.wall_depth / 2.0 - radius)
-	var hi := Vector3(params.wall_width / 2.0 + radius, position.y + params.height + radius,
+	var hi := Vector3(params.wall_width * scale / 2.0 + radius, position.y + params.height + radius,
 			params.wall_depth / 2.0 + radius)
 	var from := Vector3(la.x, a.y, la.y)
 	var dir := Vector3(lb.x - la.x, b.y - a.y, lb.y - la.y)

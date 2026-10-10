@@ -5,7 +5,8 @@ extends Node3D
 ## circle, "cloud" a few smoke puffs, "rain" a circle with arrows falling into
 ## it, "trap" a small wire between two stakes (dim until armed), "decoy" a
 ## burning copy of a player's body, "wall" three tall shields across the
-## facing. Everything fades out over its last FADE_SECONDS.
+## facing, "firewall" one glowing box (Flame Wall), "orb" a floating ball over
+## a faint circle (Life Spore). Everything fades out over its last FADE_SECONDS.
 
 const FADE_SECONDS := 0.5
 const RAIN_STREAKS := 8
@@ -33,6 +34,11 @@ func setup(p: ZoneParams, yaw: float) -> void:
 			_box(Vector3(0.06, 0.5, 0.06), Vector3(p.radius * 0.8, 0.25, 0.0), 0.9)
 			_box(Vector3(0.06, 0.5, 0.06), Vector3(-p.radius * 0.8, 0.25, 0.0), 0.9)
 			_disc(p.radius, 0.12)
+		"orb":
+			_sphere(Vector3(0.0, 0.6, 0.0), 0.3, 0.8)
+			_disc(p.radius, 0.15)
+		"firewall":
+			_box(Vector3(p.wall_width, p.height, p.wall_depth), Vector3(0.0, p.height / 2.0, 0.0), 0.45)
 		"decoy":
 			var mesh := CapsuleMesh.new()
 			mesh.radius = Player.BODY_RADIUS

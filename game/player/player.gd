@@ -172,6 +172,12 @@ var throw_counter := HeavyCounter.new()
 ## Server: server_tick of this player's last light or heavy projectile release
 ## (the Crossbow's Siege capstone, "loaded_chamber"); -1 = none yet.
 var last_release_tick := -1
+## Server: server_tick of this player's last heavy that connected (the Great
+## Staff's Focus capstone); -1 = none yet.
+var last_heavy_hit_tick := -1
+## Server: what's left of this player's Ward shield (only while it has the
+## absorb status; World._absorb).
+var absorb := 0.0
 ## Server: the player whose knockback is moving this one and who has the
 ## Tempest Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
@@ -943,12 +949,12 @@ func _show_assassin(model: String, attack: AttackParams, attack_type: int, abili
 	left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
 
 
-# --- Ranger: Longbow, Crossbow and Firebolts models (placeholder, client) ---
+# --- Ranger and Mage: ranged weapon models (placeholder, client) ---
 # Built in code. The bow and crossbow are carried pointing down and raised
 # level while attacking; the Firebolts' ember wraps glow on both hands and
 # swing like the axes.
 
-const RANGER_MODELS := ["longbow", "crossbow", "firebolts"]
+const RANGER_MODELS := ["longbow", "crossbow", "firebolts", "great_staff", "gauntlet"]
 const BOW_PIVOT := Vector3(-0.4, 0.3, -0.25)
 const CROSSBOW_PIVOT := Vector3(0.3, 0.3, -0.2)
 ## Pitch while carried; level (0) while shooting.
@@ -958,6 +964,9 @@ var _bow: Node3D
 var _crossbow: Node3D
 var _wrap_right: Node3D
 var _wrap_left: Node3D
+## The Mage's: a tall staff with a glowing orb, and a glowing gauntlet.
+var _staff: Node3D
+var _gauntlet: Node3D
 
 
 func _build_ranger_models() -> void:
@@ -988,6 +997,17 @@ func _build_ranger_models() -> void:
 		[Vector3(0.14, 0.12, 0.16), Vector3.ZERO, ember],
 		[Vector3(0.05, 0.05, 0.2), Vector3(0.0, 0.0, -0.15), ember],
 	])
+	var life := _flat_material(Color(0.4, 1.0, 0.5), 0.0, 0.6)
+	life.emission_enabled = true
+	life.emission = Color(0.3, 0.9, 0.4)
+	_staff = _weapon_pivot(CROSSBOW_PIVOT, [
+		[Vector3(0.05, 0.05, 1.8), Vector3(0.0, 0.0, -0.4), wood],
+		[Vector3(0.18, 0.18, 0.18), Vector3(0.0, 0.0, -1.35), ember],
+	])
+	_gauntlet = _weapon_pivot(TALON_RIGHT_PIVOT, [
+		[Vector3(0.18, 0.16, 0.22), Vector3.ZERO, life],
+		[Vector3(0.12, 0.08, 0.1), Vector3(0.0, 0.0, -0.15), life],
+	])
 
 
 ## Shows the Longbow, Crossbow or Firebolts (hidden for other models).
@@ -996,9 +1016,15 @@ func _show_ranger(model: String, attack: AttackParams, attack_tick: float, lower
 	_crossbow.visible = model == "crossbow"
 	_wrap_right.visible = model == "firebolts"
 	_wrap_left.visible = model == "firebolts"
+	_staff.visible = model == "great_staff"
+	_gauntlet.visible = model == "gauntlet"
 	var aiming := 0.0 if attack != null and attack_tick >= 0.0 else RANGED_CARRY_PITCH
 	_bow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
 	_crossbow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
+	_staff.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
+	if model == "gauntlet":
+		var pitch := _axe_pitches(attack, PlayerState.ATTACK_LIGHT, "", attack_tick).x
+		_gauntlet.rotation.x = lerpf(pitch, WEAPON_LOWERED, lowered)
 	if model == "firebolts":
 		var pitches := _axe_pitches(attack, PlayerState.ATTACK_LIGHT, "", attack_tick)
 		_wrap_right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)

@@ -40,6 +40,7 @@ var _trap_triggers := 0
 var _decoys := 0
 var _walls_placed := 0
 var _projectiles_stopped := 0
+var _grown := 0
 # Client: id -> [Zone (its own countdown), ZoneVisual]
 var _shown: Dictionary[int, Array] = {}
 
@@ -77,7 +78,7 @@ func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float) -> Zone:
 	_spawned += 1
 	if p.decoy:
 		_decoys += 1
-	if p.wall:
+	if p.wall and p.solid:
 		_add_wall_body(zone)
 		_walls_placed += 1
 	for peer_id in world._connected_player_ids():
@@ -104,8 +105,9 @@ func server_step() -> void:
 			for target in _targets_in(zone):
 				world.zone_effect(zone, target)
 				_affected += 1
+			_grow(zone)
 		elif zone.is_armed():
-			var first := _first_hostile_in(zone)
+			var first := _first_target_in(zone)
 			if first:
 				world.zone_effect(zone, first)
 				_affected += 1
@@ -138,7 +140,7 @@ func server_move(zone: Zone, to: Vector3) -> void:
 func wall_hit(a: Vector3, b: Vector3, radius: float, owner_id: int) -> float:
 	var best := -1.0
 	for zone in _active:
-		if not zone.params.wall or world.are_allies(zone.owner_id, owner_id):
+		if not zone.params.solid or world.are_allies(zone.owner_id, owner_id):
 			continue
 		var t := zone.blocks_segment(a, b, radius)
 		if t >= 0.0 and (best < 0.0 or t < best):
@@ -152,9 +154,9 @@ func note_projectile_stopped() -> void:
 
 
 func print_summary() -> void:
-	print("SUMMARY zones spawned=%d pulses=%d affected=%d trap_triggers=%d decoys=%d walls=%d projectiles_stopped=%d" % [
+	print("SUMMARY zones spawned=%d pulses=%d affected=%d trap_triggers=%d decoys=%d walls=%d projectiles_stopped=%d grown=%d" % [
 			_spawned, _pulses, _affected, _trap_triggers, _decoys, _walls_placed,
-			_projectiles_stopped])
+			_projectiles_stopped, _grown])
 
 
 func _end(zone: Zone) -> void:
@@ -185,16 +187,26 @@ func _targets_in(zone: Zone) -> Array[Node3D]:
 	return result
 
 
-## A trap's victim: the first hostile standing in it (enemies first), or null.
-func _first_hostile_in(zone: Zone) -> Node3D:
-	for enemy: Enemy in enemies.get_children():
-		if not enemy.dead and zone.contains(enemy.global_position):
-			return enemy
-	for player: Player in players.get_children():
-		if (not player.state.dead and not world.are_allies(zone.owner_id, player.peer_id)
-				and zone.contains(player.global_position)):
-			return player
-	return null
+## A trap's target: the first of its `affects` side standing in it (enemies
+## first for a hostile one), or null.
+func _first_target_in(zone: Zone) -> Node3D:
+	var targets := _targets_in(zone)
+	for target in targets:
+		if target is Enemy:
+			return target
+	return targets[0] if not targets.is_empty() else null
+
+
+## Conflagration: a pulse zone whose owner has "zone_grow" for its status grows
+## (World.zone_growth: [per pulse, at most]); clients are told its new scale.
+func _grow(zone: Zone) -> void:
+	var growth := world.zone_growth(zone)
+	if growth.x <= 0.0 or zone.scale >= growth.y:
+		return
+	zone.scale = minf(growth.y, zone.scale + growth.x)
+	_grown += 1
+	for peer_id in world._connected_player_ids():
+		_receive_zone_scaled.rpc_id(peer_id, zone.id, zone.scale)
 
 
 func _add_wall_body(zone: Zone) -> void:
@@ -242,6 +254,13 @@ func _receive_zone_moved(id: int, to: Vector3) -> void:
 	if _shown.has(id):
 		(_shown[id][0] as Zone).position = to
 		(_shown[id][1] as ZoneVisual).global_position = to
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_zone_scaled(id: int, new_scale: float) -> void:
+	if _shown.has(id):
+		(_shown[id][0] as Zone).scale = new_scale
+		(_shown[id][1] as ZoneVisual).scale = Vector3(new_scale, 1.0, new_scale)
 
 
 @rpc("authority", "call_remote", "reliable")

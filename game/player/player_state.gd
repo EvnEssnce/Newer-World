@@ -740,6 +740,18 @@ func use_status_stack(index: int) -> void:
 	server_events += 1
 
 
+## Server: weapon ability cooldowns (both weapons) cut by `fraction` of what's
+## left (the Mage's Ascendant capstone); a server event if any changed.
+func reduce_ability_cooldowns(fraction: float) -> void:
+	var changed := false
+	for i in cooldowns.size():
+		if cooldowns[i] > 0:
+			cooldowns[i] = roundi(cooldowns[i] * (1.0 - clampf(fraction, 0.0, 1.0)))
+			changed = true
+	if changed:
+		server_events += 1
+
+
 ## Server: the player was moved somewhere else (Shadow Swap): a server event,
 ## so the client's prediction takes the new position without counting it.
 func note_teleport() -> void:
@@ -927,7 +939,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		if w.ability(index) == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index)):
+		if (can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index))
+				and not statuses.silenced(params.statuses)):
 			_start_ability(index, aim_yaw, aim_pitch, params, move)
 			queued_attack = ATTACK_NONE
 			return
@@ -939,7 +952,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		if wing == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if can_attack() and wing_cooldowns[wing_index] == 0 and can_afford(wing):
+		if (can_attack() and wing_cooldowns[wing_index] == 0 and can_afford(wing)
+				and not statuses.silenced(params.statuses)):
 			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
 			queued_attack = ATTACK_NONE
 			return

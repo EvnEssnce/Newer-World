@@ -73,6 +73,21 @@ var read_status := ""
 var detonates_status := ""
 var detonate_damage := 0.0
 
+# Healing and channels (server)
+## Each hit window after the first deals this fraction more than the one before
+## it adds up (Searing Ray: window i deals 1 + window_ramp x i as much).
+var window_ramp := 0.0
+## Fraction of the damage this deals that heals the attacker (Siphon).
+var lifesteal := 0.0
+## Allies (not the attacker) its hitbox touches are healed this much per hit
+## window instead of being ignored (Mending Beam).
+var ally_heal := 0.0
+## The attacker and the allies its hitbox touches get Ward with this much
+## absorb (a damage-absorbing shield).
+var ally_shield := 0.0
+## Its hitbox only reaches allies (Mending Beam, Ward): hostiles are skipped.
+var allies_only := false
+
 # Zones and summons (data/zones.cfg ids; "" = none; server, ZoneSystem)
 ## Placed zone_tick after the start, zone_distance m ahead of the user.
 var zone := ""
@@ -169,6 +184,11 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	read_status = Tuning.get_optional(file, section, "read_status", "")
 	detonates_status = Tuning.get_optional(file, section, "detonates_status", "")
 	detonate_damage = Tuning.get_optional(file, section, "detonate_damage", 0.0)
+	window_ramp = Tuning.get_optional(file, section, "window_ramp", 0.0)
+	lifesteal = Tuning.get_optional(file, section, "lifesteal", 0.0)
+	ally_heal = Tuning.get_optional(file, section, "ally_heal", 0.0)
+	ally_shield = Tuning.get_optional(file, section, "ally_shield", 0.0)
+	allies_only = Tuning.get_optional(file, section, "allies_only", false)
 	zone = Tuning.get_optional(file, section, "zone", "")
 	zone_tick = roundi(float(Tuning.get_optional(file, section, "zone_time", 0.0)) * tps)
 	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)

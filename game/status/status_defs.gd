@@ -56,6 +56,7 @@ func validate() -> String:
 		if not def.affects in [StatusDef.AFFECTS_SIM, StatusDef.AFFECTS_DAMAGE]:
 			return "%s: affects must be \"sim\" or \"damage\"" % def.id
 		var sim_effect := (def.move_multiplier != 1.0 or def.stops_movement or def.stuns
+				or def.silences
 				or def.attack_speed != 1.0 or def.dodge_speed_multiplier != 1.0
 				or def.dodge_cost_multiplier != 1.0 or def.fall_gravity_multiplier != 1.0)
 		if sim_effect and def.affects != StatusDef.AFFECTS_SIM:

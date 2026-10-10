@@ -314,6 +314,35 @@ func blind_amount(defs: StatusDefs) -> float:
 	return result
 
 
+## True while silenced (no abilities).
+func silenced(defs: StatusDefs) -> bool:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.silences:
+			return true
+	return false
+
+
+## Multiplier on healing the owner receives (healing_taken) or deals
+## (healing_dealt): 1 + the sum over statuses x stacks, at least 0.
+func healing_multiplier(defs: StatusDefs, dealt: bool) -> float:
+	var bonus := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def:
+			bonus += (def.healing_dealt if dealt else def.healing_taken) * e.stacks
+	return maxf(0.0, 1.0 + bonus)
+
+
+## The index of an absorb shield status (Ward), or -1.
+func absorb_status(defs: StatusDefs) -> int:
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def and def.absorbs:
+			return e.status
+	return -1
+
+
 ## True while a stealth status is on (Veiled: drawn faint, no nameplate).
 func veiled(defs: StatusDefs) -> bool:
 	for e in entries:

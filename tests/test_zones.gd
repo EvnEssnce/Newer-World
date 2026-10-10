@@ -64,6 +64,7 @@ func test_area_is_a_circle_with_a_height_band() -> void:
 func test_wall_box_and_segment() -> void:
 	var p := _params(ZoneParams.TRIGGER_NONE)
 	p.wall = true
+	p.solid = true
 	p.wall_width = 4.0
 	p.wall_depth = 0.5
 	p.height = 2.5
@@ -97,3 +98,21 @@ func test_every_zone_in_data_loads() -> void:
 					section + " status " + p.applies_status)
 		if p.wall:
 			assert_true(p.wall_width > 0.0 and p.wall_depth > 0.0, section + " wall size")
+		assert_false(p.solid and not p.wall, section + ": solid needs wall")
+
+
+func test_scale_grows_the_area() -> void:
+	var z := Zone.new(_params(ZoneParams.TRIGGER_PULSE), Vector3.ZERO, 0.0, 7)
+	assert_false(z.contains(Vector3(3.0, 0, 0)))
+	z.scale = 1.6
+	assert_true(z.contains(Vector3(3.0, 0, 0)), "2 m x 1.6")
+
+
+func test_a_box_that_isnt_solid_blocks_nothing() -> void:
+	var p := _params(ZoneParams.TRIGGER_PULSE)
+	p.wall = true
+	p.wall_width = 4.0
+	p.wall_depth = 1.0
+	var z := Zone.new(p, Vector3.ZERO, 0.0, 7)
+	assert_true(z.contains(Vector3(1.5, 0, 0.2)), "still a box-shaped area")
+	assert_almost(z.blocks_segment(Vector3(0, 1, -5), Vector3(0, 1, 5), 0.0), -1.0)

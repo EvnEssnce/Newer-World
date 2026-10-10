@@ -116,8 +116,8 @@ ui/                  connect_menu (client start screen), hud (health/stamina/Emb
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
-                     Ranger: longbow, crossbow, firebolts),
-                     class_<id> (fighter, juggernaut, assassin, ranger),
+                     Ranger: longbow, crossbow, firebolts; Mage: great_staff, gauntlet),
+                     class_<id> (fighter, juggernaut, assassin, ranger, mage),
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
@@ -273,7 +273,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   moves the player (and the swapped enemy/player) and calls `PlayerState.note_teleport()`
   (a server event, so prediction takes it without counting a correction).
 - Kinds: Arrow Rain (Longbow), Smoke Bolt's `smoke` (Smoked: `blind` 0.7), Tripwire
-  (trap: 30 damage + Root 2 s), Fire Trail (Burn), Ember Double (decoy), Shield Wall.
+  (trap: 30 damage + Root 2 s), Fire Trail (Burn), Ember Double (decoy), Shield Wall;
+  Mage: Meteor Fall, Flame Wall (a box that isn't `solid`), Renewal Pulse (ally
+  heal), Life Spore (an ally trap), Binding Embers.
+- `wall=true` makes the area a box; only `solid=true` collides and stops projectiles.
+  Traps hit the first target of their `affects` side (allies for Life Spore).
 - `SUMMARY zones spawned= pulses= affected= trap_triggers= decoys= walls=
   projectiles_stopped=` and `SUMMARY summons decoy_bursts= shadow_swaps=` (no checks;
   the bot slots zone abilities first, `BuildService.bot_slot_status_abilities`).
@@ -633,6 +637,54 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   built, `effect="none"`). Items: Ashwood Longbow, Iron Crossbow, Cinder Wraps,
   Galeborn Plumes.
 
+## Mage (Great Staff, Gauntlet)
+
+`data/class_mage.cfg` (`--class=mage`, `-Class mage`): no mana, so **weapon abilities
+cost Ember** (`ember_cost`, predicted like Wing costs), and `[class] ember_gain` 2.0
+doubles every Ember gain (`World._give_ember`, `ClassDef.ember_gain`). Placeholder
+models in `player.gd` (a staff with an orb, carried like the crossbow; a glowing
+gauntlet). World helpers: "Mage: heals, shields, channels". Counters: `SUMMARY mage
+ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
+
+- **Great Staff** (Conflagration / Focus): light fire bolt (40), heavy charged fireball
+  (120, Burn ×2). Firebrand (5 Ember: Burn ×2), Meteor Fall (30: zone `meteor` 10 m
+  ahead, one 220 blast after 1.2 s), Flame Wall (20: zone `flame_wall`, a 6 m box of fire
+  5 m ahead, not solid: 20 + Burn every 0.5 s), Searing Ray (15: a 10 m beam, 6 windows,
+  `window_ramp` 0.3: window i deals ×(1 + 0.3 i), applied to `damage_scale` in
+  `_on_attack_stepped`), Blink (10: 7 m `input` dash in 0.08 s with i-frames),
+  Pyroclasm (20: 3.5 m radial, knockback 4 m). Capstones: **Wildfire Spread**
+  (`zone_grow`, applies_to burn: your Burn-applying pulse zones grow 15% per pulse up
+  to 2×, `World.zone_growth` → `Zone.scale`, `_receive_zone_scaled`) and **Clear Mind**
+  (`focus_refund`: an ability started within 3 s of landing a heavy refunds its Ember,
+  `Player.last_heavy_hit_tick`, `World._mage_ability_started`).
+- **Gauntlet** (Lifeweaver / Siphon): light life bolt (35), heavy 3 m drain blast (90,
+  `lifesteal` 0.3). Mending Beam (15: 10 m beam, 6 windows, `ally_heal` 30 per window,
+  `allies_only`), Renewal Pulse (25: zone `renewal_pulse`, 160 to your side in a 3 m
+  circle 6 m ahead), Siphon (10: 8 m beam, 5 windows of 30, `lifesteal` 0.5), Ward (20:
+  `ally_shield` 150 to you and allies in a 10 m beam, `allies_only`), Life Spore (15:
+  zone `life_spore`, an ally trap: heals the first ally to touch it 200), Withering
+  Touch (10: Withered, `healing_taken` −0.5). Capstones: **Overflowing Life**
+  (`overheal_shield`: healing past max becomes Ward, `World._overheal_shield` in
+  `_heal_player`) and **Shared Vitality** (`siphon_share`: lifesteal also heals allies
+  within 8 m).
+- **Heals and shields** (server): `World._ally_support` heals/shields allies the hitbox
+  touches once per window (they're never struck); `_lifesteal` after a damaging hit;
+  **Ward** = the `absorbs` status + `Player.absorb` (the pool, server only):
+  `World._absorb` takes hits from it in `resolve_strike` (after armor and block, not
+  damage over time or zones) and removes the status when it's empty; a fully absorbed
+  hit shows "Absorbed" (`HIT_ABSORBED` 9, wire only). `_heal_player` multiplies by the
+  target's `healing_taken` and the healer's `healing_dealt` statuses.
+- **Mage Wings** (Ascendant / Binder, 12 points): Phoenix Aura (25: +20% damage and
+  healing 6 s), Binding Embers (25: zone `binding_embers`, Root 2 s in a 3.5 m circle 8
+  m ahead), Searing Glare (20: 10 m line, 40 damage, **Silenced** 3 s), Wingfall (20:
+  120° 5 m cone, knockback 4 m). Defaults Z Phoenix Aura, C Binding Embers. Capstones:
+  **Rekindle** (`aura_refund`: Phoenix Aura halves what's left of your weapon ability
+  cooldowns, `PlayerState.reduce_ability_cooldowns`, a server event) and **Hushing
+  Embers** (`bind_silence`: Binding Embers also silences, `World.zone_effect`).
+- **Silence** (`silences`, sim, crowd control): `PlayerState` won't start a weapon or
+  Wing ability while silenced (presses stay buffered). No effect on Husks (no abilities).
+- Items: Emberwood Staff, Lifeweave Gauntlet, Sunfire Pinions.
+
 ## Status effects
 
 - `data/status_effects.cfg`, one `[status_<id>]` each: `category` = **debuff** (never
@@ -961,7 +1013,7 @@ powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headl
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger)
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 ```
 
@@ -1037,9 +1089,9 @@ can be overridden, strings need no quotes). The smoke test uses `--tune` for low
 and a fast respawn so deaths happen within the run, and to switch on effects that are off
 in the real data (Husk swings bleed, Broadsword, War Hammer and Dual Talons heavies push) so its
 status and force checks don't depend on bot luck, a 1 s Rebirth (`ember/rebirth/duration`)
-so a reborn bot is back in the fight quickly, 500-health Husks (they die, but most
-heavies land on a live one), every class's heavy pushing (0 m knockback keys in the
-real data), a 1.5 s Shield Wall (a long one kept Husks off the bots), 2 s Javelin Cast / Boomerang Axe /
+so a reborn bot is back in the fight quickly, 400-health Husks (they die, for loot
+and gear, but most heavies land on a live one), every class's heavy pushing (0 m knockback keys in the
+real data; Mage heavies too), a 1.5 s Shield Wall (a long one kept Husks off the bots), 2 s Javelin Cast / Boomerang Axe /
 Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` on the
 `SUMMARY juggernaut` line, no check), Skewer applying Taunted instead of Root so Husks get taunted
 (counted, not checked), and a 6 m Hold the Line reach so pokes (`line_pokes=` on the

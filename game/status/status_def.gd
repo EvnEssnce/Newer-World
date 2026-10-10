@@ -29,6 +29,8 @@ var dodge_cost_multiplier := 1.0
 var fall_gravity_multiplier := 1.0
 ## Root: no walking, dodging, jumping or dashing.
 var stops_movement := false
+## Silence: no weapon or Wing abilities (light, heavy and block still work).
+var silences := false
 ## Stun: staggers for the whole duration.
 var stuns := false
 ## Light and heavy attacks play this many times faster (1 = none; Rampage);
@@ -68,6 +70,13 @@ var roll_zone := ""
 ## Stealth (visual only for now): other players see the owner faint, with no
 ## nameplate (Ember Double's Veiled).
 var veils := false
+## Per stack: fraction more healing the owner receives (negative = less:
+## Withering Touch) / deals (Phoenix Aura).
+var healing_taken := 0.0
+var healing_dealt := 0.0
+## Ward: a damage-absorbing shield while the status lasts (the amount is on the
+## server, Player.absorb).
+var absorbs := false
 ## Shield Wall: while the owner blocks, allies inside a box this deep (m,
 ## straight behind them) and cover_width wide (m) are covered: hits on them
 ## from within the owner's block arc are blocked by the owner. 0 = none.
@@ -102,7 +111,8 @@ func is_debuff() -> bool:
 
 ## A debuff that takes control away: slows, roots, stuns, taunts.
 func is_crowd_control() -> bool:
-	return is_debuff() and (move_multiplier < 1.0 or stops_movement or stuns or forces_target)
+	return is_debuff() and (move_multiplier < 1.0 or stops_movement or stuns or forces_target
+			or silences)
 
 
 func deals_damage_over_time() -> bool:
@@ -130,6 +140,10 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.damage_taken_from_source = Tuning.get_optional(file, section, "damage_taken_from_source", 0.0)
 	s.stops_movement = Tuning.get_optional(file, section, "stops_movement", false)
 	s.stuns = Tuning.get_optional(file, section, "stuns", false)
+	s.silences = Tuning.get_optional(file, section, "silences", false)
+	s.healing_taken = Tuning.get_optional(file, section, "healing_taken", 0.0)
+	s.healing_dealt = Tuning.get_optional(file, section, "healing_dealt", 0.0)
+	s.absorbs = Tuning.get_optional(file, section, "absorbs", false)
 	s.attack_speed = Tuning.get_optional(file, section, "attack_speed", 1.0)
 	s.attack_speed_min_stamina = Tuning.get_optional(file, section, "attack_speed_min_stamina", 0.0)
 	s.cover_depth = Tuning.get_optional(file, section, "cover_depth", 0.0)

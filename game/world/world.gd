@@ -26,8 +26,10 @@ const HIT_HEALED := 7
 ## A damaging hit that crit (Headsman). Only ever sent to clients (for the
 ## label): on the server the strike's result is HIT_DAMAGED.
 const HIT_CRITICAL := 8
+## A hit a Ward shield took all of (only on the wire, like HIT_CRITICAL).
+const HIT_ABSORBED := 9
 const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried",
-		"status damage", "healed", "critical"]
+		"status damage", "healed", "critical", "absorbed"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
@@ -155,6 +157,13 @@ var _hunted_hits := 0
 ## Zones (server): Mirror Image decoy bursts, Shadow Swaps.
 var _decoy_bursts := 0
 var _shadow_swaps := 0
+## Mage (server): ally heals/shields from beams, Wards given, damage absorbed,
+## Focus and Ascendant refunds.
+var _ally_supports := 0
+var _shields := 0
+var _absorbed := 0.0
+var _focus_refunds := 0
+var _aura_refunds := 0
 
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
@@ -382,6 +391,8 @@ func _on_attack_stepped(attacker: Player) -> void:
 		return
 	var damage_scale := (attacker.damage_multiplier(attack)
 			* attacker.state.statuses.damage_dealt_multiplier(attacker.params.statuses))
+	if attack.window_ramp != 0.0:  # Searing Ray: later windows hit harder
+		damage_scale *= 1.0 + attack.window_ramp * maxi(0, attack.window_at(attacker.state.attack_tick))
 	# After damage_multiplier: it tells a heavy apart by identity.
 	attack = _with_hammer_capstones(attacker, attack)
 	var connected := _hit_targets(attacker, attack, damage_scale)
@@ -400,8 +411,13 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	var connected := 0
 	var read := false
 	var execute := attacker.execute_bonus()
+	if attack.ally_shield > 0.0 and not attacker.attack_results.has(attacker.peer_id):
+		attacker.attack_results[attacker.peer_id] = true  # Ward: the caster too
+		_shield_player(attacker, attack.ally_shield, attacker.peer_id)
 	for target: Player in _players.get_children():
 		if target == attacker:
+			continue
+		if _ally_support(attacker, attack, target) or attack.allies_only:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
 				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute)
@@ -415,7 +431,7 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 			_give_hit_statuses(attacker.peer_id, attack,
 					attacker.on_hit_statuses_for_window(), target)
 	for enemy: Enemy in _enemies.get_children():
-		if enemy.dead or attacker.attack_results.has(enemy.enemy_id):
+		if enemy.dead or attacker.attack_results.has(enemy.enemy_id) or attack.allies_only:
 			continue
 		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
@@ -454,6 +470,7 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 	_ember_from_damage(attacker_id, null, damage)
 	var stagger := _with_hook_stagger(attacker_id, enemy,
 			_with_surge_stagger(attacker_id, attack.stagger_ticks))
+	_lifesteal(attacker_id, attack, damage)
 	if _damage_enemy(enemy, damage, stagger, attacker_id,
 			HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED):
 		return true
@@ -466,6 +483,8 @@ func _on_ability_started(player: Player) -> void:
 	var started := player.state.current_ability(player.params)
 	if started and started.swap_places:
 		_shadow_swap(player, started)
+	if started:
+		_mage_ability_started(player, started)
 	if player.state.is_using_wing():
 		_on_wing_started(player)
 		return
@@ -483,6 +502,8 @@ func _on_ability_started(player: Player) -> void:
 func _on_player_attack_connected(attacker: Player, attack: AttackParams, count: int) -> void:
 	if attacker.state.is_using_ability():
 		_ability_hits += count
+	elif attacker.state.attack_type == PlayerState.ATTACK_HEAVY:
+		attacker.last_heavy_hit_tick = _tick
 	_ramp_on_hit(attacker)
 	if _target_limit_reached(attacker, attack):
 		attacker.state.end_active_window(attacker.params)
@@ -590,6 +611,8 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 			_guard_breaks += 1
 		else:
 			_blocks += 1
+	var absorbed := _absorb(target, damage)
+	damage -= absorbed
 	target.health = maxf(0.0, target.health - damage)
 	# Before a fatal hit kills: its Ember counts toward a Rebirth.
 	_ember_from_damage(attacker_id, target, damage)
@@ -602,10 +625,15 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
 		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
-	_send_hit(attacker_id, target.peer_id, damage,
-			HIT_CRITICAL if crit > 1.0 and result == HIT_DAMAGED else result)
+	var shown := result
+	if result == HIT_DAMAGED:
+		shown = HIT_ABSORBED if damage <= 0.0 and absorbed > 0.0 else (
+				HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED)
+	_send_hit(attacker_id, target.peer_id, damage, shown)
 	if result != HIT_DEFEATED:
 		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
+	if result == HIT_DAMAGED or result == HIT_DEFEATED:
+		_lifesteal(attacker_id, attack, damage + absorbed)
 	return result
 
 
@@ -1101,6 +1129,104 @@ func _parting_shot(player: Player) -> void:
 		_parting_shots += 1
 
 
+# --- Mage: heals, shields, channels (server only) ---
+
+## Mending Beam / Ward ("ally_heal", "ally_shield"): an ally of the attacker (not
+## itself) that the hitbox touches is healed or shielded once per hit window
+## instead of struck. Returns true if `target` is such an ally (handled or not).
+func _ally_support(attacker: Player, attack: AttackParams, target: Player) -> bool:
+	if attack.ally_heal <= 0.0 and attack.ally_shield <= 0.0:
+		return false
+	if not are_allies(attacker.peer_id, target.peer_id):
+		return false
+	if (target.state.dead or attacker.attack_results.has(target.peer_id)
+			or not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
+				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT)):
+		return true
+	attacker.attack_results[target.peer_id] = true
+	if attack.ally_heal > 0.0:
+		_heal_player(target, attack.ally_heal * attacker.damage_multiplier(attack), attacker.peer_id)
+	if attack.ally_shield > 0.0:
+		_shield_player(target, attack.ally_shield, attacker.peer_id)
+	_ally_supports += 1
+	return true
+
+
+## Ward: gives `target` the absorb status (absorbs) and an absorb pool of at
+## least `amount` (Player.absorb), from `source_id`.
+func _shield_player(target: Player, amount: float, source_id: int) -> void:
+	var index := target.params.statuses.index_of("ward")
+	if amount <= 0.0 or target.state.dead or index < 0:
+		return
+	if _give_status(source_id, target, index, 1, -1):
+		target.absorb = maxf(target.absorb, amount)
+		_shields += 1
+
+
+## How much of `damage` the target's Ward absorbs (taking it from the pool and
+## removing the status once it's empty). A pool without the status is gone.
+func _absorb(target: Player, damage: float) -> float:
+	var index := target.state.statuses.absorb_status(target.params.statuses)
+	if index < 0:
+		target.absorb = 0.0
+		return 0.0
+	var taken := minf(damage, target.absorb)
+	target.absorb -= taken
+	_absorbed += taken
+	if target.absorb <= 0.0:
+		target.state.remove_status(index)
+	return taken
+
+
+## Siphon ("lifesteal"): heals the attacking player a fraction of the damage it
+## dealt; with the Siphon capstone ("siphon_share", the weapon tree that's out)
+## its allies within the node's threshold (m) get the same.
+func _lifesteal(attacker_id: int, attack: AttackParams, damage: float) -> void:
+	if attack.lifesteal <= 0.0 or damage <= 0.0:
+		return
+	var attacker := _player_by_id(attacker_id)
+	if attacker == null:
+		return
+	var amount := damage * attack.lifesteal
+	_heal_player(attacker, amount, attacker_id)
+	var share := attacker.build.weapon_effect(attacker.state.weapon_id(), "siphon_share") if attacker.build else null
+	if share == null:
+		return
+	for ally: Player in _players.get_children():
+		if (ally != attacker and are_allies(attacker_id, ally.peer_id)
+				and ally.global_position.distance_to(attacker.global_position) <= share.threshold):
+			_heal_player(ally, amount, attacker_id)
+
+
+## Lifeweaver capstone ("overheal_shield", in the healer's weapon tree that's
+## out): healing past max health becomes a Ward of that much x amount.
+func _overheal_shield(healer: Player, target: Player, excess: float) -> void:
+	if healer == null or healer.build == null or excess <= 0.0:
+		return
+	var node := healer.build.weapon_effect(healer.state.weapon_id(), "overheal_shield")
+	if node:
+		_shield_player(target, excess * node.amount, healer.peer_id)
+
+
+## Server, as any ability starts: the Focus capstone ("focus_refund": an ability
+## started within threshold s of landing a heavy refunds its Ember cost) and the
+## Ascendant capstone ("aura_refund": the Wing ability applies_to cuts your
+## weapon ability cooldowns by amount).
+func _mage_ability_started(player: Player, started: AbilityParams) -> void:
+	if player.build == null:
+		return
+	if started.ember_cost > 0.0 and not player.state.is_using_wing():
+		var focus := player.build.weapon_effect(player.state.weapon_id(), "focus_refund")
+		if (focus and player.last_heavy_hit_tick >= 0
+				and _tick - player.last_heavy_hit_tick <= focus.threshold * Engine.physics_ticks_per_second):
+			player.state.gain_ember(player.params, started.ember_cost, false)
+			_focus_refunds += 1
+	var aura := player.build.wing_effect("aura_refund")
+	if aura and player.state.is_using_wing() and started.id == aura.applies_to:
+		player.state.reduce_ability_cooldowns(aura.amount)
+		_aura_refunds += 1
+
+
 # --- Zones and summons (server; ZoneSystem places and ticks them) ---
 
 ## Where each living player stands, as enemies see it (peer id -> position):
@@ -1144,6 +1270,27 @@ func zone_effect(zone: Zone, target: Node3D) -> void:
 	if not p.applies_status.is_empty() and not (player and player.state.dead):
 		_give_status(zone.owner_id, target, StatusDefs.current().index_of(p.applies_status),
 				p.status_stacks, p.status_duration_ticks)
+	# The Mage Wings' Binder capstone ("bind_silence"): its zone (applies_to)
+	# also gives the node's status (silence) to hostiles.
+	var owner := _player_by_id(zone.owner_id)
+	var bind := owner.build.wing_effect("bind_silence") if owner and owner.build else null
+	if (bind and bind.applies_to == p.id and p.affects == ZoneParams.AFFECTS_HOSTILE
+			and not (player and player.state.dead)):
+		_give_status(zone.owner_id, target, StatusDefs.current().index_of(bind.status), 1, -1)
+
+
+## Conflagration capstone ("zone_grow", applies_to = a status): the owner's
+## pulse zones that apply that status (burning ground) grow by amount x their
+## size each pulse, up to threshold x. 0 = no growth.
+func zone_growth(zone: Zone) -> Vector2:
+	var owner := _player_by_id(zone.owner_id)
+	if owner == null or owner.build == null:
+		return Vector2.ZERO
+	for weapon_id in owner.build.weapons:
+		var node := owner.build.weapon_effect(weapon_id, "zone_grow")
+		if node and node.applies_to == zone.params.applies_status:
+			return Vector2(node.amount, node.threshold)
+	return Vector2.ZERO
 
 
 ## Extra re-arms for a trap `owner_id` places (the Crossbow's Trapper capstone,
@@ -1351,6 +1498,8 @@ func _print_juggernaut_summary() -> void:
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
 			_roar_guards])
 	print("SUMMARY summons decoy_bursts=%d shadow_swaps=%d" % [_decoy_bursts, _shadow_swaps])
+	print("SUMMARY mage ally_supports=%d shields=%d absorbed=%d focus_refunds=%d aura_refunds=%d" % [
+			_ally_supports, _shields, roundi(_absorbed), _focus_refunds, _aura_refunds])
 	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
 			_ignites, _ignited_stacks, _loaded_shots, _piercing_heavies, _parting_shots, _hunted_hits])
 	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d" % [
@@ -1631,6 +1780,8 @@ func _give_ember(player: Player, amount: float, in_combat: bool) -> void:
 		return
 	var before := player.state.ember
 	amount *= 1.0 + player.gear.bonus("ember_gain_pct")  # Kindle
+	if player.build:
+		amount *= player.build.class_def.ember_gain  # the Mage gains more
 	player.state.gain_ember(player.params, amount, in_combat)
 	_ember_gained += player.state.ember - before
 
@@ -1644,7 +1795,12 @@ func _heal_player(target: Player, amount: float, healer_id: int) -> float:
 	if target.state.dead or amount <= 0.0:
 		return 0.0
 	amount *= (1.0 + target.gear.bonus("healing_pct")) * _heal_cut(target)  # Tend, Venom
+	amount *= target.state.statuses.healing_multiplier(target.params.statuses, false)  # Withering
+	var source := _player_by_id(healer_id)
+	if source:
+		amount *= source.state.statuses.healing_multiplier(source.params.statuses, true)  # Aura
 	var healed := minf(amount, target.max_health() - target.health)
+	_overheal_shield(source, target, amount - maxf(healed, 0.0))
 	if healed <= 0.0:
 		return 0.0
 	target.health += healed

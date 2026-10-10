@@ -36,6 +36,10 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 		World.HIT_DEFEATED:
 			label.text = "-%d  Defeated!" % damage
 			label.modulate = Color(1.0, 0.3, 0.2)
+		World.HIT_ABSORBED:
+			# A hit a Ward shield took all of (Gauntlet).
+			label.text = "Absorbed"
+			label.modulate = Color(0.6, 0.85, 1.0)
 		World.HIT_CRITICAL:
 			# A crit (Headsman): bigger, orange.
 			label.text = "Critical! -%d" % damage
