@@ -11,6 +11,51 @@ Husks behaving as expected.
 
 ## Session log
 
+### 2026-10-11 (27): Snapshot size (compact encoding, private view of other players)
+
+The open item "a third player already exceeds the MTU". Snapshots were Godot's own
+Variant encoding (4-byte type header per value, everything padded to 4 bytes):
+1,312–1,324 bytes for 2 players + 2 Husks (~530–570 per player, ~100 per Husk).
+
+Done:
+- **`NetCodec`** (`core/net_codec.gd`, 13 unit tests in `tests/test_net_codec.gd`): a
+  compact, **lossless** binary encoding (same values and types back, so reconciliation
+  is unaffected): 1-byte tags, small ints inside the tag, zigzag varints, whole floats as
+  ints, 32-bit floats when exact, else doubles, 1-byte zero vectors and same-value int
+  arrays, -0.0 kept. Malformed bytes decode as null (the client logs an error).
+- **Per-recipient snapshots** (`World._broadcast_snapshot`): your own entry is the full
+  state as before; every other player's is `Player.get_view_snapshot()` with
+  `PlayerState.view_array()`: the same layout, but owner-only fields (stamina, buffers,
+  held presses, ability slots, cooldowns, Ember, Rebirth cooldown/charges, attack speed
+  carry, push velocity) left at defaults. Smaller, and others can no longer read your
+  cooldowns or Ember. Each entry is encoded once per snapshot and reused for everyone.
+- **`SUMMARY net`** on the server (snapshots sent, average/max bytes, largest own /
+  other / enemy entry) and a smoke check: fail if any snapshot is over 1,360 bytes.
+- **`smoke_test.ps1 -Bots N`** (default 2, not with `-Party`): more bot clients, each
+  gets the per-client checks.
+
+Results (bytes per snapshot): 2 bots avg ~390, max 430–480 (was ~1,320); 4 bots max
+734; 6 bots max 1,034, all one packet. Entries: own ~200–230, other player ~160, Husk
+~55. About 8 players in view fit one packet.
+
+Tests: 429 passed. Smoke: default passed except the known luck check "no Husk was moved
+by force", which failed 3 of 6 runs with this change **and 3 of 4 runs without it** on
+the same machine (a Linux cloud container, so the rate may differ from Windows):
+pre-existing, but more frequent than the "1 in 10" noted before; worth making reliable.
+`-Party` passed, `-Class juggernaut` passed, `-Bots 4` and `-Bots 6` passed (bar that
+check once). Corrections 0 with 2 bots; with 4–6 bots a few clients showed 1–2 small
+position-only corrections right after spawn (identical states, cm apart): the known
+physics-step mismatch, not the encoding.
+
+Nothing to playtest by feel; a quick check that remote players still look right
+(attacks, rolls, Wings, Rebirth fire, status line) in `run_local_test.ps1` is enough.
+
+**Next for snapshots** (when more than ~8 players will be together): interest
+management (send only players/enemies within a radius; clients must hide rather than
+treat a missing id as "left", and party frames need members' health from elsewhere),
+then maybe a string table for weapon ids / Wing set (~28 bytes per other player) or
+delta compression. Otherwise back to the session 26 list below (training dummy first).
+
 ### 2026-10-09 (26): Wave 3 playtest feedback (plan; nothing built yet)
 
 The developer playtested sessions 24–25 (`PLAYTEST.md` has the ticked list and notes).

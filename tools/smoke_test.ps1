@@ -4,9 +4,11 @@
 # guarded hit, ability hits and a build change, and Husks and bots must hit each
 # other; players and Husks must be moved by force (knockback) and the Spear's
 # abilities used; projectiles thrown and hitting; no unexpected prediction
-# corrections.
-#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID]
+# corrections; snapshots must fit in one packet.
+#   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID] [-Bots N]
 # -Class picks the bots' class (default fighter; e.g. juggernaut).
+# -Bots runs more bot clients (default 2), e.g. to see snapshot sizes with more
+# players ("SUMMARY net"); every client gets the per-client checks. Not with -Party.
 # -Party runs the bots with --bot-party: they form a party, so instead of hits,
 # deaths and blocks between the bots, the server must report a party formed,
 # 0 bot-on-bot hits and at least one bot swing ignored because they're allies
@@ -15,11 +17,15 @@
 # 32 s = four of the bot's 8 s cycles (see World._bot_input): the default loadout
 # (Broadsword out), then the Spear, the Dual Axes and the Broadsword as the focus
 # weapon, so each weapon's abilities (knockback, statuses, bleed) get a turn.
-param([int]$Port = 24599, [int]$Seconds = 32, [switch]$Party, [string]$Class = 'fighter')
+param([int]$Port = 24599, [int]$Seconds = 32, [switch]$Party, [string]$Class = 'fighter', [int]$Bots = 2)
 . "$PSScriptRoot\find_godot.ps1"
+if ($Party -and $Bots -ne 2) { throw "-Party needs exactly 2 bots (it checks for a party of 2)." }
+if ($Bots -lt 2) { throw "-Bots needs at least 2 (the bots fight each other)." }
 
 $logDir = Join-Path $ProjectRoot 'build\smoke'
 New-Item -ItemType Directory -Force $logDir | Out-Null
+# A run with fewer -Bots than the last mustn't check the extra clients' old logs.
+Remove-Item (Join-Path $logDir 'client*.log') -ErrorAction SilentlyContinue
 
 function Start-Godot([string]$name, [string[]]$gameArgs) {
     Start-Process $Godot -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru `
@@ -78,10 +84,10 @@ if ($Party) { $botFlags += '--bot-party' }
 
 $server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
-$clients = @(
-    (Start-Godot 'client1' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)),
-    (Start-Godot 'client2' ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune))
-)
+$clientNames = @(1..$Bots | ForEach-Object { "client$_" })
+$clients = @($clientNames | ForEach-Object {
+    Start-Godot $_ ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)
+})
 # A script that fails to parse leaves the game running without --quit-after, so
 # don't wait forever: anything still running well past its time is stopped.
 $clients | ForEach-Object {
@@ -246,7 +252,21 @@ if (-not $projSummary) {
 } else {
     Write-Host "PASS projectiles: $($projSummary.Line)" -ForegroundColor Green
 }
-foreach ($name in 'client1', 'client2') {
+# Snapshots (World._broadcast_snapshot, NetCodec) must fit in one ENet packet
+# (1392 bytes, less about 30 for the RPC's own header): a bigger unreliable
+# packet is split, and losing any piece loses the whole snapshot.
+$netSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY net snapshots_sent=(\d+) bytes_avg=(\d+) bytes_max=(\d+)'
+$snapshotBudget = 1360
+if (-not $netSummary -or [int]$netSummary.Matches[0].Groups[1].Value -lt 1) {
+    Write-Host "FAIL net: no snapshots sent ($($netSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$netSummary.Matches[0].Groups[3].Value -gt $snapshotBudget) {
+    Write-Host "FAIL net: a snapshot was over $snapshotBudget bytes ($($netSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS net: $($netSummary.Line)" -ForegroundColor Green
+}
+foreach ($name in $clientNames) {
     $summary = Select-String -Path (Join-Path $logDir "$name.log") -Pattern '^SUMMARY client=\d+ remote=\d+ moved=([\d.]+)'
     if (-not $summary) {
         Write-Host "FAIL ${name}: never saw another player" -ForegroundColor Red

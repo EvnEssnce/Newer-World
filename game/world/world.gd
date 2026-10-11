@@ -53,6 +53,12 @@ const ABILITY_BUTTONS := (PlayerState.BUTTON_ABILITY_1 | PlayerState.BUTTON_ABIL
 # Server
 var _tick := 0
 var _snapshot_interval := 3
+## Snapshot sizes (encoded bytes, per recipient), for "SUMMARY net".
+var _snapshots_sent := 0
+var _snapshot_bytes := 0
+var _snapshot_bytes_max := 0
+## Largest single entries seen: own player (full state), another player, enemy.
+var _entry_bytes_max := [0, 0, 0]
 var _max_input_buffer := 8
 var _max_inputs_per_tick := 2
 var _hits := 0
@@ -268,15 +274,41 @@ func _server_tick(delta: float) -> void:
 		_broadcast_snapshot()
 
 
+## Each recipient gets its own player's full entry (Player.get_snapshot: what
+## reconciliation needs) and everyone else's slim one (get_view_snapshot), in
+## NetCodec bytes. Every entry is encoded once and reused for every recipient.
 func _broadcast_snapshot() -> void:
-	var states: Array = []
-	for player: Player in _players.get_children():
-		states.append(player.get_snapshot())
-	var enemy_states: Array = []
+	var players := _players.get_children()
+	var full := {}
+	var views: Array[PackedByteArray] = []
+	for player: Player in players:
+		full[player.peer_id] = NetCodec.encode(player.get_snapshot())
+		views.append(NetCodec.encode(player.get_view_snapshot()))
+		_note_entry_size(0, full[player.peer_id].size())
+		_note_entry_size(1, views[-1].size())
+	var enemies := StreamPeerBuffer.new()
+	NetCodec.write_array_header(enemies, _enemies.get_child_count())
 	for enemy: Enemy in _enemies.get_children():
-		enemy_states.append(enemy.get_snapshot())
+		var entry := NetCodec.encode(enemy.get_snapshot())
+		_note_entry_size(2, entry.size())
+		enemies.put_data(entry)
 	for peer_id in _connected_player_ids():
-		_receive_snapshot.rpc_id(peer_id, _tick, states, enemy_states)
+		var buffer := StreamPeerBuffer.new()
+		NetCodec.write_array_header(buffer, 2)
+		NetCodec.write_array_header(buffer, players.size())
+		for i in players.size():
+			var player: Player = players[i]
+			buffer.put_data(full[peer_id] if player.peer_id == peer_id else views[i])
+		buffer.put_data(enemies.data_array)
+		var data := buffer.data_array
+		_snapshots_sent += 1
+		_snapshot_bytes += data.size()
+		_snapshot_bytes_max = maxi(_snapshot_bytes_max, data.size())
+		_receive_snapshot.rpc_id(peer_id, _tick, data)
+
+
+func _note_entry_size(kind: int, size: int) -> void:
+	_entry_bytes_max[kind] = maxi(_entry_bytes_max[kind], size)
 
 
 ## Peers with a player in the world. A peer can be mid-disconnect for a moment
@@ -1705,9 +1737,16 @@ func _nearest_remote_player() -> Player:
 	return nearest
 
 
+## `data`: NetCodec bytes of [players, enemies]. This client's own entry is
+## Player.get_snapshot(), everyone else's Player.get_view_snapshot().
 @rpc("authority", "call_remote", "unreliable_ordered", 2)
-func _receive_snapshot(tick: int, states: Array, enemy_states: Array) -> void:
+func _receive_snapshot(tick: int, data: PackedByteArray) -> void:
+	var decoded: Variant = NetCodec.decode(data)
+	if not decoded is Array or decoded.size() != 2:
+		push_error("[client] snapshot %d didn't decode (%d bytes)" % [tick, data.size()])
+		return
 	_snapshots_received += 1
+	var states: Array = decoded[0]
 	var server_time := tick / float(Engine.physics_ticks_per_second)
 	_sync_render_clock(server_time)
 	var my_id := multiplayer.get_unique_id()
@@ -1720,16 +1759,17 @@ func _receive_snapshot(tick: int, states: Array, enemy_states: Array) -> void:
 			player = _spawn_client_player(peer_id, peer_id == my_id, state[1])
 		if player.is_local:
 			player.client_receive_ack(state[1], state[2], state[3], state[4])
+			player.set_health(state[5])
 		else:
-			player.push_snapshot(server_time, state[1], state[4])
-		player.set_health(state[5])
+			player.push_snapshot(server_time, state[1], state[2])
+			player.set_health(state[3])
 	for player: Player in _players.get_children():
 		if not seen.has(player.peer_id):
 			print("[client] peer %d left" % player.peer_id)
 			_departed_seen[player.peer_id] = player.distance_seen
 			_players.remove_child(player)
 			player.queue_free()
-	_receive_enemy_states(server_time, enemy_states)
+	_receive_enemy_states(server_time, decoded[1])
 
 
 ## Enemy snapshot entries: Enemy.get_snapshot().
@@ -1939,6 +1979,9 @@ func print_summary() -> void:
 		_print_ember_summary()
 		_print_juggernaut_summary()
 		_projectiles.print_summary()
+		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [
+				_snapshots_sent, _snapshot_bytes / maxi(1, _snapshots_sent), _snapshot_bytes_max,
+				_entry_bytes_max[0], _entry_bytes_max[1], _entry_bytes_max[2]])
 		return
 	_projectiles.print_client_summary()
 	if _local_player:

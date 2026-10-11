@@ -1043,6 +1043,41 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
 
 
+## What other players get in snapshots instead of to_array(): the same layout,
+## but what only the owner needs (to predict and for its HUD: stamina, buffers,
+## held presses, ability slots and cooldowns, Ember, Rebirth cooldown and
+## charges, attack speed carry, the push's velocity) is left at its default,
+## which costs a byte or two in NetCodec, and keeps them private. Everything
+## drawing reads stays: attack and ability timeline, dodge, block, swap,
+## stagger, death and Rebirth progress, forced-movement ticks, statuses, weapons
+## and Wing set, facing. A new field is sent unless it's added here.
+func view_array() -> Array:
+	var view := copy()
+	view.stamina = 0.0
+	view.stamina_regen_wait = 0
+	view.dodge_buffer = 0
+	view.dodge_cooldown = 0
+	view.air_dodges_used = 0
+	view.queued_attack = ATTACK_NONE
+	view.queued_attack_ticks = 0
+	view.queued_ability_slot = -1
+	view.attack_hold = HOLD_RELEASED
+	view.attack_speed_carry = 0.0
+	view.server_events = 0
+	view.ability_slots.fill(-1)
+	view.cooldowns.fill(0)
+	view.swap_buffer = 0
+	view.force.velocity = Vector2.ZERO
+	view.force.launch = 0.0
+	view.ember = 0.0
+	view.combat_ticks = 0
+	view.rebirth_cooldown = 0
+	view.rebirth_charges = 0
+	view.wing_slots.fill(-1)
+	view.wing_cooldowns.fill(0)
+	return view.to_array()
+
+
 func copy() -> PlayerState:
 	return from_array(to_array())
 
