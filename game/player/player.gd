@@ -356,6 +356,8 @@ func server_process_inputs(max_per_tick: int, delta: float) -> void:
 		last_processed_seq = input[0]
 
 
+## Server: this player's snapshot entry for its own client (everything
+## reconciliation needs). Other clients get get_view_snapshot().
 func get_snapshot() -> Array:
 	# Health and max health in one Vector2: the same size as a float health alone
 	# (snapshots are near the MTU).
@@ -366,6 +368,12 @@ func get_snapshot() -> Array:
 ## Base max health plus gear's.
 func max_health() -> float:
 	return params.max_health + bonus_max_health
+
+
+## Server: this player's snapshot entry for other clients: what drawing it
+## needs (PlayerState.view_array).
+func get_view_snapshot() -> Array:
+	return [peer_id, global_position, state.view_array(), Vector2(health, max_health())]
 
 
 ## Server: the damage modifier from this player's mastery passives and

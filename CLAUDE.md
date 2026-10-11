@@ -37,6 +37,7 @@ core/
   tuning.gd          Autoload. Loads every res://data/*.cfg.
   net.gd             Autoload. ENet server/client setup, connection signals, ping.
   launch_args.gd     Command-line flags (after "--").
+  net_codec.gd       NetCodec: compact, lossless binary encoding for snapshots. Unit tested.
   input_actions.gd   Key bindings, registered in code.
 game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
@@ -148,10 +149,20 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   simulates at most `max_inputs_per_tick` per tick. **One input = one sim step**; a
   player with no queued input doesn't move. That keeps server and client in lockstep.
 - **Server → each client**, `snapshot_rate` times per second, `World._receive_snapshot`
-  (unreliable ordered, channel 2): `tick` and every player's
-  `[peer_id, position, velocity, last_processed_seq, PlayerState.to_array(),
-  Vector2(health, max_health)]` (max health includes gear; one Vector2 is the size of
-  the old float health).
+  (unreliable ordered, channel 2): `tick` and `NetCodec` bytes of `[players, enemies]`,
+  built per recipient (`World._broadcast_snapshot`). The recipient's own entry is
+  `Player.get_snapshot()`: `[peer_id, position, velocity, last_processed_seq,
+  PlayerState.to_array(), Vector2(health, max_health)]` (max health includes gear; one
+  Vector2 is the size of a float health alone); every other player's is
+  `get_view_snapshot()`: `[peer_id, position, PlayerState.view_array(),
+  Vector2(health, max_health)]` (same layout as `to_array()`, with what only the owner
+  needs, such as stamina, cooldowns, Ember, buffers, held presses, equip time and
+  charges, left at defaults: smaller, and private). Each entry is encoded once and
+  reused for every recipient. `NetCodec` is lossless (same values and types back, so
+  reconciliation compares exactly what the server had): a 1-byte tag per value, small
+  ints in the tag, varints, whole floats as ints, 32-bit floats when exact, 1-byte zero
+  vectors and same-value int arrays. A field that only drawing needs stays in
+  `view_array()`; one only the owner needs is reset there.
   Snapshots also drive spawning/despawning on clients: new id → spawn, missing id → remove.
 - **Local player**: applies each input immediately and remembers the predicted position
   and `PlayerState` per seq (keeping the latest acknowledged one, since two snapshots
@@ -210,11 +221,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
   rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
   charge_mask, spare_charges, Wing cooldowns by pool index without trailing zeros]`
-  (`PACKED_WING_HEADER` = 10; new small ints can go in that header too); 35 = `attack_speed_carry` (float, Rampage: see "Attack
-  speed" under Status effects). Append new fields at the end. A player's snapshot entry is
-  about 520 bytes, so 2 players + 2 Husks is ~1.3 KB, near ENet's 1392-byte MTU: a third
-  player already goes over it (Godot warns "above the MTU"); interest management /
-  delta compression will be needed before bigger tests.
+  (`PACKED_WING_HEADER` = 10; new small ints can go in that header too); 35 =
+  `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects).
+  Append new fields at the end. **Snapshot size** (`SUMMARY net` on the server; the
+  smoke test fails a snapshot over 1360 bytes, ENet's 1392-byte MTU less the RPC
+  header): own entry ~200–240 bytes, each other player ~145–175, each Husk ~50–60;
+  2 players + 2 Husks ~440–530 bytes, 4 players ~810, 6 players ~1,130 (Godot's Variant
+  encoding was ~1.4 KB for 2 players). About 7 players in view fit one packet;
+  interest management (only nearby players/enemies) is next for more.
   Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
   statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`: a dodge's window, or an ability's
@@ -1078,6 +1092,9 @@ don't bind them to anything else.
 Godot was installed with winget; there is no `godot` on PATH. `tools/find_godot.ps1`
 locates it (override with the `GODOT` env var). PowerShell blocks scripts by default, so
 run them with `-ExecutionPolicy Bypass`:
+(In a Linux cloud container: download the Godot 4.7 Linux build and PowerShell 7
+(`pwsh`), set `GODOT` to the Godot binary, run `$GODOT --headless --import` once, then
+`pwsh -File tools/run_tests.ps1` and `pwsh -File tools/smoke_test.ps1` work as below.)
 
 ```
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # server + you + a bot window
@@ -1086,9 +1103,10 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, snapshots under one packet
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage / paladin)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Bots 6    # more bots (not with -Party): same checks for each, and snapshots must still fit one packet
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.

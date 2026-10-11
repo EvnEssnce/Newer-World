@@ -75,7 +75,11 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 **Sessions 32–36:** the **Assassin**, **Ranger**, zones and summons, the **Mage** and
 the **Paladin**: every class in `design/classes.md` is built. All unplaytested; see §4.
 
-**Latest state (session 28):** Husks drop personal loot; F picks it up; I opens the
+**Session 39:** main now holds everything: the class track branch (sessions 27–37) was
+fast-forwarded into main and the `snapshot-size` branch (session 38) merged on top.
+517 unit tests; smoke passes for every class (details in the session log).
+
+**Session 28:** Husks drop personal loot; F picks it up; I opens the
 inventory with equipped gear; gear changes damage, crits, armor, max health, block
 stamina, healing and Ember. A training dummy (6,000 HP, DPS readout) stands at z = +18
 (session 30). 450 unit tests; the real `smoke_test.ps1` (run with PowerShell 7 on Linux,
@@ -128,12 +132,14 @@ and playtested). Each numbered item is roughly one session with one testable goa
 
 ### Step C: Network headroom (before any test with more than 2 players)
 
-7. **Snapshot size:** with 2 players + 2 Husks a snapshot already reaches ~1.41–1.45 KB,
-   over ENet's 1392-byte MTU; a third player always goes over. Add **interest
-   management** (only nearby players/enemies) and **delta compression** (send what
-   changed since the last acknowledged snapshot). Measure with a 6–10 bot stress run.
-   Probably 2 sessions. Every later step adds players, enemies or state, so this comes
-   first.
+7. **Snapshot size. First half done (session 38, merged in 39):** `NetCodec` compact
+   encoding and a slim `view_array()` for other players took 2 players + 2 Husks from
+   ~1.41–1.45 KB to ~440–530 bytes; 6 players max ~1,130. About 7 players in view fit
+   one packet (the smoke test fails anything over 1,360 bytes). **Still to do** before
+   tests with more than ~7 players together: **interest management** (only nearby
+   players/enemies; clients must hide rather than treat a missing id as "left", and
+   party frames need members' health from elsewhere), then maybe a string table for
+   weapon ids / Wing set (~28 bytes per other player) or **delta compression**.
 
 ### Step D: Milestone 3, gathering and crafting
 
@@ -422,8 +428,8 @@ Gameplay:
 - Builds, inventories and gear are lost on disconnect (Step E).
 
 Networking:
-- Snapshots exceed the MTU at worst with 2 players + 2 Husks (Godot warns "above the
-  MTU"); a third player always does (step 7).
+- Snapshots fit one packet up to about 7 players in view (6 bots: max ~1,130 of 1,360
+  bytes); more needs interest management (step 7).
 - No lag compensation; hit events arrive before the attacker's swing is drawn on other
   clients; no render smoothing after a correction (step 19).
 - Server and client read tuning separately: different `data/*.cfg` files mean constant
@@ -442,6 +448,13 @@ Testing:
   Husk / no player was moved by force". Rerun once; a second failure is real.
 - Linux cloud runner only: two bots quitting at the same instant sometimes print
   `party_members=0` for one of them (quit timing, not a party bug).
+- `smoke_test.ps1 -Bots 6` on a 4-core Linux container: the server quits
+  (`--quit-after` = seconds + 2) before the late-starting clients print their
+  summaries, so 3–4 clients fail "never saw another player / no local player summary"
+  (2 of 2 runs). With the server given seconds + 8 every check passed. Fine on a faster
+  machine; if it shows up on Windows, give the server more slack in the script.
+- "No Husk was moved by force" failed 2 of 9 merged smoke runs (Fighter, `-Bots 4`) on
+  Linux, more often than the 1 in 10 noted before.
 
 Housekeeping:
 - Placeholder swing/flash/damage-number constants live in `player.gd` (cosmetic, to be
@@ -508,6 +521,8 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 35 | 2026-10-10 | The Mage: Great Staff (Meteor Fall, Flame Wall, Searing Ray channel ramp, Blink, Pyroclasm; Wildfire Spread, Clear Mind), Gauntlet (Mending Beam, Renewal Pulse, Siphon lifesteal, Ward absorb shields, Life Spore ally trap, Withering Touch; Overflowing Life, Shared Vitality), Wings (Phoenix Aura, Binding Embers, Searing Glare silence, Wingfall; Rekindle, Hushing Embers). Weapon abilities cost Ember; Mage Ember gain ×2. Zones: solid flag, ally traps, growth. Smoke: Mage heavies push, 400-health Husks. 489 tests; smoke all classes pass (Linux quit race aside) |
 | 36 | 2026-10-10 | The Paladin: Dual Shortstaffs (Consecrating Strikes, Twin Guard, Uplifting Blow, Spinning Staves deflecting, Rush to Aid, Rebuke; Radiant Rhythm, Guarded Grace), Longstaff (Sanctified Ground both-sides zone, Sweeping Rebuke, Guardian's Leap, Staff Spin, Smite, Benediction; Sanctuary, Judgment), Wings (Sheltering Wings, Cleansing Flame, Guardian Wing damage share, Phoenix Blessing, Kindle Life; Purifier Rebirth passives, Mirror Aegis reflect, Everflame). The class track is complete. Smoke skips projectiles for classes that throw nothing. 496 tests; smoke all classes pass apart from known luck checks and the Linux quit race |
 | 37 | 2026-10-10 | Class track leftovers: ability charges in the sim (Second Wind, Second Step; `charge_mask`/`spare_charges` in the packed header), Updraft's hover (`max_fall_speed`), server-steered projectiles with a redirect event (Ricochet bounces, Seeker Spark homing), sticking knives and Recall. 504 tests; smoke Assassin/Ranger pass with 0 corrections; a one-off run with the light attacks turned into Ricochet/Seeker Spark and Recall on Pinning Knife saw 4 bounces, 10 recalls, 16 redirects |
+| 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
+| 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 
 ---
 
