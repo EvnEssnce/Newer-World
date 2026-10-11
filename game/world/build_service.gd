@@ -21,6 +21,8 @@ var loot: LootSystem
 ## Build changes applied / refused (for the smoke test summary).
 var accepted := 0
 var rejected := 0
+## Class changes applied (_request_class).
+var class_changes := 0
 
 # Client
 var local_build: CharacterBuild
@@ -108,6 +110,55 @@ func _request_wings(nodes: PackedStringArray, slots: PackedStringArray) -> void:
 	_finish(player, error)
 
 
+## Client → server: become another class (a test tool, data/testing.cfg
+## [class_change] enabled). Out of combat and between actions only
+## (PlayerState.class_change_error); a clean start: the class's default build,
+## full health, the state reset of PlayerState.reset_for_class_change, and gear
+## the class can't wear back in the bag (LootSystem.class_changed).
+@rpc("any_peer", "call_remote", "reliable")
+func _request_class(class_id: String) -> void:
+	var player := _sender_player()
+	if player == null:
+		return
+	var class_def := ClassDef.for_id(class_id)
+	var error := ""
+	if not class_change_enabled():
+		error = "Changing class is switched off."
+	elif player.build == null:
+		error = "No build yet."
+	elif class_def == null:
+		error = "There's no class \"%s\"." % class_id
+	elif class_def == player.build.class_def:
+		error = "You're already a %s." % class_def.display_name
+	else:
+		error = player.state.class_change_error()
+	if error.is_empty() and loot:
+		error = loot.check_class_change(player, class_def)
+	if not error.is_empty():
+		rejected += 1
+		print("[server] peer %d class change refused: %s" % [player.peer_id, error])
+		send_build(player, error)
+		return
+	var old_class := player.build.class_def.id
+	player.state.reset_for_class_change(player.params)
+	player.reset_class_state()
+	player.build = CharacterBuild.create_default(class_def)
+	player.build.apply_to_state(player.state, player.params)
+	if loot:
+		loot.class_changed(player)
+	player.health = player.max_health()
+	accepted += 1
+	class_changes += 1
+	print("[server] peer %d changed class: %s -> %s" % [player.peer_id, old_class, class_def.id])
+	send_build(player)
+
+
+## data/testing.cfg [class_change] enabled: the server allows _request_class,
+## and the K panel shows the Class picker.
+static func class_change_enabled() -> bool:
+	return Tuning.get_optional("testing", "class_change", "enabled", false)
+
+
 func _check_can_change(player: Player) -> String:
 	if player.build == null:
 		return "No build yet."
@@ -153,6 +204,10 @@ func request_weapons(weapons: PackedStringArray) -> void:
 
 func request_wings(nodes: PackedStringArray, slots: PackedStringArray) -> void:
 	_request_wings.rpc_id(1, nodes, slots)
+
+
+func request_class(class_id: String) -> void:
+	_request_class.rpc_id(1, class_id)
 
 
 ## Test bot: a free respec of the Wing tree to its default allocation plus the

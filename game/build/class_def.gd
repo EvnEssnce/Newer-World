@@ -28,6 +28,14 @@ static func for_id(class_id: String) -> ClassDef:
 	return _cache[class_id]
 
 
+## Every class with a data/class_<id>.cfg, sorted (the K panel's Class picker).
+static func all_ids() -> PackedStringArray:
+	var ids := PackedStringArray()
+	for file in Tuning.files_with_prefix("class_"):
+		ids.append(file.trim_prefix("class_"))
+	return ids
+
+
 static func from_tuning(class_id: String) -> ClassDef:
 	var file := "class_" + class_id
 	var c := ClassDef.new()

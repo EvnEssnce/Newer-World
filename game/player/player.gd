@@ -365,6 +365,24 @@ func get_snapshot() -> Array:
 			Vector2(health, max_health())]
 
 
+## Server: forgets the server-only state an old class's abilities and
+## capstones left (counters, Ward shield, Phoenix Blessing, Hold the Line
+## targets) on a class change (BuildService._request_class).
+func reset_class_state() -> void:
+	line_inside.clear()
+	line_ready_at.clear()
+	status_damage_pending = 0.0
+	status_heal_pending = 0.0
+	heavy_counter = HeavyCounter.new()
+	throw_counter = HeavyCounter.new()
+	hit_counter = HeavyCounter.new()
+	last_release_tick = -1
+	last_heavy_hit_tick = -1
+	absorb = 0.0
+	blessing_until_tick = -1
+	wall_stun_source = 0
+
+
 ## Base max health plus gear's.
 func max_health() -> float:
 	return params.max_health + bonus_max_health

@@ -375,6 +375,34 @@ func check_weapon_change(player: Player, weapons: PackedStringArray) -> String:
 	return ""
 
 
+## Server: "" if `player` can become `class_def` as far as gear goes: the bag
+## has room for whatever of theirs the new class can't wear.
+func check_class_change(player: Player, class_def: ClassDef) -> String:
+	var worn: Equipment = _equipment.get(player.peer_id)
+	if worn == null:
+		return ""
+	var off := worn.slots_off_for_class(_db, class_def.id, class_def.weapons)
+	if off.size() > _inventories[player.peer_id].free_slots():
+		return "No room in your inventory for the gear your new class can't use."
+	return ""
+
+
+## Server: the player's class changed (BuildService._request_class): gear the
+## new class can't wear goes back to the bag; weapon items of its types follow
+## the new loadout.
+func class_changed(player: Player) -> void:
+	var worn: Equipment = _equipment.get(player.peer_id)
+	if worn == null:
+		return
+	var class_def := player.build.class_def
+	for equip_slot in worn.slots_off_for_class(_db, class_def.id, class_def.weapons):
+		_inventories[player.peer_id].add(worn.unequip(equip_slot))
+	for item in worn.sync_weapons(player.state.weapons, _db):
+		_inventories[player.peer_id].add(item)
+	_apply_gear(player)
+	_send_inventory(player.peer_id)
+
+
 ## Server: the weapon types changed (K panel): weapon items follow their type,
 ## or go back to the bag.
 func weapons_changed(player: Player) -> void:

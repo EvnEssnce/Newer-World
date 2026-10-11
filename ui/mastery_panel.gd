@@ -103,6 +103,8 @@ func _refresh() -> void:
 	var slots := _current_slots()
 
 	_content.add_child(_header(build, tree, nodes))
+	if BuildService.class_change_enabled():
+		_content.add_child(_class_row(build))
 	_content.add_child(_weapon_row(build))
 	_content.add_child(_slot_row(tree, nodes, slots))
 	var columns := HBoxContainer.new()
@@ -156,6 +158,33 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 	defaults.text = "Default"
 	defaults.pressed.connect(_send.bind(tree.default_nodes, tree.default_slots))
 	row.add_child(defaults)
+	return row
+
+
+## Test tool (data/testing.cfg): every class; picking one asks the server to
+## switch (BuildService.request_class). The panel redraws from the reply, so a
+## refused switch (in combat, mid-action) snaps back and shows why.
+func _class_row(build: CharacterBuild) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_label("Class:", Color.WHITE))
+	var picker := OptionButton.new()
+	picker.custom_minimum_size = Vector2(150, 0)
+	picker.tooltip_text = "Switch class (test tool). Out of combat only; starts you fresh with the class's default build."
+	for class_id in ClassDef.all_ids():
+		var class_def := ClassDef.for_id(class_id)
+		if class_def == null:
+			continue
+		picker.add_item(class_def.display_name)
+		picker.set_item_metadata(picker.item_count - 1, class_id)
+		if class_def == build.class_def:
+			picker.select(picker.item_count - 1)
+	picker.item_selected.connect(func(index: int) -> void:
+		_builds.request_class(picker.get_item_metadata(index)))
+	row.add_child(picker)
+	var note := _label("Test tool: out of combat only. Resets health, Ember, cooldowns and your build to the class's defaults.", HINT_COLOR, true)
+	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(note)
 	return row
 
 

@@ -79,6 +79,10 @@ the **Paladin**: every class in `design/classes.md` is built. All unplaytested; 
 fast-forwarded into main and the `snapshot-size` branch (session 38) merged on top.
 517 unit tests; smoke passes for every class (details in the session log).
 
+**Session 40:** a **Class picker in the K panel** (test tool, `data/testing.cfg`): switch
+to any class in one window, out of combat, as a clean start. Use it for the class
+playtests below instead of restarting with `-Class`.
+
 **Session 28:** Husks drop personal loot; F picks it up; I opens the
 inventory with equipped gear; gear changes damage, crits, armor, max health, block
 stamina, healing and Ember. A training dummy (6,000 HP, DPS readout) stands at z = +18
@@ -224,6 +228,12 @@ trees, Wings, models), plus the systems it needs:
 ## 4. Outstanding work
 
 ### Needs a hand playtest (`run_local_test.ps1`)
+
+**Class picker (session 40):** K, then the Class picker above "Equipped weapons": does
+the switch feel instant and clean (new weapons in hand, Wings on Z/C, full health,
+Ember 50, no cooldowns)? In combat (6 s after a hit) it's refused with a reason. Gear
+of the old class (weapons, Wing Enhancement) should land in the bag (I). Does the bot
+window still see you right after you switch?
 
 **Loot (session 27):**
 - Kill Husks: do drops read well (sack, beam, name, rarity colours)? Is the 2.5 m pickup
@@ -446,6 +456,9 @@ Networking:
 Testing:
 - Bot-luck smoke checks still fail about 1 run in 10: "no hit landed on a guard", "no
   Husk / no player was moved by force". Rerun once; a second failure is real.
+  On the Linux container (sessions 39–40) it's more like 1 in 2 for Fighter runs, a
+  different check each time (force most often, also gear "nothing was equipped" and
+  the guard check): worth making these checks deterministic.
 - Linux cloud runner only: two bots quitting at the same instant sometimes print
   `party_members=0` for one of them (quit timing, not a party bug).
 - `smoke_test.ps1 -Bots 6` on a 4-core Linux container: the server quits
@@ -523,6 +536,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 37 | 2026-10-10 | Class track leftovers: ability charges in the sim (Second Wind, Second Step; `charge_mask`/`spare_charges` in the packed header), Updraft's hover (`max_fall_speed`), server-steered projectiles with a redirect event (Ricochet bounces, Seeker Spark homing), sticking knives and Recall. 504 tests; smoke Assassin/Ranger pass with 0 corrections; a one-off run with the light attacks turned into Ricochet/Seeker Spark and Recall on Pinning Knife saw 4 bounces, 10 recalls, 16 redirects |
 | 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
+| 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
 
 ---
 

@@ -110,7 +110,8 @@ game/
                              Pure logic, unit tested.
 ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars, ability
                      bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
-                     mastery_panel (K: equipped weapons, weapon trees and a Wings tab, respec, slots),
+                     mastery_panel (K: Class picker (test tool), equipped weapons, weapon trees
+                     and a Wings tab, respec, slots),
                      party_hud (party frames, invite prompt, party notices; built in code),
                      loot_hud (pickup prompt, loot feed, equip bar) and inventory_panel (I:
                      equipped gear and the bag).
@@ -123,7 +124,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
-                     armor, equip time), party, status_effects, projectiles, zones (.cfg).
+                     armor, equip time), party, status_effects, projectiles, zones,
+                     testing (test-only switches: the in-game class change) (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -197,6 +199,19 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   ability indices, Wing set and slots) into `PlayerState.set_loadout` / `set_wings`,
   server events, so it reaches the client through snapshots. Passive/upgrade nodes are
   server-only damage/stamina/damage-taken modifiers, never sim state.
+- **Changing class in-game** (a test tool, `data/testing.cfg [class_change] enabled`;
+  turn it off before playtests with other people): the K panel's Class picker sends
+  `_request_class(class_id)`. The server refuses it unless enabled, a real other class,
+  and `PlayerState.class_change_error()` is "" (alive, out of combat: `combat_ticks` 0,
+  not mid-attack/ability/swap/gear change, roll, stagger or forced move), and
+  `LootSystem.check_class_change` (bag room for the gear that must come off). Then a
+  clean start: `PlayerState.reset_for_class_change` (full stamina, no statuses, Ember at
+  resting, every cooldown and spare charge cleared, first weapon out; a server event),
+  `Player.reset_class_state` (server-only counters, Ward, Phoenix Blessing), the new
+  class's default `CharacterBuild` + `apply_to_state`, `LootSystem.class_changed`
+  (`Equipment.slots_off_for_class`: other classes' weapons and Wing Enhancement back to
+  the bag), full health, `_receive_build`. Zones and projectiles already out stay until
+  they end. Counted in `BuildService.class_changes`.
 - **On-floor is synced state**: `PlayerMovement` reads `PlayerState.on_floor` (set after
   each `move_and_slide`), never `body.is_on_floor()` directly, so a restored state
   carries it. Server-side teleports (respawn) should still land exactly on the ground.

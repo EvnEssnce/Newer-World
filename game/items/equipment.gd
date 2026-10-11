@@ -99,6 +99,19 @@ func unequip(equip_slot: String) -> Item:
 	return previous
 
 
+## The equip slots whose item a character of class `class_id` (using
+## `class_weapons`) can't wear: what has to come off on a class change
+## (another class's weapons and Wing Enhancement).
+func slots_off_for_class(db: ItemDatabase, class_id: String,
+		class_weapons: PackedStringArray) -> PackedStringArray:
+	var result := PackedStringArray()
+	for equip_slot in SLOTS:
+		var item: Item = items.get(equip_slot)
+		if item and not check(item, equip_slot, db, class_id, class_weapons).is_empty():
+			result.append(equip_slot)
+	return result
+
+
 ## After the loadout's weapons changed (K panel, or an equip): moves each
 ## weapon item to the slot now holding its type. Returns the ones whose type
 ## isn't equipped any more, taken out (they go back to the bag).

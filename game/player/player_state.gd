@@ -504,6 +504,48 @@ func is_equipping() -> bool:
 	return equip_left > 0
 
 
+## Why the class can't change now (BuildService._request_class, a test tool),
+## or "": alive, out of combat, and not mid-attack/ability/swap/gear change,
+## roll, stagger or forced movement.
+func class_change_error() -> String:
+	if dead:
+		return "You can't change class while defeated."
+	if combat_ticks > 0:
+		return "You can't change class in combat (wait %.0f s)." % ceilf(
+				combat_ticks / float(Engine.physics_ticks_per_second))
+	if not can_change_loadout() or dodge_tick >= 0 or not can_act():
+		return "Finish what you're doing first."
+	return ""
+
+
+## Server: a class change is a clean start, like a respawn without dying: full
+## stamina, no statuses, Ember at its resting level, every cooldown (abilities,
+## Wings, roll, Rebirth) and spare charge cleared, the first weapon out, nothing
+## queued. A server event. The new build's apply_to_state comes after.
+func reset_for_class_change(params: PlayerParams) -> void:
+	stamina = params.max_stamina
+	stamina_regen_wait = 0
+	statuses.clear()
+	ember = params.ember_resting
+	combat_ticks = 0
+	cooldowns.fill(0)
+	wing_cooldowns.fill(0)
+	dodge_cooldown = 0
+	dodge_buffer = 0
+	air_dodges_used = 0
+	rebirth_cooldown = 0
+	rebirth_charges = 0
+	spare_charges = 0
+	equipped = 0
+	blocking = false
+	queued_attack = ATTACK_NONE
+	queued_attack_ticks = 0
+	queued_ability_slot = -1
+	swap_buffer = 0
+	attack_speed_carry = 0.0
+	server_events += 1
+
+
 ## Equips new_weapons (ids, one per weapon slot) with new_slots (see
 ## ability_slots). A weapon that stays equipped keeps its cooldowns, even if it
 ## moves to the other slot.
