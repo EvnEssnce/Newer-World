@@ -1070,10 +1070,11 @@ func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: Player
 	yaw = aim_yaw
 	var started := attack_params(params) as AbilityParams
 	# A backward dash moves away from where the ability faces; an input dash
-	# (Vault) goes the way you're moving, or backward with no input.
+	# (Vault) goes the way you're moving, or backward with no input (forward
+	# with dash_input_forward: Blink, Ashstep).
 	ability_dir = -forward(yaw) if started.dash_backward else forward(yaw)
 	if started.dash_from_input:
-		ability_dir = move.normalized() if move.length() > 0.1 else -forward(yaw)
+		ability_dir = dash_input_direction(move, yaw, started.dash_input_forward)
 		# Face the way it goes (its turn_speed 0 keeps it there for the vault).
 		yaw = yaw_for_direction(ability_dir)
 	# A pitch-aimed dash (Crashing Leap) keeps its fraction of the distance in
@@ -1126,6 +1127,27 @@ func _step_attack_speed(params: PlayerParams) -> void:
 		return
 	attack_speed_carry -= 1.0
 	attack_tick += 1
+
+
+## An input dash's direction: the way the movement input points, or with no
+## input backward from the facing (Vault), or forward with no_input_forward.
+static func dash_input_direction(move: Vector2, facing: float, no_input_forward: bool) -> Vector2:
+	if move.length() > 0.1:
+		return move.normalized()
+	return forward(facing) if no_input_forward else -forward(facing)
+
+
+## If this (later) view of a player shows its current ability's teleport
+## happened since `before` (an earlier view of it), how many ticks ago;
+## else -1. Clients use it to snap remote players across the gap.
+func ticks_since_teleport(before: PlayerState, params: PlayerParams) -> int:
+	var a := current_ability(params)
+	if a == null or not a.is_teleport() or attack_tick < a.teleport_tick:
+		return -1
+	if (before != null and before.attack_serial == attack_serial
+			and before.attack_tick >= a.teleport_tick):
+		return -1  # it had already happened
+	return attack_tick - a.teleport_tick
 
 
 ## The yaw that faces a world-space XZ direction.

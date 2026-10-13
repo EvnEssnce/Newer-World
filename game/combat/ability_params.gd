@@ -22,8 +22,15 @@ var dash_ease_in := false
 ## The dash goes backward, away from where the ability faces.
 var dash_backward := false
 ## The dash goes the way the movement input points as the ability starts;
-## backward (away from the facing) with no input (Vault).
+## backward (away from the facing) with no input (Vault), or forward with
+## dash_input_forward (dash_direction="input_forward": Blink, Ashstep).
 var dash_from_input := false
+var dash_input_forward := false
+## Teleport (teleport=true): no dash speed; on ability tick teleport_tick the
+## sim moves the user teleport_distance m at once along ability_dir, stopping
+## short of walls (PlayerMovement.teleport). 0 = none.
+var teleport_distance := 0.0
+var teleport_tick := 0
 ## The dash is aimed by the camera's pitch (Crashing Leap): at or below
 ## aim_full_pitch it goes the full distance, at or above aim_zero_pitch 0 m
 ## (straight up), scaled linearly in between. Radians, up = positive.
@@ -73,6 +80,20 @@ func is_dashing(tick: int) -> bool:
 	return dash_speed > 0.0 and tick >= dash_start_tick and tick < dash_end_tick
 
 
+func is_teleport() -> bool:
+	return teleport_distance > 0.0
+
+
+## True on the ability tick its teleport happens.
+func teleports_at(tick: int) -> bool:
+	return teleport_distance > 0.0 and tick == teleport_tick
+
+
+## It moves its user: a dash or a teleport.
+func moves_user() -> bool:
+	return dash_speed > 0.0 or teleport_distance > 0.0
+
+
 ## The dash's speed (m/s) on this ability tick (one inside the dash). Eased in,
 ## the speed on dash tick i of n is dash_speed * (2i + 1) / n: the distance
 ## covered by the end of tick i grows with the square of the time, and the
@@ -119,12 +140,17 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 	var dash_distance: float = Tuning.get_optional(file, section, "dash_distance", 0.0)
 	if dash_distance > 0.0:
 		a.dash_start_tick = roundi(Tuning.get_value(file, section, "dash_start") * tps)
-		a.dash_end_tick = maxi(a.dash_start_tick + 1,
-				roundi(Tuning.get_value(file, section, "dash_end") * tps))
-		a.dash_speed = dash_distance / ((a.dash_end_tick - a.dash_start_tick) / tps)
+		if Tuning.get_optional(file, section, "teleport", false):
+			a.teleport_distance = dash_distance
+			a.teleport_tick = a.dash_start_tick
+		else:
+			a.dash_end_tick = maxi(a.dash_start_tick + 1,
+					roundi(Tuning.get_value(file, section, "dash_end") * tps))
+			a.dash_speed = dash_distance / ((a.dash_end_tick - a.dash_start_tick) / tps)
 		var direction: String = Tuning.get_optional(file, section, "dash_direction", "forward")
 		a.dash_backward = direction == "back"
-		a.dash_from_input = direction == "input"
+		a.dash_from_input = direction == "input" or direction == "input_forward"
+		a.dash_input_forward = direction == "input_forward"
 		a.dash_ease_in = Tuning.get_optional(file, section, "dash_ease", "none") == "in"
 		a.dash_aim_pitch = Tuning.get_optional(file, section, "dash_aim_pitch", false)
 		if a.dash_aim_pitch:

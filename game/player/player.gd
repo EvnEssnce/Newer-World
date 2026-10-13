@@ -635,6 +635,11 @@ func interpolate(render_time: float) -> void:
 		var to_state: PlayerState = to[2]
 		var weight: float = (render_time - from[0]) / (to[0] - from[0])
 		new_pos = from[1].lerp(to[1], weight)
+		var teleport_ago := to_state.ticks_since_teleport(from_state, params)
+		if teleport_ago >= 0:
+			# A teleport (Blink) between the two: snap across the gap, don't glide.
+			var at: float = to[0] - teleport_ago / float(Engine.physics_ticks_per_second)
+			new_pos = to[1] if render_time >= at else from[1]
 		yaw = lerp_angle(from_state.yaw, to_state.yaw, weight)
 		if from_state.is_dodging() and to_state.dodge_tick > from_state.dodge_tick:
 			dodge_progress = lerpf(dodge_progress, to_state.dodge_progress(params), weight)
