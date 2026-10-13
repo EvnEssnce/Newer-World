@@ -62,14 +62,18 @@ func trigger() -> void:
 
 
 ## True if feet at `point` stand in the zone: within radius (horizontally) and
-## within height above or below its center. A wall's box counts as its area.
-func contains(point: Vector3) -> bool:
+## within height above or below its center. A wall's box counts as its area,
+## and there a body of `body_radius` counts as soon as it overlaps the box: a
+## wall is an upright volume, and a thin one (Flame Wall: 1.2 m deep) tested
+## at the feet alone missed bodies that stood visibly in it, and let walkers
+## cross between two pulses. A disc is a ground marking: the feet decide.
+func contains(point: Vector3, body_radius := 0.0) -> bool:
 	if absf(point.y - position.y) > params.height:
 		return false
 	if params.wall:
 		var local := _to_local(point)
-		return (absf(local.x) <= params.wall_width * scale / 2.0
-				and absf(local.y) <= params.wall_depth / 2.0)
+		return (absf(local.x) <= params.wall_width * scale / 2.0 + body_radius
+				and absf(local.y) <= params.wall_depth / 2.0 + body_radius)
 	return Vector2(point.x - position.x, point.z - position.z).length() <= params.radius * scale
 
 
