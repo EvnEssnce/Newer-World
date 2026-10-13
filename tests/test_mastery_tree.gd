@@ -262,9 +262,8 @@ func test_check_reports_unreachable_nodes() -> void:
 ## aimed at one of its tree's abilities requires the node that unlocks it.
 func test_every_real_tree_is_sound() -> void:
 	# Upgrades that work without their ability (Endless Flurry fires Fan of
-	# Knives itself), and the Throwing Knives tree (another session's file)
-	# until it gets its requires: Heavy Pin, Wide Fan.
-	var exempt := ["endless_flurry", "heavy_pin", "wide_fan"]
+	# Knives itself).
+	var exempt := ["endless_flurry"]
 	var count := 0
 	for file in DirAccess.get_files_at("res://data"):
 		if not (file.begins_with("mastery_") and file.ends_with(".cfg")) or file == "mastery.cfg":
