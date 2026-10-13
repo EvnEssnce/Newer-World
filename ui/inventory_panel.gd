@@ -505,18 +505,26 @@ func _comparison(item: Item, def: ItemDatabase.ItemDef) -> Array:
 		if def.slot == "weapon":
 			against = "plain %s" % _weapon_name(def.weapon_type)
 			against_long = "Compared with your plain %s:" % _weapon_name(def.weapon_type)
-	var parts := PackedStringArray()
+	var gains := false
+	var losses := false
 	var lines := PackedStringArray([against_long])
 	for stat: String in changes:
-		var change := Item.display_change(stat, changes[stat])
-		var color := BETTER_COLOR if changes[stat] > 0.0 else WORSE_COLOR
-		parts.append("[color=#%s]%s[/color]" % [color.to_html(false), change])
-		lines.append(change)
-	if parts.is_empty():
-		parts.append("same stats")
+		lines.append(Item.display_change(stat, changes[stat]))
+		gains = gains or changes[stat] > 0.0
+		losses = losses or changes[stat] < 0.0
+	if not gains and not losses:
 		lines.append("Same stats.")
-	return ["[color=#%s]vs. %s:[/color] %s" % [HINT_COLOR.to_html(false), against,
-			"   ".join(parts)], lines]
+	# The card only shows which way it goes (a trade-off shows both arrows); the
+	# tooltip has every stat.
+	var arrows := ""
+	if gains:
+		arrows += "[color=#%s]▲[/color]" % BETTER_COLOR.to_html(false)
+	if losses:
+		arrows += "[color=#%s]▼[/color]" % WORSE_COLOR.to_html(false)
+	if arrows.is_empty():
+		arrows = "="
+	return ["%s [color=#%s]vs. %s[/color]" % [arrows, HINT_COLOR.to_html(false), against],
+			lines]
 
 
 ## "Chest", "Spear", "Wing Enh." (short, for the card's first line).

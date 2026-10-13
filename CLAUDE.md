@@ -1090,7 +1090,7 @@ don't bind them to anything else.
   (1 + ember_gain_pct); `Player.max_health()` = base + max_health (health is capped
   when it drops). `max_stamina` / `stamina_regen_pct` affixes are off (`slots=[]`)
   until stamina gear is synced sim state. Average gear score (inventory title):
-  weighted by `[average] weights`, an empty weapon slot = GS 100.
+  weighted by `[average] weights`, every empty slot = GS 100 (the base), so gear only raises it.
 - `SUMMARY gear equips= unequips=` (LootSystem) and `SUMMARY gear_combat gear_crits=
   armored_hits= armor_stopped=` (World); the smoke test checks an equip (its Husks
   drop only armor there, so any class can wear it).

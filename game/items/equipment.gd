@@ -158,9 +158,8 @@ func sync_weapons(loadout: PackedStringArray, db: ItemDatabase) -> Array[Item]:
 	return removed
 
 
-## What the equipped items add up to. In the average gear score an empty
-## weapon slot counts as the plain weapon's base gear score, other empty slots
-## as 0.
+## What the equipped items add up to. In the average gear score every empty
+## slot counts as the base gear score (a plain weapon's), so gear only raises it.
 func stats(db: ItemDatabase, weights: Dictionary) -> Stats:
 	var result := Stats.new()
 	var weighted := 0.0
@@ -170,8 +169,7 @@ func stats(db: ItemDatabase, weights: Dictionary) -> Stats:
 		total_weight += weight
 		var item: Item = items.get(equip_slot)
 		if item == null:
-			if equip_slot.begins_with("weapon_"):
-				weighted += weight * db.gear.base
+			weighted += weight * db.gear.base
 			continue
 		weighted += weight * item.gear_score
 		var def: ItemDatabase.ItemDef = db.items.get(item.item_id)

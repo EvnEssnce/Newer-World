@@ -158,11 +158,12 @@ func test_stats_add_up_armor_powers_and_bonuses() -> void:
 func test_average_gear_score_weighs_slots() -> void:
 	var worn := Equipment.new()
 	var weights := {"weapon_1": 0.5, "head": 0.25, "chest": 0.25}
-	assert_almost(worn.stats(db, weights).average_gear_score, 0.5 * 100,
-			0.001, "a plain weapon counts as the base gear score, empty armor as 0")
+	assert_almost(worn.stats(db, weights).average_gear_score, 100.0,
+			0.001, "every empty slot counts as the base gear score")
 	worn.equip("weapon_1", _item("sword", 120))
-	worn.equip("head", _item("cap", 100))
-	assert_almost(worn.stats(db, weights).average_gear_score, 0.5 * 120 + 0.25 * 100)
+	worn.equip("head", _item("cap", 140))
+	assert_almost(worn.stats(db, weights).average_gear_score,
+			0.5 * 120 + 0.25 * 140 + 0.25 * 100)
 
 
 func test_summary_lines_show_only_what_gear_adds() -> void:
