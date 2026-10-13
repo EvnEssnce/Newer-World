@@ -177,3 +177,114 @@ func test_block_stamina_modifier() -> void:
 	tree.get_node("a_pas").amount = -0.15
 	assert_almost(tree.block_stamina_multiplier(PackedStringArray(["a_pas"])), 0.85)
 	assert_almost(tree.block_stamina_multiplier(PackedStringArray()), 1.0)
+
+
+# --- requires (ability combos) ---
+
+func _requires(id: String, ids: Array) -> void:
+	tree.get_node(id).requires = PackedStringArray(ids)
+
+
+func test_requires_needs_the_required_node_learned() -> void:
+	_requires("b_act", ["a_act"])
+	assert_false(_ok(["b_act"]), "without a_act")
+	assert_true(tree.validate(PackedStringArray(["b_act"])).contains("requires a_act"))
+	assert_true(_ok(["a_act", "b_act"]))
+	assert_true(_ok(["b_act", "a_act"]), "order doesn't matter")
+	assert_false(tree.can_add(PackedStringArray(["a_pas"]), "b_act"))
+	assert_true(tree.can_add(PackedStringArray(["a_act"]), "b_act"))
+
+
+func test_unlearning_a_required_node_unlearns_what_needs_it() -> void:
+	_requires("b_act", ["a_act"])
+	var nodes := PackedStringArray(["a_act", "a_pas", "b_act"])
+	assert_eq(tree.remove(nodes, "a_act"), PackedStringArray(["a_pas"]))
+	assert_eq(tree.lost_with(nodes, "a_act"), PackedStringArray(["b_act"]))
+	assert_eq(tree.lost_with(nodes, "b_act"), PackedStringArray())
+	# Tier gates cascade too: a_pas pays for a_two's gate.
+	var deeper := PackedStringArray(["a_act", "a_pas", "a_two"])
+	assert_eq(tree.lost_with(deeper, "a_pas"), PackedStringArray(["a_two"]))
+
+
+func test_prune_keeps_a_node_listed_before_its_same_tier_requirement() -> void:
+	_requires("a_pas", ["a_act"])
+	assert_eq(tree.prune(PackedStringArray(["a_pas", "a_act"])), PackedStringArray(["a_act", "a_pas"]))
+
+
+func test_missing_requirements_and_names() -> void:
+	_requires("b_big", ["a_act", "a_two"])
+	assert_eq(tree.missing_requirements(PackedStringArray(["a_act"]), "b_big"), PackedStringArray(["a_two"]))
+	assert_eq(tree.all_requirements("b_big"), PackedStringArray(["a_act", "a_two"]))
+	tree.get_node("a_act").display_name = "Slash"
+	assert_eq(tree.display_names(PackedStringArray(["a_act"])), "Slash")
+	assert_eq(tree.display_names(PackedStringArray(["a_act", "a_two", "b_act"])), "Slash, a_two and b_act")
+
+
+func _has_problem(text: String) -> bool:
+	for problem in tree.check():
+		if problem.contains(text):
+			return true
+	return false
+
+
+func test_check_accepts_a_sound_tree() -> void:
+	_requires("b_act", ["a_act"])
+	_requires("a_three", ["a_two"])
+	assert_eq(tree.check(), PackedStringArray())
+
+
+func test_check_reports_bad_requires() -> void:
+	_requires("a_pas", ["nope"])
+	assert_true(_has_problem("unknown node \"nope\""), "unknown id")
+	_requires("a_pas", ["a_pas"])
+	assert_true(_has_problem("requires itself"), "itself")
+	_requires("a_pas", [])
+	_requires("a_act", ["a_two"])
+	assert_true(_has_problem("a higher tier"), "higher tier")
+	_requires("a_act", ["a_pas"])
+	_requires("a_pas", ["a_act"])
+	assert_true(_has_problem("cycle"), "cycle")
+
+
+func test_check_reports_unreachable_nodes() -> void:
+	tree.tier_requirements = PackedInt32Array([0, 2, 4])
+	assert_true(_has_problem("a_three can't be reached: tier 3 needs 4"), "tier gate past the branch")
+	tree.tier_requirements = PackedInt32Array([0, 2, 3])
+	_requires("a_three", ["b_big"])
+	# a: 3 below tier 3 + a_three; b: b_big = 6 points of 5.
+	assert_eq(tree.min_cost("a_three"), 6)
+	assert_true(_has_problem("a_three can't be reached: it needs at least 6"), "over budget")
+	tree.default_nodes = PackedStringArray(["a_two"])
+	assert_true(_has_problem("[default]"), "bad default allocation")
+
+
+## Every real tree file loads without problems, and every upgrade or capstone
+## aimed at one of its tree's abilities requires the node that unlocks it.
+func test_every_real_tree_is_sound() -> void:
+	# Upgrades that work without their ability (Endless Flurry fires Fan of
+	# Knives itself), and the Throwing Knives tree (another session's file)
+	# until it gets its requires: Heavy Pin, Wide Fan.
+	var exempt := ["endless_flurry", "heavy_pin", "wide_fan"]
+	var count := 0
+	for file in DirAccess.get_files_at("res://data"):
+		if not (file.begins_with("mastery_") and file.ends_with(".cfg")) or file == "mastery.cfg":
+			continue
+		var key := file.trim_prefix("mastery_").trim_suffix(".cfg")
+		var t := (MasteryTree.for_wings(key.trim_prefix("wings_")) if key.begins_with("wings_")
+				else MasteryTree.for_weapon(key))
+		assert_true(t != null, file)
+		if t == null:
+			continue
+		count += 1
+		assert_eq(t.check(), PackedStringArray(), file)
+		var unlocks := {}
+		for id in t.node_order:
+			var n := t.get_node(id)
+			if n.kind == MasteryTree.KIND_ACTIVE:
+				unlocks[n.ability] = id
+		for id in t.node_order:
+			var n := t.get_node(id)
+			if n.kind != MasteryTree.KIND_ACTIVE and unlocks.has(n.applies_to) and not (id in exempt):
+				assert_true(unlocks[n.applies_to] in t.all_requirements(id),
+						"%s: %s should require %s" % [file, id, unlocks[n.applies_to]])
+	assert_true(count >= 21, "found %d tree files" % count)
