@@ -40,6 +40,32 @@ class Stats:
 	func weapon_gear_score_for(weapon_type: String, base: int) -> int:
 		return weapon_gear_score.get(weapon_type, base)
 
+	## Short lines for the HUD's equipment summary, only what gear adds:
+	## "Armor 84", "Broadsword power 112%", "Wing power 108%", then each bonus
+	## in Item.STAT_TEXT order (unknown stats last), e.g. "+3.1% crit chance".
+	func summary_lines() -> PackedStringArray:
+		var lines := PackedStringArray()
+		if armor > 0.0:
+			lines.append("Armor %d" % roundi(armor))
+		for weapon_type: String in weapon_power:
+			lines.append("%s power %d%%" % [weapon_type.capitalize(),
+					roundi(weapon_power[weapon_type] * 100.0)])
+		if wing_gear_score > 0:
+			lines.append("Wing power %d%%" % roundi(wing_power * 100.0))
+		var order: Array = Item.STAT_TEXT.keys()
+		var stats: Array = bonuses.keys()
+		stats.sort_custom(func(a: String, b: String) -> bool:
+			var ia := order.find(a)
+			var ib := order.find(b)
+			if ia < 0:
+				ia = order.size()
+			if ib < 0:
+				ib = order.size()
+			return ia < ib if ia != ib else a < b)
+		for stat: String in stats:
+			lines.append(Item.display_stat(stat, bonuses[stat]))
+		return lines
+
 
 ## Equip slot -> Item. Missing = empty.
 var items: Dictionary[String, Item] = {}

@@ -42,6 +42,10 @@ var _ember_marker: ColorRect
 var _ember_label: Label
 ## Blind statuses (Dazzled): a white haze over the whole screen.
 var _blind_overlay: ColorRect
+## "742 / 1000" on the health bar.
+var _health_label: Label
+## Gear score, equip slot symbols and gear stat totals, top right.
+var _equipment_summary: EquipmentSummary
 
 
 func _ready() -> void:
@@ -49,6 +53,7 @@ func _ready() -> void:
 	_build_wing_bar()
 	_build_ember_bar()
 	_build_status_row()
+	_build_health_label()
 	_blind_overlay = ColorRect.new()
 	_blind_overlay.color = Color(1.0, 0.97, 0.9, 0.0)
 	_blind_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -61,9 +66,32 @@ func set_info(text: String) -> void:
 	_info.text = text
 
 
+## max_value is the real maximum (gear's max health included).
 func set_health(value: float, max_value: float) -> void:
 	_health.max_value = max_value
 	_health.value = value
+	var text := "%d / %d" % [ceili(maxf(value, 0.0)), roundi(max_value)]
+	if _health_label.text != text:
+		_health_label.text = text
+
+
+## The equipment summary (top right) for this client's gear (World calls it).
+func setup_equipment(loot: LootSystem) -> void:
+	_equipment_summary = EquipmentSummary.new()
+	add_child(_equipment_summary)
+	_equipment_summary.setup(loot)
+
+
+func _build_health_label() -> void:
+	_health_label = Label.new()
+	_health_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_health_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_health_label.add_theme_font_size_override(&"font_size", 12)
+	_health_label.add_theme_constant_override(&"outline_size", 3)
+	_health_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	_health_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_health.add_child(_health_label)
 
 
 ## Big centered message (e.g. the respawn countdown); empty hides it.
