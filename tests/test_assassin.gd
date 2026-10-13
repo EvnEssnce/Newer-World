@@ -174,3 +174,31 @@ func test_assassin_wing_tree_default_build_is_valid() -> void:
 		var n := t.get_node(id)
 		if n.kind == MasteryTree.KIND_ACTIVE:
 			assert_true(wings.ability_index(n.ability) >= 0, "%s's ability %s" % [id, n.ability])
+
+
+func test_shadow_swap_needs_ember_double() -> void:
+	var t := MasteryTree.for_wings("assassin")
+	var swap := t.get_node("shadow_swap")
+	assert_eq(swap.branch, "trickster")
+	assert_true(swap.tier > t.get_node("ember_double").tier, "below Ember Double")
+	assert_true("ember_double" in swap.requires)
+	assert_true("ember_double" in t.get_node("mirror_image").requires)
+	# Trickster through tier 2 without Ember Double: tier 3 is open, Swap still isn't.
+	var no_double := PackedStringArray(["plumage_flash", "sleight", "misdirection"])
+	assert_true(t.is_tier_open(no_double, "trickster", 3))
+	assert_false(t.can_add(no_double, "shadow_swap"))
+	no_double.append("ember_double")
+	assert_true(t.can_add(no_double, "shadow_swap"))
+	# Unlearning Ember Double takes Shadow Swap with it.
+	assert_false("shadow_swap" in t.remove(t.default_nodes, "ember_double"))
+
+
+func test_bot_wing_respec_reaches_both_capstones() -> void:
+	var t := MasteryTree.for_wings("assassin")
+	var even := BuildService._bot_learn_capstones(t, t.default_nodes.duplicate(), false, true)
+	assert_eq(t.validate(even), "", "even cycle")
+	assert_true("second_step" in even, "Second Step (makes room)")
+	assert_true("ashstep" in even and "plumage_flash" in even, "default slots stay learned")
+	var odd := BuildService._bot_learn_capstones(t, t.default_nodes.duplicate(), true, true)
+	assert_eq(t.validate(odd), "", "odd cycle")
+	assert_true("mirror_image" in odd and "shadow_swap" in odd and "ember_double" in odd, "odd cycle")

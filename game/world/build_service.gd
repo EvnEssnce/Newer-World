@@ -220,7 +220,7 @@ func bot_respec_wings(cycle: int) -> void:
 	if local_build == null or local_build.wing_tree == null:
 		return
 	var tree := local_build.wing_tree
-	var nodes := _bot_learn_capstones(tree, tree.default_nodes.duplicate(), cycle % 2 == 1)
+	var nodes := _bot_learn_capstones(tree, tree.default_nodes.duplicate(), cycle % 2 == 1, true)
 	var slots := bot_wing_slots_for_cycle(cycle)
 	var unlocked := tree.unlocked_abilities(nodes)
 	for i in slots.size():
@@ -326,30 +326,58 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 		request_mastery(weapon_id, nodes, slots)
 ## Test bot: `nodes` plus each built capstone (a last-tier passive whose effect
 ## isn't "none": the Spear's Hold the Line and Finishing Thrust) that fits, with
-## the lower nodes of its branch (in file order) it needs, so the smoke test
-## exercises them. A capstone that doesn't fit is left out. reverse: try the
-## capstones last-first.
+## the lower nodes of its branch (in file order) and the nodes it `requires`, so
+## the smoke test exercises them. A capstone that doesn't fit is left out.
+## reverse: try the capstones last-first. make_room: if the first capstone tried
+## doesn't fit, unlearn other branches' nodes (last first) until it does (the
+## Assassin Wing tree's Second Step doesn't fit next to Shadow Swap).
 static func _bot_learn_capstones(tree: MasteryTree, nodes: PackedStringArray,
-		reverse := false) -> PackedStringArray:
+		reverse := false, make_room := false) -> PackedStringArray:
 	var order := tree.node_order.duplicate()
 	if reverse:
 		order.reverse()
+	var first := true
 	for id in order:
 		var cap := tree.get_node(id)
 		if (cap.tier != tree.tier_count() or cap.kind == MasteryTree.KIND_ACTIVE
 				or cap.effect == "none" or id in nodes):
 			continue
-		var trial := nodes.duplicate()
-		for other_id in tree.node_order:
-			if tree.can_add(trial, id):
-				break
-			var other := tree.get_node(other_id)
-			if other.branch == cap.branch and other.tier < cap.tier and tree.can_add(trial, other_id):
-				trial.append(other_id)
-		if tree.can_add(trial, id):
-			trial.append(id)
+		var trial := _bot_path_to(tree, nodes, id)
+		if trial.is_empty() and make_room and first:
+			var needed := tree.all_requirements(id)
+			var base := nodes.duplicate()
+			while trial.is_empty():
+				var drop := ""
+				for other_id in base:
+					if tree.get_node(other_id).branch != cap.branch and not (other_id in needed):
+						drop = other_id
+				if drop.is_empty():
+					break
+				base = tree.remove(base, drop)
+				trial = _bot_path_to(tree, base, id)
+		first = false
+		if not trial.is_empty():
 			nodes = trial
 	return nodes
+
+
+## Test bot: `nodes` plus what capstone `id` needs (lower nodes of its branch in
+## file order, its `requires`) and `id` itself; empty if it doesn't fit.
+static func _bot_path_to(tree: MasteryTree, nodes: PackedStringArray, id: String) -> PackedStringArray:
+	var cap := tree.get_node(id)
+	var needed := tree.all_requirements(id)
+	var trial := nodes.duplicate()
+	for other_id in tree.node_order:
+		if tree.can_add(trial, id):
+			break
+		var other := tree.get_node(other_id)
+		if (((other.branch == cap.branch and other.tier < cap.tier) or other_id in needed)
+				and tree.can_add(trial, other_id)):
+			trial.append(other_id)
+	if not tree.can_add(trial, id):
+		return PackedStringArray()
+	trial.append(id)
+	return trial
 
 
 ## Test bot: `nodes` plus every active node the rules allow that isn't learned

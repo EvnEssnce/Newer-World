@@ -7,7 +7,10 @@ extends RefCounted
 ##
 ## Rules: two branches; a node of tier T needs tier_requirements[T - 1] points
 ## already spent in its branch on nodes of lower tiers; the total cost can't go
-## over `points`. Respecs are free: any valid allocation can replace any other.
+## over `points`; a node with `requires` needs each of those nodes learned too
+## (ability combos: Shadow Swap needs Ember Double; an upgrade needs the ability
+## it upgrades). Unlearning a node also unlearns whatever needed it (remove).
+## Respecs are free: any valid allocation can replace any other.
 ## Active nodes unlock abilities; a slot may only hold an unlocked ability.
 ## Passive and upgrade nodes are server-side modifiers (damage_multiplier,
 ## block_stamina_multiplier), so they never affect the predicted simulation.
@@ -55,6 +58,9 @@ class MasteryNode:
 	var status := ""
 	## "hit_pulse_heal": every count-th attack that connects.
 	var count := 0
+	## Node ids (in this tree) that must be learned before this one: a combo
+	## whose ability does nothing without them. Same or lower tier, any branch.
+	var requires := PackedStringArray()
 
 
 ## The weapon id, or "wings_<class>" for a class's Wing tree.
@@ -128,6 +134,11 @@ static func from_tuning(weapon: String) -> MasteryTree:
 		n.threshold = Tuning.get_optional(file, section, "threshold", 0.0)
 		n.status = Tuning.get_optional(file, section, "status", "")
 		n.count = Tuning.get_optional(file, section, "count", 0)
+		var requires: Variant = Tuning.get_optional(file, section, "requires", [])
+		n.requires = (PackedStringArray([requires]) if requires is String
+				else PackedStringArray(requires))
+	for problem in t.check():
+		push_error("data/%s.cfg: %s" % [file, problem])
 	return t
 
 
@@ -196,6 +207,9 @@ func validate(allocated: PackedStringArray) -> String:
 		if not is_tier_open(allocated, n.branch, n.tier):
 			return "%s needs %d points in lower tiers of its branch." % [
 					n.display_name, tier_requirements[clampi(n.tier - 1, 0, tier_count() - 1)]]
+		var missing := missing_requirements(allocated, id)
+		if not missing.is_empty():
+			return "%s requires %s." % [n.display_name, display_names(missing)]
 	if spent(allocated) > points:
 		return "Not enough points (%d of %d)." % [spent(allocated), points]
 	return ""
@@ -210,18 +224,24 @@ func can_add(allocated: PackedStringArray, id: String) -> bool:
 
 
 ## The largest valid part of an allocation, keeping lower tiers first (in their
-## listed order): e.g. after removing a node, drops whatever needed it.
+## listed order): e.g. after removing a node, drops whatever needed it (by tier
+## gate or `requires`). Within a tier it goes round again until nothing more
+## fits, so a node listed before a same-tier node it requires is kept too.
 func prune(allocated: PackedStringArray) -> PackedStringArray:
 	var kept := PackedStringArray()
 	for tier in range(1, tier_count() + 1):
-		for id in allocated:
-			var n := get_node(id)
-			if n == null or n.tier != tier or id in kept:
-				continue
-			var with := kept.duplicate()
-			with.append(id)
-			if validate(with) == "":
-				kept = with
+		var added := true
+		while added:
+			added = false
+			for id in allocated:
+				var n := get_node(id)
+				if n == null or n.tier != tier or id in kept:
+					continue
+				var with := kept.duplicate()
+				with.append(id)
+				if validate(with) == "":
+					kept = with
+					added = true
 	return kept
 
 
@@ -232,6 +252,128 @@ func remove(allocated: PackedStringArray, id: String) -> PackedStringArray:
 	if at >= 0:
 		without.remove_at(at)
 	return prune(without)
+
+
+## The nodes `id` requires (directly) that `allocated` lacks.
+func missing_requirements(allocated: PackedStringArray, id: String) -> PackedStringArray:
+	var missing := PackedStringArray()
+	var n := get_node(id)
+	if n:
+		for req in n.requires:
+			if not (req in allocated):
+				missing.append(req)
+	return missing
+
+
+## Every node `id` needs through `requires`, directly or through another (no
+## duplicates; unknown ids skipped).
+func all_requirements(id: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	var todo := PackedStringArray([id])
+	while not todo.is_empty():
+		var n := get_node(todo[todo.size() - 1])
+		todo.remove_at(todo.size() - 1)
+		if n == null:
+			continue
+		for req in n.requires:
+			if req != id and not (req in found) and nodes.has(req):
+				found.append(req)
+				todo.append(req)
+	return found
+
+
+## The learned nodes that unlearning `id` would also remove (remove()'s cascade:
+## what requires it, or loses its tier gate without it). For the K panel.
+func lost_with(allocated: PackedStringArray, id: String) -> PackedStringArray:
+	var kept := remove(allocated, id)
+	var lost := PackedStringArray()
+	for other in allocated:
+		if other != id and not (other in kept):
+			lost.append(other)
+	return lost
+
+
+## "Ember Double" / "Ember Double and Ashstep" / "A, B and C".
+func display_names(ids: PackedStringArray) -> String:
+	var names := PackedStringArray()
+	for id in ids:
+		var n := get_node(id)
+		names.append(n.display_name if n else id)
+	if names.size() <= 1:
+		return "".join(names)
+	return ", ".join(names.slice(0, names.size() - 1)) + " and " + names[names.size() - 1]
+
+
+## Problems with the tree's own data (empty = fine), reported when it loads
+## and by a unit test over every real tree: `requires` naming an unknown node,
+## itself, a higher-tier node, or a cycle; a node no allocation can reach (its
+## tier gate needs more points than its branch's lower tiers hold, or it and
+## its requirements cost more than `points`); a default allocation that breaks
+## the rules.
+func check() -> PackedStringArray:
+	var problems := PackedStringArray()
+	for id in node_order:
+		var n := get_node(id)
+		for req in n.requires:
+			var r := get_node(req)
+			if r == null:
+				problems.append("%s requires unknown node \"%s\"." % [id, req])
+			elif req == id:
+				problems.append("%s requires itself." % id)
+			elif r.tier > n.tier:
+				problems.append("%s (tier %d) requires %s, a higher tier (%d)." % [
+						id, n.tier, req, r.tier])
+		if _requires_cycle(id):
+			problems.append("%s is part of a requires cycle." % id)
+		if n.tier < 1 or n.tier > tier_count():
+			problems.append("%s has tier %d (1 to %d)." % [id, n.tier, tier_count()])
+			continue
+		var below := 0
+		for other_id in node_order:
+			var other := get_node(other_id)
+			if other.branch == n.branch and other.tier < n.tier:
+				below += other.cost
+		if below < tier_requirements[n.tier - 1]:
+			problems.append("%s can't be reached: tier %d needs %d points below it, its branch has %d." % [
+					id, n.tier, tier_requirements[n.tier - 1], below])
+		elif min_cost(id) > points:
+			problems.append("%s can't be reached: it needs at least %d points with what it requires (%d)." % [
+					id, min_cost(id), points])
+	var error := validate(default_nodes)
+	if not error.is_empty():
+		problems.append("[default] nodes: " + error)
+	return problems
+
+
+## A lower bound on the points any allocation holding `id` spends: per branch,
+## its required nodes there plus the tier gate below the lowest of them that
+## still has to be paid.
+func min_cost(id: String) -> int:
+	var needed := all_requirements(id)
+	needed.append(id)
+	var total := 0
+	for branch in branches:
+		var best := 0
+		for a in needed:
+			var na := get_node(a)
+			if na == null or na.branch != branch:
+				continue
+			var at_or_above := 0
+			for b in needed:
+				var nb := get_node(b)
+				if nb and nb.branch == branch and nb.tier >= na.tier:
+					at_or_above += nb.cost
+			best = maxi(best, tier_requirements[clampi(na.tier - 1, 0, tier_count() - 1)] + at_or_above)
+		total += best
+	return total
+
+
+func _requires_cycle(id: String) -> bool:
+	for req in all_requirements(id):
+		var r := get_node(req)
+		if r and id in r.requires:
+			return true
+	return false
 
 
 ## Ability ids unlocked by an allocation's active nodes.

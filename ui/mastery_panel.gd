@@ -288,13 +288,27 @@ func _node_card(tree: MasteryTree, n: MasteryTree.MasteryNode, nodes: PackedStri
 	button.text = "%s\n%s, %d pt" % [n.display_name, n.kind, n.cost]
 	button.tooltip_text = n.description
 	button.custom_minimum_size = Vector2(160, 0)
+	var missing := tree.missing_requirements(nodes, n.id)
+	if not n.requires.is_empty():
+		button.tooltip_text += "\nRequires %s." % tree.display_names(n.requires)
 	if learned:
 		button.modulate = ALLOCATED_COLOR
 		button.pressed.connect(_send_unlearn.bind(n.id))
+		var lost := tree.lost_with(nodes, n.id)
+		if not lost.is_empty():
+			button.tooltip_text += "\nUnlearning it also unlearns %s." % tree.display_names(lost)
 	else:
 		button.disabled = not tree.can_add(nodes, n.id)
 		button.pressed.connect(_send_learn.bind(n.id))
 	card.add_child(button)
+	if not n.requires.is_empty():
+		# The combo it needs: red until those nodes are learned (the button
+		# stays disabled meanwhile), grey once met.
+		var needs := _label("Requires %s" % tree.display_names(n.requires),
+				ERROR_COLOR if not missing.is_empty() else HINT_COLOR, true)
+		needs.add_theme_font_size_override("font_size", 13)
+		needs.custom_minimum_size = Vector2(160, 0)
+		card.add_child(needs)
 	if learned and n.kind == MasteryTree.KIND_ACTIVE:
 		var slot_row := HBoxContainer.new()
 		var keys := _slot_keys()
