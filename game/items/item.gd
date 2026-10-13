@@ -142,5 +142,62 @@ static func display_stat(stat: String, value: float) -> String:
 	return "%s%d %s" % [sign_text, roundi(value), text[0]]
 
 
+## Stat -> value for everything the item gives: its primary stat and each
+## affix's bonus stat (affixes on the same stat add up).
+func stat_totals(db: ItemDatabase) -> Dictionary:
+	var totals := {}
+	var def: ItemDatabase.ItemDef = db.items.get(item_id)
+	if def:
+		totals[def.primary_stat] = primary_value
+	for affix_id in affixes:
+		var affix: ItemDatabase.AffixDef = db.affixes.get(affix_id)
+		var stat := affix.stat if affix else affix_id
+		totals[stat] = totals.get(stat, 0.0) + affixes[affix_id]
+	return totals
+
+
+## Stat -> (new - old) for every stat either side has (stat_totals), in
+## STAT_TEXT order (unknown stats last, sorted). Changes too small to show
+## (under 0.5, or 0.05% for percent stats) are left out. Every stat is
+## better higher, so a positive change is an improvement.
+static func stat_changes(new_stats: Dictionary, old_stats: Dictionary) -> Dictionary:
+	var keys: Array = []
+	for stat: String in STAT_TEXT:
+		if new_stats.has(stat) or old_stats.has(stat):
+			keys.append(stat)
+	var unknown: Array = []
+	for stat: String in new_stats.keys() + old_stats.keys():
+		if not STAT_TEXT.has(stat) and stat not in unknown:
+			unknown.append(stat)
+	unknown.sort()
+	keys.append_array(unknown)
+	var changes := {}
+	for stat: String in keys:
+		var diff: float = new_stats.get(stat, 0.0) - old_stats.get(stat, 0.0)
+		var shown := absf(diff) * 100.0 if _is_percent(stat) else absf(diff)
+		if shown >= (0.05 if _is_percent(stat) else 0.5):
+			changes[stat] = diff
+	return changes
+
+
+## A change as the UI shows it: "+12 armor", "-1.5% crit chance", and for a
+## reduction stat "-6.0% stamina cost of blocked hits" when it grows.
+static func display_change(stat: String, diff: float) -> String:
+	var text := display_stat(stat, absf(diff))
+	if diff >= 0.0:
+		return text
+	if text.begins_with("+"):
+		return "-" + text.substr(1)
+	if text.begins_with("-"):
+		return "+" + text.substr(1)
+	return "%s %s" % [stat, ("%.1f%%" % (diff * 100.0)) if _is_percent(stat) else str(roundi(diff))]
+
+
+static func _is_percent(stat: String) -> bool:
+	if STAT_TEXT.has(stat):
+		return STAT_TEXT[stat][1]
+	return stat.ends_with("_pct") or stat.ends_with("_chance") or stat.ends_with("_reduction")
+
+
 static func _stat_label(stat: String) -> String:
 	return STAT_TEXT[stat][0] if STAT_TEXT.has(stat) else stat

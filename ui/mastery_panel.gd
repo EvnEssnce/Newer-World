@@ -10,7 +10,12 @@ extends Control
 ## (BuildService.request_mastery), which validates it; the panel redraws from
 ## the server's reply, so it always shows the real build.
 
-const PANEL_SIZE := Vector2(900, 500)
+## Largest the window gets (both trees and the Wings tab fit without a scroll
+## at 1920x1080). A smaller viewport gets the viewport minus SCREEN_MARGIN on
+## each side, and the panel scrolls only then.
+const MAX_PANEL_SIZE := Vector2(1440, 840)
+const MIN_PANEL_SIZE := Vector2(360, 260)
+const SCREEN_MARGIN := 20.0
 const ALLOCATED_COLOR := Color(0.55, 1.0, 0.6)
 const ERROR_COLOR := Color(1.0, 0.5, 0.45)
 const HINT_COLOR := Color(0.75, 0.75, 0.8)
@@ -22,6 +27,7 @@ var _builds: BuildService
 ## The weapon whose tree is shown, or WINGS.
 var _weapon_id := ""
 var _content: VBoxContainer
+var _panel: PanelContainer
 
 
 func setup(builds: BuildService) -> void:
@@ -42,13 +48,10 @@ func _ready() -> void:
 	add_child(dim)
 
 	var panel := PanelContainer.new()
+	_panel = panel
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	panel.offset_left = -PANEL_SIZE.x / 2.0
-	panel.offset_right = PANEL_SIZE.x / 2.0
-	panel.offset_top = -PANEL_SIZE.y / 2.0
-	panel.offset_bottom = PANEL_SIZE.y / 2.0
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.07, 0.08, 0.1, 0.95)
 	style.border_color = Color(0.85, 0.7, 0.35, 0.8)
@@ -65,14 +68,27 @@ func _ready() -> void:
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_theme_constant_override("separation", 8)
 	scroll.add_child(_content)
+	resized.connect(_fit)
+	_fit()
+
+
+## Sizes the window to the viewport, up to MAX_PANEL_SIZE.
+func _fit() -> void:
+	var room := size - Vector2.ONE * SCREEN_MARGIN * 2.0
+	var panel_size := room.min(MAX_PANEL_SIZE).max(MIN_PANEL_SIZE)
+	_panel.offset_left = -panel_size.x / 2.0
+	_panel.offset_right = panel_size.x / 2.0
+	_panel.offset_top = -panel_size.y / 2.0
+	_panel.offset_bottom = panel_size.y / 2.0
 
 
 func toggle() -> void:
 	visible = not visible
 	if visible:
+		InventoryPanel.hide_other_modals(self)  # I and K never show together
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_refresh()
-	else:
+	elif not InventoryPanel.other_modal_open(self):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED  # back to the game
 
 
@@ -271,7 +287,7 @@ func _node_card(tree: MasteryTree, n: MasteryTree.MasteryNode, nodes: PackedStri
 	var learned := n.id in nodes
 	button.text = "%s\n%s, %d pt" % [n.display_name, n.kind, n.cost]
 	button.tooltip_text = n.description
-	button.custom_minimum_size = Vector2(140, 0)
+	button.custom_minimum_size = Vector2(160, 0)
 	if learned:
 		button.modulate = ALLOCATED_COLOR
 		button.pressed.connect(_send_unlearn.bind(n.id))
