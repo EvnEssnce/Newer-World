@@ -377,7 +377,7 @@ Still to check: the Ranger zones below.
   Q/E/R/Z/C), Wingfall.
 - Models: the staff with its orb, the glowing gauntlet.
 
-**Paladin (session 36, `run_local_test.ps1 -Class paladin`, `-Party` for the support):**
+**Paladin (session 36, `run_local_test.ps1 -Class paladin`, `-Party` for the support):** playtested in session 41: "tested fine", no changes.
 - Shortstaffs: Consecrating Strikes healing you/the bot as you hit; Uplifting Blow;
   Twin Guard's parry + counter (Guarded Grace capstone heals); Spinning Staves
   deflecting the bot's throws ("Blocked"); Rush to Aid's Ward; Rebuke; Radiant Rhythm
