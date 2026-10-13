@@ -24,6 +24,8 @@ extends Node3D
 const WALL_LAYER := 16
 ## Meters above a placement point the ground snap starts from.
 const SNAP_FROM := 1.0
+## Client: frames the invisible warm-up looks stay in front of the camera.
+const PREWARM_FRAMES := 3
 
 var world: World
 var players: Node3D
@@ -43,6 +45,10 @@ var _projectiles_stopped := 0
 var _grown := 0
 # Client: id -> [Zone (its own countdown), ZoneVisual]
 var _shown: Dictionary[int, Array] = {}
+# Client: the invisible warm-up looks (see _prewarm_step), and frames left
+# before they go (-1 = not placed yet, 0 = done).
+var _prewarm_node: Node3D
+var _prewarm_frames := -1
 
 
 func _physics_process(_delta: float) -> void:
@@ -55,6 +61,8 @@ func _physics_process(_delta: float) -> void:
 func _process(delta: float) -> void:
 	if multiplayer.is_server():
 		return
+	if _prewarm_frames != 0:
+		_prewarm_step()
 	var tps := float(Engine.physics_ticks_per_second)
 	for id: int in _shown:
 		var zone: Zone = _shown[id][0]
@@ -249,6 +257,41 @@ func _ground_below(from: Vector3) -> Vector3:
 
 
 # --- Client ---
+
+## Client: as soon as there's a camera, shows one fully transparent copy of
+## every zone look (one per `visual`) just in front of it for PREWARM_FRAMES
+## frames, then removes them. Drawing them makes the GPU compile their
+## materials' shaders while the world loads instead of on the first cast (a
+## first Shield Wall froze the game while its shader compiled: ~0.15 s on a
+## fast PC, about 1 s reported). Godot keeps compiled shaders in user://, so
+## this mostly matters on a cold shader cache (new install, Godot update).
+func _prewarm_step() -> void:
+	if _prewarm_frames > 0:
+		_prewarm_frames -= 1
+		if _prewarm_frames == 0 and is_instance_valid(_prewarm_node):
+			_prewarm_node.queue_free()
+		return
+	if DisplayServer.get_name() == "headless":
+		_prewarm_frames = 0
+		return
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	_prewarm_node = Node3D.new()
+	_prewarm_node.position = Vector3(0.0, 0.0, -4.0)
+	_prewarm_node.scale = Vector3.ONE * 0.2
+	camera.add_child(_prewarm_node)
+	var looks := {}
+	for p in ZoneParams.all_kinds():
+		if looks.has(p.visual):
+			continue
+		looks[p.visual] = true
+		var visual := ZoneVisual.new()
+		visual.setup(p, 0.0)
+		visual.update(0.0, true, 0.0)  # 0 s left: faded out, alpha 0
+		_prewarm_node.add_child(visual)
+	_prewarm_frames = PREWARM_FRAMES
+
 
 @rpc("authority", "call_remote", "reliable")
 func _receive_zone(id: int, kind: String, position_: Vector3, yaw: float, ticks_left: int) -> void:

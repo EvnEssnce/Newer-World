@@ -151,6 +151,34 @@ func test_item_round_trips_through_a_dictionary() -> void:
 	assert_eq(copy.to_dict(), item.to_dict())
 
 
+func test_min_rarity_affix_only_rolls_at_that_rarity_or_better() -> void:
+	_affix("kindled", "ember_gain_pct", 0.2, 0.2, ["head"])
+	db.affixes["kindled"].min_rarity = "legendary"
+	for i in 200:
+		var rare := LootRoller.roll_item(db.items["cap"], "rare", 100, db, rng)
+		assert_false(rare.affixes.has("kindled"), "rare is below legendary")
+		var legendary := LootRoller.roll_item(db.items["cap"], "legendary", 100, db, rng)
+		assert_true(legendary.affixes.has("kindled"), "legendary rolls the whole head pool")
+	assert_true(db.rarity_allows("legendary", db.affixes["kindled"]))
+	assert_false(db.rarity_allows("common", db.affixes["kindled"]))
+	assert_true(db.rarity_allows("common", db.affixes["hale"]), "no min_rarity: any rarity")
+
+
+func test_min_rarity_leaving_too_few_affixes_rolls_fewer() -> void:
+	_affix("kindled", "ember_gain_pct", 0.2, 0.2, ["head"])
+	db.affixes["kindled"].min_rarity = "legendary"
+	db.rarities["rare"].affix_count = 3
+	var item := LootRoller.roll_item(db.items["cap"], "rare", 100, db, rng)
+	assert_eq(item.affixes.size(), 2, "only precise and hale are open to a rare cap")
+
+
+func test_validate_catches_unknown_min_rarity() -> void:
+	db.affixes["hale"].min_rarity = "mythic"
+	assert_eq(db.validate().size(), 1)
+	db.affixes["hale"].min_rarity = "rare"
+	assert_eq(db.validate().size(), 0)
+
+
 func test_validate_catches_broken_references() -> void:
 	assert_eq(db.validate().size(), 0, "the test database is consistent")
 	db.tables["test"].item_weights["ghost"] = 1

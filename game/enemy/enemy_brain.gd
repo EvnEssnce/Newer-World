@@ -104,6 +104,13 @@ func is_attacking() -> bool:
 	return attack_tick >= 0
 
 
+## True when it isn't fighting attacker_id (idle, or targeting someone else),
+## so a hit from them counts as a backstab where [backstab] unaware_enemies is
+## on. Never for an always_aware enemy (training dummy): only hits from behind.
+func is_unaware_of(attacker_id: int, params: EnemyParams) -> bool:
+	return not params.always_aware and target_id != attacker_id
+
+
 func is_attack_active(params: EnemyParams) -> bool:
 	var a := params.attack
 	return attack_tick >= a.windup_ticks and attack_tick < a.windup_ticks + a.active_ticks

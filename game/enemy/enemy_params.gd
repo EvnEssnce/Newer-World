@@ -26,6 +26,9 @@ var wander_pause_ticks := 0
 ## Never moves, turns or swings (training dummy); hits still stagger it and
 ## forces still move it.
 var stationary := false
+## Counts as aware of every player: only hits from its rear arc backstab it,
+## never the "unaware enemy" rule (training dummy, which never targets anyone).
+var always_aware := false
 
 # Threat ([threat]; see ThreatTable)
 ## Per point of damage it takes from a player (hits, projectiles, damage over time).
@@ -73,6 +76,7 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.wander_radius = Tuning.get_value(file, "ai", "wander_radius")
 	p.wander_pause_ticks = roundi(Tuning.get_value(file, "ai", "wander_pause") * tps)
 	p.stationary = Tuning.get_value(file, "ai", "stationary")
+	p.always_aware = Tuning.get_optional(file, "ai", "always_aware", false)
 
 	p.threat_per_damage = Tuning.get_value(file, "threat", "per_damage")
 	p.threat_per_heal = Tuning.get_value(file, "threat", "per_heal")
