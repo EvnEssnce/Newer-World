@@ -28,7 +28,7 @@ $tuneArgs = @($Tune | ForEach-Object { "--tune=$_" })
 
 [IO.File]::WriteAllText($override, "[display]`n`nwindow/size/no_focus=true`n")
 try {
-    $server = Start-Process $Godot -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru `
+    $server = Start-Process $Godot -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru `
         -ArgumentList (@('--headless', '--', '--server', "--port=$Port", "--quit-after=$($Seconds + 3)") + $tuneArgs) `
         -RedirectStandardOutput (Join-Path $logDir 'server.log') `
         -RedirectStandardError (Join-Path $logDir 'server.err.log')

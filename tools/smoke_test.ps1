@@ -29,7 +29,7 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 Remove-Item (Join-Path $logDir 'client*.log') -ErrorAction SilentlyContinue
 
 function Start-Godot([string]$name, [string[]]$gameArgs) {
-    Start-Process $Godot -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru `
+    Start-Process $Godot -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru `
         -ArgumentList (@('--headless', '--') + $gameArgs) `
         -RedirectStandardOutput (Join-Path $logDir "$name.log") `
         -RedirectStandardError (Join-Path $logDir "$name.err.log")

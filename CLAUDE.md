@@ -1235,7 +1235,15 @@ other apps meanwhile): the script runs the server headless with its log in a fil
 console window) and the windowed `--bot` client with a temporary `override.cfg`
 (`display/window/size/no_focus=true`, gitignored, deleted once the client is up), so
 it still renders but can't be focused. Don't start windowed or console processes any
-other way. Never screenshot the desktop: it captures the developer's screen.
+other way. **Agents' shells have no console**, so any console program they start
+(`powershell -File ...`, Godot's `_console.exe`) opens a new, focused console window
+(it minimized the developer's fullscreen game). So: run the tool scripts **in-process**
+from the PowerShell tool (`Set-ExecutionPolicy -Scope Process Bypass -Force;
+& .\tools\smoke_test.ps1 -Port N`), never `powershell -File`/`Start-Job`; the scripts
+start every console Godot with `Start-Process -WindowStyle Hidden` (a hidden console
+can't take focus). `run_local_test.ps1` and `run_server.ps1` are the developer's and
+still open visible windows on purpose. (Verified 2026-10-13: tests, a screenshot run and
+a smoke run in-process opened no visible console and never took focus.) Never screenshot the desktop: it captures the developer's screen.
 
 Every script that dot-sources `tools\find_godot.ps1` (run, smoke, tests, screenshots,
 roll_loot) first runs `--headless --import` (~3 s), which registers new `class_name`

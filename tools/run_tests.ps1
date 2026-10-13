@@ -7,7 +7,7 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 $out = Join-Path $logDir 'tests.log'
 $err = Join-Path $logDir 'tests.err.log'
 
-$proc = Start-Process $Godot -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru -Wait `
+$proc = Start-Process $Godot -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru -Wait `
     -ArgumentList '--headless', 'res://tests/framework/run_tests.tscn' `
     -RedirectStandardOutput $out -RedirectStandardError $err
 

@@ -15,4 +15,7 @@ $GodotGui = $Godot -replace '_console\.exe$', '.exe'
 
 # Register new class_name scripts (after a pull, merge or fresh worktree), or
 # scripts that use them fail to parse ("Could not find type ..."). ~3 s.
-& $Godot --headless --path $ProjectRoot --import *> $null
+# Hidden window: when the caller has no console (an agent's shell), a console
+# program started any other way opens a new console window that takes focus.
+Start-Process $Godot -WorkingDirectory $ProjectRoot -ArgumentList '--headless', '--import' `
+    -WindowStyle Hidden -Wait
