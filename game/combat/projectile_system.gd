@@ -18,7 +18,9 @@ extends Node3D
 ## on, i-frames evade (it flies on, and can still hit them later on that leg), a
 ## guard or a Riposte facing where it came from blocks or parries it (stopping
 ## it if stopped_by_guard), statuses and force on HIT_DAMAGED, Ember as usual.
-## Each target is hit once per projectile (once per leg for a boomerang).
+## Each target is hit once per projectile (once per leg for a boomerang). A
+## knife whose attack `embeds` stays in what it damaged (EmbeddedKnives, shown as
+## a status) until Recall rips it out (server_recall); a miss just ends.
 ## Events to clients: _receive_spawn(id, kind, owner, origin, velocity, tick) and
 ## _receive_event(id, type, age, position): TURN (a returning one turned back,
 ## from its timer, a wall or its pierce) or END_* (where it stopped).
@@ -60,10 +62,14 @@ var _hits_enemies := 0
 var _ally_hits := 0
 var _ally_ignored := 0
 var _ended := {}  # Projectile.END_* -> count
-## Stuck projectiles (params.sticks): [owner id, position, server tick it's gone].
-var _stuck: Array[Array] = []
+## Embedded projectiles (AttackParams.embeds: knives in targets, for Recall), one
+## table per status index (StatusDefs) that shows them.
+var _embedded: Dictionary[int, EmbeddedKnives] = {}
+## Knives embedded, ripped out by Recall, and dropped (cleanse, death, cap,
+## time) since the start. SUMMARY assassin.
+var embedded_count := 0
+var recalled_count := 0
 var _bounces := 0
-var _recalled := 0
 var _redirects := 0
 # Client
 var _flying: Array[Flying] = []
@@ -185,15 +191,13 @@ func server_step(delta: float) -> void:
 			proj.turned_since_sync = 0.0
 			_send_redirect(proj)
 		if proj.ended != Projectile.END_NONE:
-			if proj.params.sticks and proj.ended in [Projectile.END_WALL, Projectile.END_EXPIRED]:
-				_stuck.append([proj.owner_id, proj.position,
-						world.server_tick() + proj.params.stick_ticks])
 			if proj.attack and not proj.attack.zone_on_impact.is_empty():
 				world.zones.server_spawn(proj.attack.zone_on_impact, proj.owner_id, proj.position,
 						PlayerState.yaw_for_direction(Vector2(proj.velocity.x, proj.velocity.z)))
 			_send_event(proj, proj.ended)
 			_ended[proj.ended] = _ended.get(proj.ended, 0) + 1
 			_active.erase(proj)
+	_step_embedded()
 
 
 ## Where a returning projectile steers: its thrower's hands, or where it was
@@ -211,6 +215,8 @@ func _return_target(owner_id: int, proj: Projectile) -> Vector3:
 ## Server: this step's segment against the world and every target, nearest
 ## first, until the projectile stops or turns back.
 func _collide(proj: Projectile) -> void:
+	if not proj.params.hits:
+		return  # cosmetic (Recall's knives flying home)
 	var a := proj.prev_position
 	var b := proj.position
 	var leg_returning := proj.returning
@@ -300,6 +306,7 @@ func _resolve_player_hit(proj: Projectile, target: Player, at: Vector3) -> bool:
 	_hits_players += 1
 	if result == World.HIT_DAMAGED:
 		world._give_hit_statuses(proj.owner_id, proj.attack, _on_hit_for(proj), target)
+		_embed(proj, target.peer_id)
 	return proj.register_hit(target.peer_id,
 			result == World.HIT_BLOCKED or result == World.HIT_PARRIED)
 
@@ -310,8 +317,9 @@ func _hit_enemy(proj: Projectile, enemy: Enemy, at: Vector3) -> bool:
 	_hits_enemies += 1
 	world.note_projectile_hit(proj.attack is AbilityParams, false)
 	var keeps_going := proj.register_hit(enemy.enemy_id, false)
-	world.strike_enemy(proj.owner_id, source[0], source[1], proj.attack, enemy,
-			proj.damage_scale, _on_hit_for.bind(proj), proj.execute)
+	if not world.strike_enemy(proj.owner_id, source[0], source[1], proj.attack, enemy,
+			proj.damage_scale, _on_hit_for.bind(proj), proj.execute):
+		_embed(proj, enemy.enemy_id)
 	return _maybe_bounce(proj, at, keeps_going)
 
 
@@ -367,26 +375,114 @@ func _nearest_hostile(proj: Projectile, from: Vector3, radius: float, heading: V
 	return best
 
 
-## Server: Recall. Each of `player`'s stuck projectiles flies back to it as
-## attack.recall_projectile (a returning kind), hitting with `attack`.
+## Server: Recall (attack.recalls). Rips out every projectile `player` has
+## embedded as that status: each target is struck once with the attack's
+## damage times its knives (World.resolve_strike / strike_enemy from the
+## player's position: allies never, a guard facing the player blocks), then
+## one cosmetic attack.recall_projectile per knife flies from it back to the
+## player. Uses the knives up.
 func server_recall(player: Player, attack: AttackParams) -> void:
+	var index := StatusDefs.current().index_of(attack.recalls)
+	var table: EmbeddedKnives = _embedded.get(index)
+	if table == null:
+		return
+	var scale := (player.damage_multiplier(attack)
+			* player.state.statuses.damage_dealt_multiplier(player.params.statuses))
+	var torn := table.take(player.peer_id)
+	for target_id in torn:
+		var count: int = torn[target_id]
+		_sync_embedded(index, target_id)
+		var target := _target_node(target_id)
+		if target == null or _target_dead(target):
+			continue
+		recalled_count += count
+		var from := target.global_position + Vector3.UP * 1.0
+		if target is Player:
+			var results: Dictionary[int, bool] = {}
+			var result := world.resolve_strike(player.peer_id, player.global_position, player.state.yaw,
+					attack, results, target, scale * count, player.execute_bonus())
+			if result == World.HIT_DAMAGED:
+				world._give_hit_statuses(player.peer_id, attack, [] as Array[Vector2i], target)
+		else:
+			world.strike_enemy(player.peer_id, player.global_position, player.state.yaw, attack,
+					target, scale * count, func() -> Array[Vector2i]: return [] as Array[Vector2i],
+					player.execute_bonus())
+		if attack.recall_projectile.is_empty():
+			continue
+		var home := attack.copy()
+		home.projectile = attack.recall_projectile
+		var to := Vector2(player.global_position.x - from.x, player.global_position.z - from.z)
+		var yaw := PlayerState.yaw_for_direction(to) if not to.is_zero_approx() else 0.0
+		for i in count:
+			# Fanned a little so several knives read as several.
+			server_fire_from(player, home, from, yaw + spread_offset(i, count, 0.6), 0.0)
+	if world.is_verbose() and not torn.is_empty():
+		print("[server] peer %d recalls knives from %s" % [player.peer_id, torn])
+
+
+## Server: an embedding projectile (its attack's `embeds` status) damaged
+## target_id: a knife stays in it (pushing out the thrower's oldest past the cap).
+func _embed(proj: Projectile, target_id: int) -> void:
+	if proj.attack == null or proj.attack.embeds.is_empty():
+		return
+	var defs := StatusDefs.current()
+	var index := defs.index_of(proj.attack.embeds)
+	var def := defs.get_def(index)
+	if def == null:
+		return
+	if not _embedded.has(index):
+		_embedded[index] = EmbeddedKnives.new(def.max_stacks, def.duration_ticks)
+	var table := _embedded[index]
+	var pushed_out := table.add(proj.owner_id, target_id, world.server_tick())
+	embedded_count += 1
+	if pushed_out != 0 and pushed_out != target_id:
+		_sync_embedded(index, pushed_out)
+	_sync_embedded(index, target_id)
+
+
+## Server, every tick: knives whose time ran out fall out, and knives in a
+## target that's gone, dead, or lost the status (a cleanse, a class change) are
+## dropped.
+func _step_embedded() -> void:
 	var now := world.server_tick()
-	var keep: Array[Array] = []
-	for stuck in _stuck:
-		if stuck[2] <= now:
-			continue
-		if stuck[0] != player.peer_id:
-			keep.append(stuck)
-			continue
-		var at: Vector3 = stuck[1]
-		var to := Vector2(player.global_position.x - at.x, player.global_position.z - at.z)
-		var recall := attack.copy()
-		recall.projectile = attack.recall_projectile
-		server_fire_from(player, recall, at + Vector3.UP * 0.5,
-				PlayerState.yaw_for_direction(to) if not to.is_zero_approx() else 0.0,
-				player.damage_multiplier(attack))
-		_recalled += 1
-	_stuck = keep
+	for index in _embedded:
+		var table := _embedded[index]
+		for target_id in table.expire(now):
+			_sync_embedded(index, target_id)
+		for target_id in table.targets():
+			var target := _target_node(target_id)
+			if target == null or _target_dead(target) or not _statuses_of(target).has(index):
+				table.drop_target(target_id)
+
+
+## Server: sets target_id's status `index` to the knives in it (removed at 0),
+## lasting until the last one falls out.
+func _sync_embedded(index: int, target_id: int) -> void:
+	var target := _target_node(target_id)
+	if target == null:
+		return
+	var table := _embedded[index]
+	var count := table.count_in(target_id)
+	var ticks := table.last_expiry(target_id) - world.server_tick()
+	if target is Player:
+		(target as Player).state.set_status_stacks(index, count, ticks)
+	else:
+		(target as Enemy).statuses.set_stacks(index, count, ticks)
+
+
+## A player (peer id > 0) or enemy (id < 0) by id, or null.
+func _target_node(target_id: int) -> Node3D:
+	if target_id > 0:
+		return players.get_node_or_null(str(target_id)) as Node3D
+	return enemies.get_node_or_null(str(target_id)) as Node3D
+
+
+func _target_dead(target: Node3D) -> bool:
+	return (target as Player).state.dead if target is Player else (target as Enemy).dead
+
+
+func _statuses_of(target: Node3D) -> StatusEffects:
+	return (target as Player).state.statuses if target is Player else (target as Enemy).statuses
 
 
 func _send_redirect(proj: Projectile) -> void:
@@ -418,7 +514,7 @@ func print_summary() -> void:
 			_fired, _hits_players + _hits_enemies, _hits_players, _hits_enemies, _ally_hits,
 			_ally_ignored, _ended.get(Projectile.END_HIT, 0), _ended.get(Projectile.END_WALL, 0),
 			_ended.get(Projectile.END_CAUGHT, 0), _ended.get(Projectile.END_EXPIRED, 0),
-			_bounces, _recalled, _redirects])
+			_bounces, recalled_count, _redirects])
 
 
 # --- Client ---

@@ -50,14 +50,14 @@ var spin := 0.0
 ## Server-side flight extras. bounces: after a hit that would stop it, it flies
 ## on to the nearest target it hasn't hit within bounce_range m, this many times
 ## (Ricochet). homing_turn: radians per second it turns toward the nearest
-## hostile in front within homing_range m (Seeker Spark). sticks: one that stops
-## in a wall or runs out stays where it is for stick_ticks (Recall brings it back).
+## hostile in front within homing_range m (Seeker Spark).
 var bounces := 0
 var bounce_range := 0.0
 var homing_turn := 0.0
 var homing_range := 0.0
-var sticks := false
-var stick_ticks := 0
+## false = cosmetic: it flies (and is caught) but never hits anyone and nothing
+## stops it, walls included (Recall's knives flying home).
+var hits := true
 
 static var _kinds: Dictionary[String, ProjectileParams] = {}
 static var _loaded := false
@@ -106,8 +106,7 @@ static func from_tuning(kind_id: String, tps: float) -> ProjectileParams:
 	p.bounce_range = Tuning.get_optional(FILE, section, "bounce_range", 0.0)
 	p.homing_turn = deg_to_rad(Tuning.get_optional(FILE, section, "homing_turn", 0.0))
 	p.homing_range = Tuning.get_optional(FILE, section, "homing_range", 0.0)
-	p.sticks = Tuning.get_optional(FILE, section, "sticks", false)
-	p.stick_ticks = roundi(float(Tuning.get_optional(FILE, section, "stick_time", 0.0)) * tps)
+	p.hits = Tuning.get_optional(FILE, section, "hits", true)
 	return p
 
 

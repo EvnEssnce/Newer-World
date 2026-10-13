@@ -538,7 +538,7 @@ func _on_ability_started(player: Player) -> void:
 		_shadow_swap(player, started)
 	if started:
 		_mage_ability_started(player, started)
-	if started and not started.recall_projectile.is_empty():
+	if started and not started.recalls.is_empty():
 		_projectiles.server_recall(player, started)
 	if player.state.is_using_wing():
 		_on_wing_started(player)
@@ -1046,8 +1046,8 @@ func _feint_read(attacker: Player, attack: AttackParams) -> void:
 ## a server event), null for an enemy. Else 1.
 func _marked_scale(attacker_id: int, attack: AttackParams, statuses: StatusEffects,
 		defs: StatusDefs, target_player: Player) -> float:
-	if attacker_id <= 0 or not attack.projectile.is_empty():
-		return 1.0
+	if attacker_id <= 0 or not attack.projectile.is_empty() or not attack.recalls.is_empty():
+		return 1.0  # knives (Recall's included) don't use the mark
 	var index := statuses.mark_from(defs, attacker_id)
 	if index < 0:
 		return 1.0
@@ -1782,8 +1782,9 @@ func _print_juggernaut_summary() -> void:
 			_ally_supports, _shields, roundi(_absorbed), _focus_refunds, _aura_refunds])
 	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
 			_ignites, _ignited_stacks, _loaded_shots, _piercing_heavies, _parting_shots, _hunted_hits])
-	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d" % [
-			_backstabs, _primed_crits, _feint_reads, _marked_hits, _flurry_fans, _heal_cuts])
+	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d embedded=%d recalled=%d" % [
+			_backstabs, _primed_crits, _feint_reads, _marked_hits, _flurry_fans, _heal_cuts,
+			_projectiles.embedded_count, _projectiles.recalled_count])
 
 
 ## Server: a player's health reached 0 (a hit or damage over time). With
@@ -2472,6 +2473,12 @@ func _bot_ability_button(turn: int, first: bool = false) -> int:
 		hitting.erase(force_slot)
 	if filled.is_empty():
 		return 0
+	if not first:
+		# Recall once its knives are in (the attack turn threw them).
+		for slot in filled:
+			var index := state.slot_ability(slot)
+			if not weapon.ability(index).recalls.is_empty() and state.cooldown_left(index) == 0:
+				return PlayerState.BUTTON_ABILITY_1 << slot
 	if first:
 		for key in ["self_status", "applies_status"]:
 			for slot in filled:
@@ -2790,6 +2797,12 @@ func _update_loadout_hud() -> void:
 	if state.weapons.size() >= PlayerState.WEAPON_SLOTS:
 		other = params.weapon(state.weapons[1 - state.equipped]).display_name
 	_hud.set_weapons(weapon.display_name, other, state.is_swapping())
+	# Magazine (Throwing Knives): progress of the reload (empty) or refill.
+	var shots := state.ammo_left(params)
+	var timer := state.ammo_timer[state.equipped]
+	var full_wait := weapon.reload_ticks if shots == 0 else weapon.refill_ticks
+	_hud.set_ammo(shots, weapon.ammo,
+			1.0 - float(timer) / full_wait if timer > 0 and full_wait > 0 else -1.0, shots == 0)
 	var tps := float(Engine.physics_ticks_per_second)
 	for slot in PlayerState.ABILITY_SLOTS:
 		var ability := weapon.ability(state.slot_ability(slot))

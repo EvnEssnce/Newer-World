@@ -122,6 +122,16 @@ var ability_slots := PackedInt32Array()
 ## weapons, holstered or not.
 var cooldowns := PackedInt32Array()
 
+# Ammo (a weapon with a magazine, WeaponParams.ammo > 0: Throwing Knives). Per
+# weapon slot, following the weapon if it changes slot (set_loadout); timers
+# keep running while it's holstered, like cooldowns.
+## Shots used from the magazine (0 = full, so the default needs no params).
+var ammo_spent := PackedInt32Array()
+## Ticks until the magazine is full again (0 = not counting): reload_ticks once
+## it's empty, refill_ticks after a throw that leaves some (restarted by every
+## throw); a press it can't pay for shortens a refill to the reload time.
+var ammo_timer := PackedInt32Array()
+
 # Weapon swap
 ## Ticks since the current swap started, or -1 when not swapping.
 var swap_tick := -1
@@ -202,6 +212,10 @@ func _init() -> void:
 	ability_slots.fill(-1)
 	cooldowns.resize(WEAPON_SLOTS * WeaponParams.MAX_ABILITIES)
 	cooldowns.fill(0)
+	ammo_spent.resize(WEAPON_SLOTS)
+	ammo_spent.fill(0)
+	ammo_timer.resize(WEAPON_SLOTS)
+	ammo_timer.fill(0)
 	wing_slots.resize(WING_SLOTS)
 	wing_slots.fill(-1)
 	wing_cooldowns.resize(WeaponParams.MAX_ABILITIES)
@@ -222,6 +236,7 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	for i in wing_cooldowns.size():
 		if wing_cooldowns[i] > 0:
 			wing_cooldowns[i] -= 1
+	_step_ammo()
 	_refill_charges()
 	_step_ember_and_rebirth(params)
 	status_damage = statuses.tick(params.statuses)
@@ -356,6 +371,7 @@ func revive(params: PlayerParams) -> void:
 	ember = params.ember_resting
 	combat_ticks = 0
 	rebirth_left = -1
+	_fill_ammo()
 	server_events += 1
 
 
@@ -424,6 +440,16 @@ func remove_status(index: int) -> bool:
 		return false
 	server_events += 1
 	return true
+
+
+## Server: sets a status that mirrors server bookkeeping (embedded knives) to
+## `stacks` stacks and ticks_left (0 stacks removes it). A server event if it
+## changed. Ignored while dead (statuses were cleared).
+func set_status_stacks(index: int, stacks: int, ticks_left: int, source: int = 0) -> void:
+	if dead and stacks > 0:
+		return
+	if statuses.set_stacks(index, stacks, ticks_left, source):
+		server_events += 1
 
 
 ## Server: removes every debuff (a cleanse). Removing a stun also ends its
@@ -543,16 +569,19 @@ func reset_for_class_change(params: PlayerParams) -> void:
 	queued_ability_slot = -1
 	swap_buffer = 0
 	attack_speed_carry = 0.0
+	_fill_ammo()
 	server_events += 1
 
 
 ## Equips new_weapons (ids, one per weapon slot) with new_slots (see
-## ability_slots). A weapon that stays equipped keeps its cooldowns, even if it
-## moves to the other slot.
+## ability_slots). A weapon that stays equipped keeps its cooldowns and ammo,
+## even if it moves to the other slot; a newly equipped one starts full.
 func set_loadout(new_weapons: PackedStringArray, new_slots: PackedInt32Array) -> void:
 	var new_cooldowns := PackedInt32Array()
 	new_cooldowns.resize(WEAPON_SLOTS * WeaponParams.MAX_ABILITIES)
 	new_cooldowns.fill(0)
+	var new_spent := PackedInt32Array([0, 0])
+	var new_timer := PackedInt32Array([0, 0])
 	for slot in mini(new_weapons.size(), WEAPON_SLOTS):
 		var old_slot := weapons.find(new_weapons[slot])
 		if old_slot < 0 or old_slot >= WEAPON_SLOTS:
@@ -560,11 +589,15 @@ func set_loadout(new_weapons: PackedStringArray, new_slots: PackedInt32Array) ->
 		for i in WeaponParams.MAX_ABILITIES:
 			new_cooldowns[slot * WeaponParams.MAX_ABILITIES + i] = (
 					cooldowns[old_slot * WeaponParams.MAX_ABILITIES + i])
+		new_spent[slot] = ammo_spent[old_slot]
+		new_timer[slot] = ammo_timer[old_slot]
 	weapons = new_weapons.duplicate()
 	ability_slots.fill(-1)
 	for i in mini(new_slots.size(), ability_slots.size()):
 		ability_slots[i] = new_slots[i]
 	cooldowns = new_cooldowns
+	ammo_spent = new_spent
+	ammo_timer = new_timer
 	if queued_attack == ATTACK_ABILITY:
 		queued_attack = ATTACK_NONE
 	server_events += 1
@@ -1029,7 +1062,7 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 			queued_attack = ATTACK_NONE  # empty slot
 			return
 		if (can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index))
-				and not statuses.silenced(params.statuses)):
+				and not statuses.silenced(params.statuses) and _pay_ammo(w.ability(index), params)):
 			_start_ability(index, aim_yaw, aim_pitch, params, move)
 			queued_attack = ATTACK_NONE
 			return
@@ -1046,7 +1079,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
 			queued_attack = ATTACK_NONE
 			return
-	elif can_attack():
+	elif can_attack() and _pay_ammo(w.attack(queued_attack), params):
+		# Too few shots in the magazine: the press stays buffered.
 		attack_type = queued_attack
 		attack_tick = 0
 		attack_serial += 1
@@ -1089,6 +1123,52 @@ func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: Player
 		cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
 	ember = maxf(0.0, ember - started.ember_cost)
 	_apply_self_status(started, params)
+
+
+## The weapon in weapon slot `slot` (the default weapon if none).
+func weapon_in_slot(params: PlayerParams, slot: int) -> WeaponParams:
+	return params.weapon(weapons[slot] if slot < weapons.size() else "")
+
+
+## Shots left in the magazine of the weapon in `slot` (-1 = the one that's
+## out). 0 for a weapon without one.
+func ammo_left(params: PlayerParams, slot := -1) -> int:
+	if slot < 0:
+		slot = equipped
+	return maxi(0, weapon_in_slot(params, slot).ammo - ammo_spent[slot])
+
+
+## Inside step(): if `attack` can be paid for from the magazine of the weapon
+## that's out, takes its ammo_cost and (re)starts the timer: the reload if it's
+## now empty, else the refill. Returns false (nothing spent) if there aren't
+## enough shots; then a refill still to come is shortened to the reload time.
+## Always true for a weapon without a magazine or an attack that costs nothing.
+func _pay_ammo(attack: AttackParams, params: PlayerParams) -> bool:
+	var w := weapon(params)
+	if attack == null or w.ammo <= 0 or attack.ammo_cost <= 0:
+		return true
+	if ammo_left(params) < attack.ammo_cost:
+		if ammo_timer[equipped] == 0 or ammo_timer[equipped] > w.reload_ticks:
+			ammo_timer[equipped] = w.reload_ticks
+		return false
+	ammo_spent[equipped] += attack.ammo_cost
+	ammo_timer[equipped] = w.reload_ticks if ammo_left(params) <= 0 else w.refill_ticks
+	return true
+
+
+## Inside step(): magazine timers count down for both weapons; at 0 the
+## magazine is full.
+func _step_ammo() -> void:
+	for slot in WEAPON_SLOTS:
+		if ammo_timer[slot] > 0:
+			ammo_timer[slot] -= 1
+			if ammo_timer[slot] == 0:
+				ammo_spent[slot] = 0
+
+
+func _fill_ammo() -> void:
+	ammo_spent.fill(0)
+	ammo_timer.fill(0)
 
 
 func _attack_turn_speed(params: PlayerParams) -> float:
@@ -1170,7 +1250,8 @@ func to_array() -> Array:
 			weapons.duplicate(), equipped, ability_slots.duplicate(), cooldowns.duplicate(),
 			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
 			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown,
-			ember, wing_set, _pack_ember_wings(), attack_speed_carry]
+			ember, wing_set, _pack_ember_wings(), attack_speed_carry,
+			ammo_spent + ammo_timer]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -1211,6 +1292,10 @@ static func from_array(data: Array) -> PlayerState:
 	s.wing_set = data[33]
 	s._unpack_ember_wings(data[34])
 	s.attack_speed_carry = data[35]
+	# 36: ammo, [spent per weapon slot..., timer per weapon slot...].
+	var ammo: PackedInt32Array = data[36]
+	s.ammo_spent = ammo.slice(0, WEAPON_SLOTS)
+	s.ammo_timer = ammo.slice(WEAPON_SLOTS, WEAPON_SLOTS * 2)
 	return s
 
 
@@ -1284,6 +1369,7 @@ func view_array() -> Array:
 	view.free_move_mask = 0
 	view.charge_mask = 0
 	view.spare_charges = 0
+	view._fill_ammo()
 	return view.to_array()
 
 
@@ -1314,6 +1400,7 @@ func matches(other: PlayerState) -> bool:
 			and equipped == other.equipped
 			and ability_slots == other.ability_slots
 			and cooldowns == other.cooldowns
+			and ammo_spent == other.ammo_spent and ammo_timer == other.ammo_timer
 			and swap_tick == other.swap_tick
 			and equip_left == other.equip_left
 			and free_move_mask == other.free_move_mask

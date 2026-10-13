@@ -21,6 +21,13 @@ var heavy_hold_ticks := 0
 var block_stamina_multiplier := 1.0
 ## The ability pool; PlayerState refers to abilities by index into it.
 var abilities: Array[AbilityParams] = []
+## Magazine (Throwing Knives): shots it holds, 0 = no magazine (attacks'
+## ammo_cost is ignored). reload_ticks: once empty, ticks until it's full again;
+## refill_ticks: after a throw that leaves some, ticks without another until
+## it's full again. PlayerState.ammo_spent / ammo_timer track it per weapon slot.
+var ammo := 0
+var reload_ticks := 0
+var refill_ticks := 0
 
 
 ## The params for PlayerState.ATTACK_LIGHT / ATTACK_HEAVY, or null.
@@ -56,10 +63,17 @@ static func from_tuning(weapon_id: String, tps: float) -> WeaponParams:
 	w.attack_buffer_ticks = roundi(Tuning.get_value(file, "attacks", "buffer") * tps)
 	w.attack_turn_speed = deg_to_rad(Tuning.get_value(file, "attacks", "turn_speed"))
 	w.heavy_hold_ticks = roundi(Tuning.get_value(file, "attacks", "heavy_hold_time") * tps)
+	w.ammo = Tuning.get_optional(file, "weapon", "ammo", 0)
+	if w.ammo > 0:
+		w.reload_ticks = maxi(1, roundi(Tuning.get_value(file, "weapon", "reload_time") * tps))
+		w.refill_ticks = maxi(1, roundi(Tuning.get_value(file, "weapon", "refill_delay") * tps))
 	var ability_ids: Array = Tuning.get_value(file, "weapon", "abilities")
 	for ability_id: String in ability_ids:
 		if w.abilities.size() >= MAX_ABILITIES:
 			push_error("%s.cfg: more than %d abilities" % [file, MAX_ABILITIES])
 			break
 		w.abilities.append(AbilityParams.ability_from_tuning(file, ability_id, tps))
+	for a: AttackParams in [w.light_attack, w.heavy_attack] + w.abilities:
+		if w.ammo > 0 and a.ammo_cost > w.ammo:
+			push_error("%s.cfg: an ammo_cost above [weapon] ammo can never be paid" % file)
 	return w

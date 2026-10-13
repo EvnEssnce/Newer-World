@@ -307,8 +307,9 @@ func bot_slot_status_abilities(params: PlayerParams) -> void:
 				throws.append(ability.id)
 		var status_room := PlayerState.ABILITY_SLOTS - mini(throws.size(), 1)
 		# Summons and zones first (Shield Wall, Tripwire, Arrow Rain), so the smoke
-		# test places them; then self-buffs, then status abilities.
-		for key in ["zone", "self_status", "applies_status"]:
+		# test places them; then Recall (rips out embedded knives), self-buffs,
+		# then status abilities.
+		for key in ["zone", "recalls", "self_status", "applies_status"]:
 			for ability in params.weapon(weapon_id).abilities:
 				if (ability.id in unlocked and not ability.internal and not ability.id in slots
 						and not ability.id in throws and not str(ability.get(key)).is_empty()

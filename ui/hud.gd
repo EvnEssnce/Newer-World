@@ -47,6 +47,14 @@ var _blind_overlay: ColorRect
 var _health_label: Label
 ## Gear score, equip slot symbols and gear stat totals, top right.
 var _equipment_summary: EquipmentSummary
+## Magazine readout left of the ability bar (Throwing Knives): pips, a count
+## and a reload bar.
+var _ammo_box: VBoxContainer
+var _ammo_pips: HBoxContainer
+var _ammo_label: Label
+var _ammo_bar: ProgressBar
+const AMMO_FULL := Color(1.0, 0.6, 0.3)
+const AMMO_EMPTY := Color(0.3, 0.3, 0.33, 0.8)
 
 
 func _ready() -> void:
@@ -252,6 +260,65 @@ func _build_ability_bar() -> void:
 	_weapon_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	_weapon_label.add_theme_constant_override("outline_size", 4)
 	add_child(_weapon_label)
+	_build_ammo(bar)
+
+
+## The magazine readout, right-aligned just left of the ability bar.
+func _build_ammo(bar: Control) -> void:
+	_ammo_box = VBoxContainer.new()
+	_ammo_box.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_ammo_box.offset_left = bar.offset_left - 170.0
+	_ammo_box.offset_right = bar.offset_left - 12.0
+	_ammo_box.offset_top = bar.offset_top + 4.0
+	_ammo_box.offset_bottom = bar.offset_bottom
+	_ammo_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	_ammo_box.add_theme_constant_override("separation", 4)
+	_ammo_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ammo_box.visible = false
+	add_child(_ammo_box)
+	_ammo_label = Label.new()
+	_ammo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_ammo_label.add_theme_font_size_override("font_size", 13)
+	_ammo_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_ammo_label.add_theme_constant_override("outline_size", 3)
+	_ammo_box.add_child(_ammo_label)
+	_ammo_pips = HBoxContainer.new()
+	_ammo_pips.alignment = BoxContainer.ALIGNMENT_END
+	_ammo_pips.add_theme_constant_override("separation", 4)
+	_ammo_box.add_child(_ammo_pips)
+	_ammo_bar = ProgressBar.new()
+	_ammo_bar.custom_minimum_size = Vector2(0, 5)
+	_ammo_bar.show_percentage = false
+	_ammo_bar.max_value = 1.0
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = AMMO_FULL
+	_ammo_bar.add_theme_stylebox_override("fill", fill)
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0.0, 0.0, 0.0, 0.5)
+	_ammo_bar.add_theme_stylebox_override("background", back)
+	_ammo_box.add_child(_ammo_bar)
+
+
+## The magazine of the weapon that's out: shots left of capacity (capacity 0
+## hides it: no magazine), and while it reloads or refills, how far along
+## (0..1; below 0 = not counting). reloading: empty, so the count reads
+## "Reloading".
+func set_ammo(left: int, capacity: int, progress: float, reloading: bool) -> void:
+	_ammo_box.visible = capacity > 0
+	if capacity <= 0:
+		return
+	while _ammo_pips.get_child_count() < capacity:
+		var pip := ColorRect.new()
+		pip.custom_minimum_size = Vector2(7, 16)
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_ammo_pips.add_child(pip)
+	for i in _ammo_pips.get_child_count():
+		var pip := _ammo_pips.get_child(i) as ColorRect
+		pip.visible = i < capacity
+		pip.color = AMMO_FULL if i < left else AMMO_EMPTY
+	_ammo_label.text = "Reloading" if reloading else "%d / %d" % [left, capacity]
+	_ammo_bar.modulate.a = 1.0 if progress >= 0.0 else 0.0
+	_ammo_bar.value = clampf(progress, 0.0, 1.0)
 
 
 func _build_slot(slot: int) -> Panel:
