@@ -994,7 +994,8 @@ func _ramp_on_hit(attacker: Player) -> void:
 ## A backstab: a player's hit (attacker_id > 0) from within [backstab]
 ## rear_arc behind the target's facing (attacker_pos: for a projectile, a
 ## point back along its path), or on an enemy whose threat target isn't the
-## attacker (idle, or fighting someone else) when unaware_enemies is on.
+## attacker (idle, or fighting someone else) when unaware_enemies is on
+## (EnemyBrain.is_unaware_of; never for an always_aware enemy, the dummy).
 ## target: a Player or an Enemy.
 func _is_backstab(attacker_id: int, attacker_pos: Vector3, target: Node3D) -> bool:
 	var attacker := _player_by_id(attacker_id) if attacker_id > 0 else null
@@ -1006,7 +1007,8 @@ func _is_backstab(attacker_id: int, attacker_pos: Vector3, target: Node3D) -> bo
 	var behind := MeleeHitbox.is_in_front(target.global_position, yaw + PI, attacker_pos,
 			p.backstab_rear_arc)
 	if not behind and player == null and p.backstab_unaware_enemies:
-		behind = (target as Enemy).brain.target_id != attacker_id
+		var enemy := target as Enemy
+		behind = enemy.brain.is_unaware_of(attacker_id, enemy.params)
 	if behind:
 		_backstabs += 1
 	return behind

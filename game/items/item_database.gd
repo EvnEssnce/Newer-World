@@ -41,6 +41,8 @@ class AffixDef:
 	var min_per_100_gs := 0.0
 	var max_per_100_gs := 0.0
 	var slots: PackedStringArray = []
+	## Lowest rarity id that can roll it ("" = every rarity).
+	var min_rarity := ""
 
 
 class LootTable:
@@ -122,17 +124,27 @@ static func from_tuning() -> ItemDatabase:
 		affix.min_per_100_gs = Tuning.get_value("affixes", id, "min_per_100_gs")
 		affix.max_per_100_gs = Tuning.get_value("affixes", id, "max_per_100_gs")
 		affix.slots = PackedStringArray(Tuning.get_value("affixes", id, "slots"))
+		affix.min_rarity = Tuning.get_optional("affixes", id, "min_rarity", "")
 		db.affixes[id] = affix
 	return db
 
 
-## Affixes an item in this slot can roll, in data file order.
-func affixes_for_slot(slot: String) -> Array[AffixDef]:
+## Affixes an item in this slot can roll, in data file order. With a rarity,
+## only those whose min_rarity it reaches.
+func affixes_for_slot(slot: String, rarity := "") -> Array[AffixDef]:
 	var pool: Array[AffixDef] = []
 	for affix: AffixDef in affixes.values():
-		if slot in affix.slots:
+		if slot in affix.slots and (rarity.is_empty() or rarity_allows(rarity, affix)):
 			pool.append(affix)
 	return pool
+
+
+## Whether an item of this rarity may roll the affix: no min_rarity, or the
+## rarity is that one or later in rarity_order.
+func rarity_allows(rarity: String, affix: AffixDef) -> bool:
+	if affix.min_rarity.is_empty():
+		return true
+	return rarity_order.find(rarity) >= rarity_order.find(affix.min_rarity)
 
 
 ## Problems with the definitions, e.g. a loot table naming an item that doesn't
@@ -156,6 +168,8 @@ func validate() -> PackedStringArray:
 	for affix: AffixDef in affixes.values():
 		if affix.min_per_100_gs > affix.max_per_100_gs:
 			problems.append("affix '%s' has min above max" % affix.id)
+		if not affix.min_rarity.is_empty() and affix.min_rarity not in rarity_order:
+			problems.append("affix '%s' has unknown min_rarity '%s'" % [affix.id, affix.min_rarity])
 		for slot in affix.slots:
 			if slot not in SLOTS:
 				problems.append("affix '%s' has unknown slot '%s'" % [affix.id, slot])

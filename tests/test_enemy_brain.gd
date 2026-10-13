@@ -231,3 +231,20 @@ func test_stationary_is_still_staggered() -> void:
 	assert_eq(brain.mode, EnemyBrain.Mode.STAGGERED)
 	_step(HOME, {})
 	assert_eq(brain.mode, EnemyBrain.Mode.IDLE)
+
+
+func test_unaware_of_players_it_isnt_fighting() -> void:
+	assert_true(brain.is_unaware_of(1, params), "idle: unaware of everyone")
+	_step(HOME, {1: Vector3(5, 0, 0)})
+	assert_false(brain.is_unaware_of(1, params), "aware of its target")
+	assert_true(brain.is_unaware_of(2, params), "unaware of someone else")
+
+
+func test_always_aware_is_never_unaware() -> void:
+	params.stationary = true
+	params.always_aware = true
+	brain.add_threat(1, 100.0, params)
+	_step(HOME, {1: Vector3(1, 0, 1)})
+	assert_eq(brain.target_id, 0, "a dummy never targets anyone")
+	assert_false(brain.is_unaware_of(1, params), "so only rear-arc hits backstab it")
+	assert_false(brain.is_unaware_of(2, params))

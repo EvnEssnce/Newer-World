@@ -66,6 +66,14 @@ static func get_kind(kind: String) -> ZoneParams:
 	return _kinds.get(kind)
 
 
+## Every kind in data/zones.cfg, in file order.
+static func all_kinds() -> Array[ZoneParams]:
+	get_kind("")
+	var kinds: Array[ZoneParams] = []
+	kinds.assign(_kinds.values())
+	return kinds
+
+
 static func from_tuning(kind: String, tps: float) -> ZoneParams:
 	var f := "zones"
 	var s := "zone_" + kind
