@@ -220,6 +220,8 @@ var _radial_mesh: CylinderMesh
 var _wing_pivots: Array[Node3D] = []
 var _rebirth_fire: MeshInstance3D
 var _rebirth_mesh: CylinderMesh
+## Beam attacks' look (client; `beam_color` in the weapon file).
+var _beam: BeamVisual
 ## Placeholder War Hammer, built in code (client; _build_hammer_model).
 var _hammer_pivot: Node3D
 
@@ -259,6 +261,8 @@ func _ready() -> void:
 	_build_hammer_model()
 	_build_assassin_models()
 	_build_ranger_models()
+	_beam = BeamVisual.new()
+	_model.add_child(_beam)
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -756,6 +760,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_show_ranger(model, attack, attack_tick, lowered)
 
 	_show_hitbox(attack, attack_tick)
+	_beam.update(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
 
 	if view.dead:

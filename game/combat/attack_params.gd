@@ -42,6 +42,9 @@ var max_targets := 0
 ## When max_targets stops it (a charge on contact), everything within this many
 ## meters of the attacker is hit too. 0 = only what the hitbox touches.
 var impact_radius := 0.0
+## Cosmetic (clients only): a box attack drawn as a conjured beam of this color
+## along its hitbox (BeamVisual). Alpha 0 (the default) = no beam.
+var beam_color := Color(0.0, 0.0, 0.0, 0.0)
 ## Knockback / pull / launch on hit (force_* keys), or null for none.
 var force: ForceParams = null
 ## This attack's own execute bonus (Executioner's Swing; execute_damage /
@@ -177,6 +180,7 @@ func load_from(file: String, section: String, tps: float) -> void:
 	hitbox_arc = deg_to_rad(Tuning.get_optional(file, section, "arc", 0.0))
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
 	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
+	beam_color = Tuning.get_optional(file, section, "beam_color", Color(0.0, 0.0, 0.0, 0.0))
 	execute = Vector2(Tuning.get_optional(file, section, "execute_damage", 0.0),
 			Tuning.get_optional(file, section, "execute_threshold", 0.0))
 	_load_statuses(file, section, tps)

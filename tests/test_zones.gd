@@ -117,3 +117,59 @@ func test_a_box_that_isnt_solid_blocks_nothing() -> void:
 	var z := Zone.new(p, Vector3.ZERO, 0.0, 7)
 	assert_true(z.contains(Vector3(1.5, 0, 0.2)), "still a box-shaped area")
 	assert_almost(z.blocks_segment(Vector3(0, 1, -5), Vector3(0, 1, 5), 0.0), -1.0)
+
+
+## Flame Wall's size (data/zones.cfg [zone_flame_wall]), built by hand.
+func _flame_wall() -> ZoneParams:
+	var p := _params(ZoneParams.TRIGGER_PULSE)
+	p.radius = 3.0
+	p.height = 2.0
+	p.duration_ticks = 300
+	p.interval_ticks = 30
+	p.wall = true
+	p.wall_width = 6.0
+	p.wall_depth = 1.2
+	return p
+
+
+## Regression (session 41 playtest: "enemies standing in the Flame Wall when it
+## appears aren't burned"): the thin box was tested at the target's feet only,
+## so a Husk whose body stood visibly in the fire (center up to its radius
+## outside the 1.2 m depth, or past the ends) was never touched.
+func test_wall_area_counts_bodies_that_overlap_it() -> void:
+	# Placed 5 m ahead of a player at the origin facing -Z: the box spans
+	# x -3..3, z -5.6..-4.4.
+	var z := Zone.new(_flame_wall(), Vector3(0, 0, -5), 0.0, 7)
+	assert_true(z.step(), "pulses on its first tick")
+	var husk := 0.5  # Enemy.BODY_RADIUS
+	var body_in_fire := Vector3(0.0, 0.0, -5.9)  # body spans z -6.4..-5.4
+	assert_false(z.contains(body_in_fire), "the feet alone are outside")
+	assert_true(z.contains(body_in_fire, husk), "the body overlaps the fire")
+	assert_true(z.contains(Vector3(3.3, 0.0, -5.0), husk), "overlapping an end")
+	assert_false(z.contains(Vector3(0.0, 0.0, -6.2), husk), "a clear gap")
+	assert_false(z.contains(Vector3(3.6, 0.0, -5.0), husk), "past an end")
+	# Turned (facing -X, so the wall runs along Z): same rule in its frame.
+	var turned := Zone.new(_flame_wall(), Vector3(-5, 0, 0), PI / 2.0, 7)
+	assert_true(turned.contains(Vector3(-5.9, 0.0, 0.0), husk))
+	assert_true(turned.contains(Vector3(-5.0, 0.0, 3.3), husk))
+	assert_false(turned.contains(Vector3(-5.0, 0.0, 3.6), husk))
+	# A disc is a ground marking: the feet decide, whatever the body.
+	var disc := Zone.new(_params(ZoneParams.TRIGGER_PULSE), Vector3.ZERO, 0.0, 7)
+	assert_false(disc.contains(Vector3(2.3, 0, 0), husk))
+
+
+## A Husk walking straight through a Flame Wall at its chase speed (3.5 m/s)
+## is burned at least once, whatever the pulse timing when it reaches it.
+func test_walking_through_a_wall_is_always_burned() -> void:
+	var step := 3.5 / 60.0
+	for phase in 30:
+		var z := Zone.new(_flame_wall(), Vector3(0, 0, -5), 0.0, 7)
+		for i in phase:
+			z.step()
+		var at := Vector3(0.0, 0.0, -9.0)
+		var burned := false
+		while at.z < -1.0:
+			if z.step() and z.contains(at, 0.5):
+				burned = true
+			at.z += step
+		assert_true(burned, "pulse phase %d" % phase)

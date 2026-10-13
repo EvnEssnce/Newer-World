@@ -193,19 +193,19 @@ func _end(zone: Zone) -> void:
 
 
 ## Living players of the zone's `affects` side and (hostile zones) living
-## enemies standing in it.
+## enemies standing in it (a wall counts their bodies: Zone.contains).
 func _targets_in(zone: Zone) -> Array[Node3D]:
 	var result: Array[Node3D] = []
 	var both := zone.params.affects == ZoneParams.AFFECTS_BOTH
 	var hostile := zone.params.affects == ZoneParams.AFFECTS_HOSTILE or both
 	for player: Player in players.get_children():
-		if player.state.dead or not zone.contains(player.global_position):
+		if player.state.dead or not zone.contains(player.global_position, Player.BODY_RADIUS):
 			continue
 		if both or world.are_allies(zone.owner_id, player.peer_id) != hostile:
 			result.append(player)
 	if hostile:
 		for enemy: Enemy in enemies.get_children():
-			if not enemy.dead and zone.contains(enemy.global_position):
+			if not enemy.dead and zone.contains(enemy.global_position, Enemy.BODY_RADIUS):
 				result.append(enemy)
 	return result
 
@@ -259,7 +259,7 @@ func _ground_below(from: Vector3) -> Vector3:
 # --- Client ---
 
 ## Client: as soon as there's a camera, shows one fully transparent copy of
-## every zone look (one per `visual`) just in front of it for PREWARM_FRAMES
+## every zone look (one per `visual`) and of the beam look just in front of it for PREWARM_FRAMES
 ## frames, then removes them. Drawing them makes the GPU compile their
 ## materials' shaders while the world loads instead of on the first cast (a
 ## first Shield Wall froze the game while its shader compiled: ~0.15 s on a
@@ -290,6 +290,10 @@ func _prewarm_step() -> void:
 		visual.setup(p, 0.0)
 		visual.update(0.0, true, 0.0)  # 0 s left: faded out, alpha 0
 		_prewarm_node.add_child(visual)
+	# The beam attacks' look too (BeamVisual: one shader for all its parts).
+	var beam := BeamVisual.new()
+	_prewarm_node.add_child(beam)
+	beam.show_invisible()
 	_prewarm_frames = PREWARM_FRAMES
 
 
