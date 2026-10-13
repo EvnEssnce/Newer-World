@@ -140,6 +140,11 @@ var _ramp_stacks := 0
 var _aftershocks := 0
 var _wall_stuns := 0
 var _roar_guards := 0
+## Earthshaker rings rolling outward (server), and the targets they hit.
+var _shock_rings: Array[ShockRing] = []
+var _aftershock_hits := 0
+## Hooking Pull hits that didn't mark Hooked (no Warden capstone).
+var _hooks_unmarked := 0
 ## Assassin (server): backstabs (hits from behind or on an unaware enemy),
 ## Primed crits used, Feint reads (a blocked/evaded Feint, or one landing on
 ## an enemy mid-swing).
@@ -325,6 +330,7 @@ func _server_tick(delta: float) -> void:
 	for player: Player in _players.get_children():
 		_hold_the_line(player)
 	_projectiles.server_step(delta)
+	_step_shock_rings(delta)
 	zones.server_step()
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
@@ -1663,11 +1669,11 @@ func _teleport(player: Player, to: Vector3) -> void:
 
 ## Server, every live tick of a player's attack: the War Hammer capstones of
 ## the weapon that's out. Earthshaker ("heavy_shockwave"): each heavy is
-## counted once (HeavyCounter); every amount-th sends out the internal ability
-## applies_to's projectile from where the player stands (the spawn reaches
-## every client, the thrower's included). Breaker ("heavy_breaks_block"):
-## returns a copy of the heavy that always breaks blocks. Otherwise returns
-## `attack` unchanged. Never touches the predicted sim.
+## counted once (HeavyCounter); every amount-th starts the internal ability
+## applies_to's ring (ShockRing, its ring_* keys) around where the player
+## stands (_spawn_shock_ring). Breaker ("heavy_breaks_block"): returns a copy
+## of the heavy that always breaks blocks. Otherwise returns `attack`
+## unchanged. Never touches the predicted sim.
 func _with_hammer_capstones(attacker: Player, attack: AttackParams) -> AttackParams:
 	if attacker.build == null or attacker.state.attack_type != PlayerState.ATTACK_HEAVY:
 		return attack
@@ -1678,12 +1684,101 @@ func _with_hammer_capstones(attacker: Player, attack: AttackParams) -> AttackPar
 		var wave := weapon.ability(weapon.ability_index(shock.applies_to))
 		if wave:
 			_aftershocks += 1
-			_projectiles.server_fire_attack(attacker, wave)
+			_spawn_shock_ring(attacker, wave, "weapon_%s" % weapon_id)
 	if attacker.build.weapon_effect(weapon_id, "heavy_breaks_block") and not attack.breaks_block:
 		var breaking := attack.copy()
 		breaking.breaks_block = true
 		return breaking
 	return attack
+
+
+## Server: starts an Earthshaker ring (ShockRing) of `attack` (an internal
+## ability; its ring_* keys in `file`) around `player`'s feet, scaled by its
+## damage modifiers now (like a projectile at release), and tells every client
+## (_receive_shock_ring).
+func _spawn_shock_ring(player: Player, attack: AbilityParams, file: String) -> void:
+	var section := "ability_%s" % attack.id
+	var ring := ShockRing.from_tuning(file, section, player.global_position)
+	ring.owner_id = player.peer_id
+	ring.attack = attack
+	ring.damage_scale = (player.damage_multiplier(attack)
+			* player.state.statuses.damage_dealt_multiplier(player.params.statuses))
+	ring.execute = player.execute_bonus()
+	_shock_rings.append(ring)
+	var color: Color = Tuning.get_optional(file, section, "ring_color", Color(0.85, 0.65, 0.35, 1.0))
+	for peer_id in _connected_player_ids():
+		_receive_shock_ring.rpc_id(peer_id, player.peer_id, ring.center, _tick, ring.speed,
+				ring.max_radius, ring.thickness, color)
+	if _verbose:
+		print("[server] peer %d aftershock ring at %s" % [player.peer_id, ring.center])
+
+
+## Server, each tick after projectiles: grows every Earthshaker ring and hits
+## each living player and enemy its band passes, once each, through the normal
+## strike path (allies ignored; guards, parries and knockback measured from the
+## ring's center). A ring whose owner left ends.
+func _step_shock_rings(delta: float) -> void:
+	for ring: ShockRing in _shock_rings.duplicate():
+		ring.step(delta)
+		if _player_by_id(ring.owner_id) == null:
+			_shock_rings.erase(ring)
+			continue
+		for target: Player in _players.get_children():
+			if (target.peer_id == ring.owner_id or target.state.dead
+					or not ring.can_hit(target.peer_id)
+					or not ring.touches(target.global_position, Player.BODY_RADIUS)):
+				continue
+			var result := resolve_strike(ring.owner_id, ring.center,
+					ring.outward_yaw(target.global_position), ring.attack, ring.results, target,
+					ring.damage_scale, ring.execute)
+			if result < 0 or result == HIT_EVADED:
+				continue
+			_aftershock_hits += 1
+			if result == HIT_DAMAGED:
+				_give_hit_statuses(ring.owner_id, ring.attack, [] as Array[Vector2i], target)
+		for enemy: Enemy in _enemies.get_children():
+			if (enemy.dead or not ring.can_hit(enemy.enemy_id)
+					or not ring.touches(enemy.global_position, Enemy.BODY_RADIUS)):
+				continue
+			ring.register_hit(enemy.enemy_id)
+			_aftershock_hits += 1
+			strike_enemy(ring.owner_id, ring.center, ring.outward_yaw(enemy.global_position),
+					ring.attack, enemy, ring.damage_scale,
+					func() -> Array[Vector2i]: return [] as Array[Vector2i], ring.execute)
+		if ring.is_done():
+			_shock_rings.erase(ring)
+
+
+## Client: an Earthshaker ring started at `center` on server tick `tick`. Your
+## own shows at once; someone else's waits for the render clock (they're drawn
+## in the past), like their projectiles.
+@rpc("authority", "call_remote", "reliable")
+func _receive_shock_ring(owner_id: int, center: Vector3, tick: int, speed: float,
+		max_radius: float, thickness: float, color: Color) -> void:
+	var delay := 0.0
+	var render := render_tick()
+	if owner_id != multiplayer.get_unique_id() and render >= 0.0:
+		delay = (tick - render) / Engine.physics_ticks_per_second
+	var visual := ShockRingVisual.new()
+	add_child(visual)
+	visual.setup(center, speed, max_radius, thickness, color, delay)
+	if _verbose:
+		# The --screenshot-dir frame number, to find the ring in the frames.
+		print("[client] aftershock ring from %d (frame %d)" % [owner_id, Time.get_ticks_msec() / 250])
+
+
+## Server: false if status_id is a capstone's mark (Hooked, from Hooking Pull)
+## and the player source_id hasn't learned that capstone (Caught on the Hook)
+## in the tree of the weapon that's out (CharacterBuild.applies_mark): then the
+## hit doesn't apply it. True otherwise (enemies, any other status).
+func _mark_learned(source_id: int, status_id: String) -> bool:
+	var source := _player_by_id(source_id) if source_id > 0 else null
+	if source == null or source.build == null or source.state.is_using_wing():
+		return true
+	if source.build.applies_mark(source.state.weapon_id(), status_id):
+		return true
+	_hooks_unmarked += 1
+	return false
 
 
 ## Server: where a hit's force moves its target (ForceParams.displacement). A
@@ -1764,9 +1859,9 @@ func _roar_guard(source_id: int) -> void:
 
 
 func _print_juggernaut_summary() -> void:
-	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d wall_stuns=%d roar_guards=%d" % [
-			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _wall_stuns,
-			_roar_guards])
+	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d aftershock_hits=%d wall_stuns=%d roar_guards=%d hooks_unmarked=%d" % [
+			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _aftershock_hits,
+			_wall_stuns, _roar_guards, _hooks_unmarked])
 	print("SUMMARY summons decoy_bursts=%d shadow_swaps=%d" % [_decoy_bursts, _shadow_swaps])
 	print("SUMMARY paladin heal_pulses=%d cleanses=%d blessings=%d deflections=%d reflections=%d shared_damage=%d kindled=%d judgments=%d" % [
 			_heal_pulses, _cleanses, _blessings, _deflections, _reflections, roundi(_shared_damage),
@@ -1941,6 +2036,8 @@ func _give_hit_statuses(source_id: int, attack: AttackParams, on_hit: Array[Vect
 		target: Node3D) -> void:
 	var defs := StatusDefs.current()
 	for status: Array in attack.target_statuses():
+		if not _mark_learned(source_id, status[0]):
+			continue
 		_give_status(source_id, target, defs.index_of(status[0]), status[1], status[2])
 	for status in on_hit:
 		_give_status(source_id, target, status.x, status.y, -1)
