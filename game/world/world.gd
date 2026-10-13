@@ -223,6 +223,9 @@ var _bot_wing_pressed := {}
 ## Time (s) of the hitting ability that follows a self-buff, or -1.
 var _bot_followup_at := -1.0
 var _bot_first_ability_pressed := false
+## Bot ability/Wing/dodge presses held back during its own light/heavy windup
+## (a press there would cancel the swing: animation canceling).
+var _bot_held_presses := 0
 var _bot_next_weapon_msec := 0
 var _verbose := false
 var _log_timer := 0.0
@@ -2532,6 +2535,16 @@ func _bot_input() -> Array:
 			buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length())
 			if (buttons & ABILITY_BUTTONS) == 0:
 				buttons |= _bot_projectile_button(flat.length())
+	# Don't cancel its own swing: presses during a light/heavy's windup wait for
+	# the windup to end (in the hit window the sim buffers them as before).
+	var cancel_buttons := ABILITY_BUTTONS | PlayerState.BUTTON_DODGE
+	if (_local_player.state.attack_cancel_phase(_local_player.params)
+			== PlayerState.CANCEL_WINDUP):
+		_bot_held_presses |= buttons & cancel_buttons
+		buttons &= ~cancel_buttons
+	else:
+		buttons |= _bot_held_presses
+		_bot_held_presses = 0
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
 

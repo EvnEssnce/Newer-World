@@ -364,7 +364,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 
 - Tap left click = light (fires on release), hold left click `heavy_hold_time` = heavy
   (fires while held). Hold right click = block. Attacks: windup → active (hitbox live)
-  → recovery, all in ticks from the weapon file. A dodge can cancel recovery only.
+  → recovery, all in ticks from the weapon file. A dodge or weapon/Wing ability press during a light/heavy windup **cancels** it (no damage, nothing released, knife ammo refunded); during its recovery it skips the rest; during the protected part (hit windows, projectile release, zone placement) it stays buffered (`PlayerState.attack_cancel_phase` is the one rule). Abilities can only be dodged in recovery, and abilities never cancel abilities.
   Presses during an attack or roll are buffered. Facing starts at `aim_yaw` and tracks
   it at `turn_speed` (weapon file) for the whole attack, so the hitbox follows the
   camera; movement is slowed by `move_multiplier`.
