@@ -59,6 +59,10 @@ const WING_SLOTS := 2
 const HOLD_RELEASED := -1
 ## The held press already became a heavy attack; nothing more until released.
 const HOLD_SPENT := -2
+## attack_cancel_phase(): not cancelable now / in the windup / in the recovery.
+const CANCEL_NONE := 0
+const CANCEL_WINDUP := 1
+const CANCEL_RECOVERY := 2
 
 var stamina := 0.0
 ## Ticks left before stamina regen starts again.
@@ -818,7 +822,15 @@ func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
 			and swap_tick < 0 and equip_left == 0
 			and stamina >= dodge_cost(params)
 			and (on_floor or air_dodges_used < params.max_air_dodges)
-			and (attack_tick < 0 or is_attack_recovering(params)))
+			and (attack_tick < 0 or _dodge_can_cancel(params)))
+
+
+## A dodge can cut short a light/heavy attack's windup or recovery
+## (attack_cancel_phase) and any ability's recovery.
+func _dodge_can_cancel(params: PlayerParams) -> bool:
+	if attack_type == ATTACK_LIGHT or attack_type == ATTACK_HEAVY:
+		return attack_cancel_phase(params) != CANCEL_NONE
+	return is_attack_recovering(params)
 
 
 ## True if spare charge `bit` (0 = roll, 1 + i = Wing pool index i) is ready.
@@ -925,7 +937,7 @@ func _handle_dodge_input(move: Vector2, buttons: int, on_floor: bool, params: Pl
 	dodge_buffer -= 1
 	if not can_dodge(on_floor, params):
 		return
-	_end_attack()
+	_cancel_attack(params)
 	queued_attack = ATTACK_NONE
 	dodge_tick = 0
 	dodge_buffer = 0
@@ -1001,6 +1013,56 @@ func is_attack_recovering(params: PlayerParams) -> bool:
 	return attack != null and attack_tick >= attack.recovery_start_tick()
 
 
+## Animation canceling: where the current light/heavy attack is.
+## CANCEL_WINDUP before its committed part (the first hit window, projectile
+## release or zone placement): a dodge or ability press ends it, nothing done.
+## CANCEL_RECOVERY after the last of them: the press skips the rest.
+## CANCEL_NONE in between (presses stay buffered, so a hit is never half
+## canceled), or when not in a light/heavy attack (abilities keep their rules).
+func attack_cancel_phase(params: PlayerParams) -> int:
+	if attack_tick < 0 or (attack_type != ATTACK_LIGHT and attack_type != ATTACK_HEAVY):
+		return CANCEL_NONE
+	var attack := attack_params(params)
+	var first := attack.windup_ticks
+	var after := attack.recovery_start_tick()
+	var throws := not attack.projectile.is_empty() or not attack.zone.is_empty()
+	if attack.shape == AttackParams.SHAPE_NONE and throws:
+		# No hitbox (a throw): only the release/placement is committed.
+		first = attack.total_ticks()
+		after = 0
+	if not attack.projectile.is_empty():
+		first = mini(first, attack.projectile_tick)
+		after = maxi(after, attack.projectile_tick + 1)
+	if not attack.zone.is_empty():
+		first = mini(first, attack.zone_tick)
+		after = maxi(after, attack.zone_tick + 1)
+	if attack_tick < first:
+		return CANCEL_WINDUP
+	if attack_tick >= after:
+		return CANCEL_RECOVERY
+	return CANCEL_NONE
+
+
+## Ends the current attack for a dodge or ability that cuts it short. A
+## light/heavy canceled in its windup threw nothing, so its ammo_cost goes back
+## in the magazine.
+func _cancel_attack(params: PlayerParams) -> void:
+	if attack_cancel_phase(params) == CANCEL_WINDUP:
+		var cost := attack_params(params).ammo_cost
+		if cost > 0 and weapon(params).ammo > 0:
+			ammo_spent[equipped] = maxi(0, ammo_spent[equipped] - cost)
+			if ammo_spent[equipped] == 0:
+				ammo_timer[equipped] = 0
+	_end_attack()
+
+
+## True if an ability press now may cut the current light/heavy attack short
+## (its windup or recovery), the same conditions as can_attack() otherwise.
+func _ability_can_cancel(params: PlayerParams) -> bool:
+	return (can_act() and dodge_tick < 0 and swap_tick < 0 and equip_left == 0
+			and attack_cancel_phase(params) != CANCEL_NONE)
+
+
 ## True during a parry ability's parry window.
 func is_parrying(params: PlayerParams) -> bool:
 	var a := current_ability(params)
@@ -1056,16 +1118,22 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 	if queued_attack == ATTACK_NONE:
 		return
 	queued_attack_ticks -= 1
+	# Animation canceling: an ability press in a light/heavy attack's windup or
+	# recovery ends it and starts at once (attack_cancel_phase).
+	var cancel := attack_tick >= 0 and _ability_can_cancel(params)
 	if queued_attack == ATTACK_ABILITY:
 		var index := slot_ability(queued_ability_slot)
 		if w.ability(index) == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if (can_attack() and cooldown_left(index) == 0 and can_afford(w.ability(index))
-				and not statuses.silenced(params.statuses) and _pay_ammo(w.ability(index), params)):
-			_start_ability(index, aim_yaw, aim_pitch, params, move)
-			queued_attack = ATTACK_NONE
-			return
+		if ((can_attack() or cancel) and cooldown_left(index) == 0 and can_afford(w.ability(index))
+				and not statuses.silenced(params.statuses)):
+			if cancel:
+				_cancel_attack(params)
+			if _pay_ammo(w.ability(index), params):
+				_start_ability(index, aim_yaw, aim_pitch, params, move)
+				queued_attack = ATTACK_NONE
+				return
 	elif queued_attack == ATTACK_WING:
 		# Not enough Ember (or on cooldown): stays buffered, so Ember the server
 		# grants within the buffer still lets it start.
@@ -1074,8 +1142,11 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		if wing == null:
 			queued_attack = ATTACK_NONE  # empty slot
 			return
-		if (can_attack() and (wing_cooldowns[wing_index] == 0 or has_spare_charge(1 + wing_index))
+		if ((can_attack() or cancel)
+				and (wing_cooldowns[wing_index] == 0 or has_spare_charge(1 + wing_index))
 				and can_afford(wing) and not statuses.silenced(params.statuses)):
+			if cancel:
+				_cancel_attack(params)
 			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
 			queued_attack = ATTACK_NONE
 			return

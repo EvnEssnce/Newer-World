@@ -163,11 +163,13 @@ func test_press_just_before_cooldown_ends_is_buffered() -> void:
 func test_ability_pressed_mid_attack_starts_after_it() -> void:
 	_step(ATTACK)
 	_step()  # light attack starts (on release)
-	_steps(params.default_weapon.light_attack.total_ticks() - 3)
-	_step(Q)
-	assert_eq(state.attack_type, PlayerState.ATTACK_LIGHT, "can't interrupt the attack")
 	_steps(2)
-	assert_true(state.is_using_ability(), "starts the tick the attack ends")
+	_step(Q)  # tick 3: the hit window
+	assert_eq(state.attack_type, PlayerState.ATTACK_LIGHT, "can't interrupt the hit")
+	_step()
+	assert_eq(state.attack_type, PlayerState.ATTACK_LIGHT)
+	_step()
+	assert_true(state.is_using_ability(), "starts as the recovery begins (skips it)")
 
 
 func test_buffered_ability_expires() -> void:
