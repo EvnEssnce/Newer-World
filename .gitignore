@@ -21,3 +21,6 @@ Thumbs.db
 
 # Claude Code agent worktrees (temporary copies of the repo)
 .claude/worktrees/
+
+# Temporary no-focus override written by tools/screenshot_run.ps1
+/override.cfg

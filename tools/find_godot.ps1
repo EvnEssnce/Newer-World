@@ -1,5 +1,5 @@
 # Dot-source this to get $Godot (console exe, prints logs), $GodotGui (windowed exe)
-# and $ProjectRoot. Set the GODOT environment variable to override the location.
+# and $ProjectRoot. It also runs Godot's import first (see the end). Set the GODOT environment variable to override the location.
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 
 if ($env:GODOT) {
@@ -12,3 +12,7 @@ if (-not $Godot -or -not (Test-Path $Godot)) {
     throw "Godot not found. Set the GODOT environment variable to the path of Godot's _console.exe."
 }
 $GodotGui = $Godot -replace '_console\.exe$', '.exe'
+
+# Register new class_name scripts (after a pull, merge or fresh worktree), or
+# scripts that use them fail to parse ("Could not find type ..."). ~3 s.
+& $Godot --headless --path $ProjectRoot --import *> $null

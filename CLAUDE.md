@@ -108,13 +108,21 @@ game/
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
                              cleanse, on-hit (Bloodlust), immunities, taunt source.
                              Pure logic, unit tested.
-ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars, ability
-                     bar, Wing slots, weapon line, status row, Rebirth banner, debug info),
+ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars with a
+                     current/max health number, ability bar, Wing slots, weapon line, status
+                     row, Rebirth banner, debug info),
+                     equipment_summary (top-right gear box: average gear score, a drawn symbol
+                     per equip slot tinted by rarity, gear stat totals from
+                     `Equipment.Stats.summary_lines`; added by `Hud.setup_equipment(loot)`,
+                     reads `LootSystem.equipment`),
                      mastery_panel (K: Class picker (test tool), equipped weapons, weapon trees
-                     and a Wings tab, respec, slots),
+                     and a Wings tab, respec, slots; sized to the viewport, max 1440x840),
                      party_hud (party frames, invite prompt, party notices; built in code),
                      loot_hud (pickup prompt, loot feed, equip bar) and inventory_panel (I:
-                     equipped gear and the bag).
+                     equipped cards + a bag grid sized to the viewport (max 1560x840; 40 slots
+                     fit at 1080p), type/class filters and sort (client view only,
+                     `InventoryPanel.bag_view`), comparisons with affixes
+                     (`Item.stat_changes`), hover tooltips).
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
@@ -275,6 +283,12 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   fires each back as a returning kind (`server_recall` → `server_fire_from`).
 
 ## Zones and summons (AREA, SUMMON)
+
+- Clients prewarm every zone look's materials once a camera exists
+  (`ZoneSystem._prewarm_step`: one alpha-0 copy per visual type for 3 frames), so a first
+  cast doesn't compile shaders mid-fight (Shield Wall froze on first use). Godot caches
+  compiled shaders in `user://shader_cache`, which hides first-use hitches: to test one,
+  use an empty user dir (an `override.cfg` with `application/config/use_custom_user_dir`).
 
 - `data/zones.cfg` `[zone_<id>]` (every key explained there): radius/height, duration,
   `trigger` "pulse" (every `interval`, first after `first_pulse`), "trap" (armed after
@@ -948,6 +962,9 @@ deflections= reflections= shared_damage= kindled= judgments=` (no checks).
   `data/enemy_<kind>.cfg`). The server spawns one `Enemy` per marker at startup with a
   negative id (`-1`, `-2`, ...), which is also its node name under `World/Enemies` and
   how hit events address it (peer ids are always positive).
+- Optional `[ai] always_aware` (true on the training dummy): the enemy is never
+  "unaware" for backstabs, so only rear-arc hits backstab it
+  (`EnemyBrain.is_unaware_of`, used by `World._is_backstab`).
 - **Server only**: each tick after the players, `Enemy.server_step` runs its
   `EnemyBrain` (IDLE wander → CHASE its threat target → ATTACK when within
   `attack_range` and off cooldown → back to CHASE; STAGGERED when hit by a staggering
@@ -999,7 +1016,9 @@ click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery pan
 or Esc closes it), T/Y/N/L/Delete party (see below), F pick up your loot in reach, I
 inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse.
 Panels that need the mouse join the `modal_ui` group: while one is visible, clicks and
-wheel scrolls don't recapture the mouse. 1–9 are reserved for later (consumables):
+wheel scrolls don't recapture the mouse. I and K close each other
+(`InventoryPanel.hide_other_modals`); a closing panel recaptures the mouse only if no
+other `modal_ui` panel is visible. 1–9 are reserved for later (consumables):
 don't bind them to anything else.
 
 ## Loot and gear (milestone 2)
@@ -1035,6 +1054,9 @@ don't bind them to anything else.
 - `ItemDatabase.validate()` checks the three files against each other; a unit test runs
   it on the real data. `tools\roll_loot.ps1 [-Table husk] [-Kills 50000]` prints what a
   table really drops.
+- An affix may set `min_rarity` (a rarity id): lower rarities never roll it (and roll
+  fewer affixes if the slot's pool runs short); `validate()` checks the id. Kindle is
+  Epic/Legendary only (about +20–30% Ember gain).
 - **Gear score** (`data/gear.cfg`, `GearScore`, New World's community-datamined
   curves): an item's main stat = `primary_base` (items.cfg, its value at GS 100) ×
   `factor(GS)`: ×1.0112 per whole 5 GS up to 500, then ×(1 + 0.0112 × 0.6667) per 5.
@@ -1206,11 +1228,19 @@ Shockwave cooldowns for more throws, Earthshaker on every heavy (`aftershocks=` 
 (counted, not checked), and a 6 m Hold the Line reach so pokes (`line_pokes=` on the
 `SUMMARY abilities` line, no check) happen in most runs.
 
-To check visuals without a person, run a windowed `--bot --screenshot-dir=...` client and
-read the saved frames. Never screenshot the desktop: it captures the developer's screen.
+To check visuals without a person, use `tools\screenshot_run.ps1 -Dir <relative dir>
+[-Seconds N] [-Port N] [-Class ID] [-Resolution WxH] [-ClientArgs ...] [-Tune ...]` and
+read the saved frames. **Never let a launch take the developer's focus** (they work in
+other apps meanwhile): the script runs the server headless with its log in a file (no
+console window) and the windowed `--bot` client with a temporary `override.cfg`
+(`display/window/size/no_focus=true`, gitignored, deleted once the client is up), so
+it still renders but can't be focused. Don't start windowed or console processes any
+other way. Never screenshot the desktop: it captures the developer's screen.
 
-After adding a `class_name` script outside the editor, run
-`<godot_console.exe> --headless --import` once so Godot registers the class.
+Every script that dot-sources `tools\find_godot.ps1` (run, smoke, tests, screenshots,
+roll_loot) first runs `--headless --import` (~3 s), which registers new `class_name`
+scripts after a pull, merge or fresh worktree; without it scripts that use them fail to
+parse ("Could not find type ..."). Run it by hand only when launching Godot another way.
 `--check-only --script` gives false "Tuning not found" errors because it skips autoloads;
 use the smoke test instead.
 

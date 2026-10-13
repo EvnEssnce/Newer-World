@@ -113,7 +113,7 @@ and playtested). Each numbered item is roughly one session with one testable goa
 The developer's notes, grouped into sessions. Milestone 2 is done once A2.1–A2.2 are
 built and playtested.
 
-1. **Inventory and K panels (client UI only):**
+1. **Done (session 41, agent; needs a playtest).** **Inventory and K panels (client UI only):** (the bag holds **40** slots, not 20; a full one fits at 1920x1080, smaller windows scroll)
    - I panel: smaller item rows and slots; the window big enough that 20 bag slots
      never need a scroll.
    - Bag **sort/filter** by item type (weapon, armor slot, Wing Enhancement) and by class.
@@ -124,10 +124,10 @@ built and playtested.
      (instead of "Your class can't use ...").
    - I and K are **mutually exclusive** (opening one closes the other).
    - K panel **larger**, so the trees don't need a scroll either.
-2. **HUD:** the current/max health number over the HP bar; a new **equipment
+2. **Done (session 41, agent; needs a playtest).** **HUD:** the current/max health number over the HP bar; a new **equipment
    summary** (small symbols for the equipped armor slots, plus the total stat bonuses
    from gear).
-3. **Small fixes:**
+3. **Done (session 41, agent; needs a playtest).** **Small fixes:** (the hitch was a cold shader cache: 141 ms here; all zone looks now prewarm at load)
    - **Dummy backstab bug:** the "unaware enemy" rule (an enemy not targeting you)
      makes every hit on the dummy a backstab, since the dummy never targets anyone.
      The dummy should count as aware of everyone (positional backstabs only). Likely a
@@ -567,7 +567,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
-| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. 525 tests |
+| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) |
 
 ---
 
