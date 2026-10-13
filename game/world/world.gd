@@ -2216,6 +2216,29 @@ func _add_projectile_system() -> void:
 	add_child(_projectiles)
 
 
+## Where `player`'s crosshair points: its aim ray (Player.aim_ray: rebuilt from
+## its position and its last simulated input's aim_yaw/aim_pitch, never taken
+## from the client) cast against the world (layer 1), players (2) and enemies
+## (4) within [aim] max_distance of data/camera.cfg, skipping the player itself,
+## its allies and the dead; nothing hit = the point at max_distance. Server:
+## authoritative (projectiles, and later AoE placement); the local client
+## computes the same for its cosmetic throws (other players' bodies are drawn
+## in the past there, so a point on one can differ slightly). Physics step only.
+func aim_point(player: Player) -> Vector3:
+	var tuning := AimRay.tuned()
+	var exclude: Array[RID] = [player.get_rid()]
+	var skip := func(collider: Object) -> bool:
+		if collider is Player:
+			var other := collider as Player
+			var dead := other.view_state.dead if (not multiplayer.is_server() and not other.is_local) else other.state.dead
+			return dead or are_allies(player.peer_id, other.peer_id)
+		if collider is Enemy:
+			return (collider as Enemy).dead
+		return false
+	return AimRay.cast(get_world_3d().direct_space_state, player.aim_ray(), tuning.max_distance,
+			1 | 2 | 4, exclude, skip)
+
+
 func server_tick() -> int:
 	return _tick
 
@@ -2252,7 +2275,9 @@ func _client_tick(delta: float) -> void:
 	var aim_yaw := _local_player.get_camera_yaw()
 	var aim_pitch := _local_player.get_camera_pitch()
 	if _bot:
-		aim_pitch = 0.0  # level: pitch-aimed leaps go their full distance
+		# Level: pitch-aimed leaps go their full distance. --bot-aim-pitch=DEG
+		# (up = positive) tilts its aim, to check pitch-aimed throws in screenshots.
+		aim_pitch = deg_to_rad(LaunchArgs.get_value("bot-aim-pitch", "0").to_float())
 		if (not _bot_status_slots_sent and _builds.local_build
 				and _local_player.state.can_change_loadout()):
 			_builds.bot_slot_status_abilities(_local_player.params)
@@ -2265,6 +2290,7 @@ func _client_tick(delta: float) -> void:
 			# Screenshots look where the bot aims (its throws fly away from the
 			# camera); its move is world space, so undo the camera's turn.
 			_local_player.set_camera_yaw(aim_yaw)
+			_local_player.set_camera_pitch(aim_pitch)  # the crosshair shows its aim
 			var world_move := Vector3(move.x, 0.0, move.y).rotated(Vector3.UP, -aim_yaw)
 			move = Vector2(world_move.x, world_move.z)
 		if not party.bot_may_attack():

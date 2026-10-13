@@ -15,8 +15,11 @@ var id := ""
 var speed := 0.0
 ## Meters per second squared, pulling down. 0 = straight.
 var gravity := 0.0
-## Radians above horizontal at launch.
+## Radians above the aim at launch (above horizontal for an aim_pitch=false kind).
 var pitch := 0.0
+## Flies toward the aim point, up or down (AimRay); false = only its heading,
+## launched level (a ground wave: Shockwave).
+var aim_pitch := true
 ## Ticks before it ends if nothing stopped it (the whole round trip for a
 ## returning one).
 var lifetime_ticks := 1
@@ -82,6 +85,7 @@ static func from_tuning(kind_id: String, tps: float) -> ProjectileParams:
 	p.speed = Tuning.get_value(FILE, section, "speed")
 	p.gravity = Tuning.get_value(FILE, section, "gravity")
 	p.pitch = deg_to_rad(Tuning.get_optional(FILE, section, "pitch", 0.0))
+	p.aim_pitch = Tuning.get_optional(FILE, section, "aim_pitch", true)
 	p.lifetime_ticks = maxi(1, roundi(Tuning.get_value(FILE, section, "lifetime") * tps))
 	p.hit_radius = Tuning.get_value(FILE, section, "hit_radius")
 	p.pierce = Tuning.get_value(FILE, section, "pierce")

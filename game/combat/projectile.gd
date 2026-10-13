@@ -74,13 +74,33 @@ func _init(p: ProjectileParams, from: Vector3, launch_velocity: Vector3) -> void
 	bounces_left = p.bounces
 
 
+## Steepest launch angle, radians (just short of straight up or down, so the
+## heading stays defined).
+const MAX_ELEVATION := 1.5533430  # 89 degrees
+
+
 ## The launch velocity for a thrower facing `yaw` (forward is -Z rotated by
 ## yaw, as everywhere else), turned by yaw_offset (a spread) and tilted up by
-## the kind's pitch.
-static func launch_velocity_for(p: ProjectileParams, yaw: float, yaw_offset: float = 0.0) -> Vector3:
+## `elevation` (radians, the aim's) plus the kind's pitch.
+static func launch_velocity_for(p: ProjectileParams, yaw: float, yaw_offset: float = 0.0,
+		elevation: float = 0.0) -> Vector3:
 	var y := yaw + yaw_offset
-	var flat := Vector2(-sin(y), -cos(y)) * cos(p.pitch)
-	return Vector3(flat.x, sin(p.pitch), flat.y) * p.speed
+	var up := clampf(elevation + p.pitch, -MAX_ELEVATION, MAX_ELEVATION)
+	var flat := Vector2(-sin(y), -cos(y)) * cos(up)
+	return Vector3(flat.x, sin(up), flat.y) * p.speed
+
+
+## The launch velocity along `aimed` (a unit direction toward the aim point,
+## AimRay.launch_direction), turned by yaw_offset around the vertical (a spread
+## fans around the aim) and tilted up by the kind's pitch. A kind with
+## aim_pitch false (a ground wave) keeps only the aim's heading and stays level.
+## `fallback_yaw`: the heading when the aim is straight up or down.
+static func launch_velocity_along(p: ProjectileParams, aimed: Vector3, yaw_offset: float,
+		fallback_yaw: float) -> Vector3:
+	var flat := Vector2(aimed.x, aimed.z)
+	var yaw := atan2(-flat.x, -flat.y) if flat.length() > 0.0001 else fallback_yaw
+	var elevation := asin(clampf(aimed.y, -1.0, 1.0)) if p.aim_pitch else 0.0
+	return launch_velocity_for(p, yaw, yaw_offset, elevation)
 
 
 ## The release point for a thrower standing at `feet` facing `yaw`.

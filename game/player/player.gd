@@ -187,6 +187,10 @@ var blessing_until_tick := -1
 ## Server: the player whose knockback is moving this one and who has the
 ## Tempest Wings capstone (a wall hit stuns), or 0.
 var wall_stun_source := 0
+## Server and the local client: aim_yaw / aim_pitch of the last simulated input
+## (aim_ray; not sim state: only projectiles, server state, use it).
+var last_aim_yaw := 0.0
+var last_aim_pitch := 0.0
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -270,6 +274,8 @@ func _process(_delta: float) -> void:
 
 
 func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, delta: float) -> void:
+	last_aim_yaw = aim_yaw
+	last_aim_pitch = aim_pitch
 	var was_on_floor := is_on_floor()
 	var was_equipping := state.is_equipping()
 	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta, aim_pitch)
@@ -565,12 +571,27 @@ func set_camera_yaw(yaw: float) -> void:
 		_camera_pivot.rotation.y = yaw
 
 
+## Test bot screenshots: the bot's aim pitch (so the crosshair shows its aim).
+func set_camera_pitch(pitch: float) -> void:
+	if _spring_arm:
+		_spring_arm.rotation.x = pitch
+
+
+## Where this player's crosshair line runs (AimRay), from its position and the
+## aim of its last simulated input (server: the authoritative one). The aim
+## point along it is World.aim_point.
+func aim_ray() -> AimRay:
+	return AimRay.create(global_position, last_aim_yaw, last_aim_pitch, AimRay.tuned())
+
+
 func _setup_camera() -> void:
 	_camera_pivot = Node3D.new()
 	_camera_pivot.name = "CameraPivot"
 	_camera_pivot.position.y = Tuning.get_value("camera", "camera", "pivot_height")
 	add_child(_camera_pivot)
 	_spring_arm = SpringArm3D.new()
+	# Over the shoulder: the arm's origin is AimRay.shoulder (right of the yaw).
+	_spring_arm.position.x = Tuning.get_value("camera", "camera", "shoulder_offset")
 	_spring_arm.spring_length = Tuning.get_value("camera", "camera", "distance")
 	_spring_arm.collision_mask = 1
 	_spring_arm.margin = 0.2
