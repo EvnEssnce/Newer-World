@@ -173,3 +173,113 @@ func test_walking_through_a_wall_is_always_burned() -> void:
 				burned = true
 			at.z += step
 		assert_true(burned, "pulse phase %d" % phase)
+
+
+# --- Aimed placement (Zone.aimed_target) ---
+
+## The camera tuning of data/camera.cfg, built by hand.
+func _aim_params() -> AimRay.Params:
+	var a := AimRay.Params.new()
+	a.pivot_height = 1.6
+	a.shoulder_offset = 0.7
+	a.distance = 4.5
+	a.max_distance = 100.0
+	return a
+
+
+## Where `ray` meets flat ground (y = 0).
+func _ground_hit(ray: AimRay) -> Vector3:
+	return ray.point_at(-ray.origin.y / ray.direction.y)
+
+
+func test_an_aimed_zone_lands_at_the_crosshair_within_range() -> void:
+	var ray := AimRay.create(Vector3.ZERO, 0.0, deg_to_rad(-20.0), _aim_params())
+	var aim := _ground_hit(ray)  # about 4.4 m ahead, 0.7 m right
+	var at := Zone.aimed_target(Vector3.ZERO, ray, aim, true, 0.0, 10.0)
+	assert_true(at.distance_to(aim) < Zone.AIM_BACKOFF + 0.001, "at the aim point")
+	assert_almost(at.x, 0.7, 0.05, "on the crosshair's line")
+
+
+func test_an_aimed_zone_past_its_range_is_clamped_on_the_crosshair_line() -> void:
+	var ray := AimRay.create(Vector3.ZERO, 0.0, deg_to_rad(-20.0), _aim_params())
+	var at := Zone.aimed_target(Vector3.ZERO, ray, _ground_hit(ray), true, 0.0, 3.0)
+	assert_almost(Vector2(at.x, at.z).length(), 3.0, 0.001, "max range, horizontally")
+	assert_almost(at.x, 0.7, 0.001, "still under the crosshair")
+	assert_true(at.z < 0.0, "ahead")
+	assert_almost(at.y, 0.0, 0.001, "at the feet's height")
+
+
+func test_aiming_at_the_sky_places_it_at_max_range_along_the_heading() -> void:
+	var feet := Vector3(5.0, 2.0, -3.0)
+	for pitch_deg: float in [30.0, 90.0]:
+		var yaw := PI / 2.0  # facing -X
+		var ray := AimRay.create(feet, yaw, deg_to_rad(pitch_deg), _aim_params())
+		var aim := ray.point_at(100.0)  # nothing hit
+		var at := Zone.aimed_target(feet, ray, aim, false, yaw, 8.0)
+		var flat := Vector2(at.x - feet.x, at.z - feet.z)
+		assert_almost(flat.length(), 8.0, 0.001, "pitch %d: max range" % pitch_deg)
+		assert_true(flat.x < -7.0, "pitch %d: ahead along the heading" % pitch_deg)
+		assert_almost(at.y, feet.y, 0.001, "pitch %d: at the feet's height" % pitch_deg)
+
+
+func test_a_hit_up_close_or_on_a_wall_counts_within_range() -> void:
+	# Looking down at the ground right in front: lands there, not pushed out.
+	var ray := AimRay.create(Vector3.ZERO, 0.0, deg_to_rad(-80.0), _aim_params())
+	var aim := _ground_hit(ray)
+	var at := Zone.aimed_target(Vector3.ZERO, ray, aim, true, 0.0, 10.0)
+	assert_true(Vector2(at.x, at.z).length() < 1.0, "close to the feet")
+	# A wall 4 m ahead hit at chest height: pulled back off its face.
+	var level := AimRay.create(Vector3.ZERO, 0.0, 0.0, _aim_params())
+	var on_wall := level.point_at(4.0)
+	var off := Zone.aimed_target(Vector3.ZERO, level, on_wall, true, 0.0, 10.0)
+	assert_true(off.z > on_wall.z, "on the near side of the wall")
+
+
+# --- Fire Trail strips (Zone.strip_between, strip_size) ---
+
+func _strip_params() -> ZoneParams:
+	var p := _params(ZoneParams.TRIGGER_PULSE)
+	p.wall = true
+	p.strip = true
+	p.wall_width = 1.6
+	p.wall_depth = 1.0
+	p.fast_roll_widen = 0.25
+	return p
+
+
+func test_a_strip_runs_from_the_roll_start_to_its_end() -> void:
+	var straight := Zone.strip_between(Vector3.ZERO, Vector3(0.0, 0.0, -4.5))
+	assert_true((straight[0] as Vector3).is_equal_approx(Vector3(0.0, 0.0, -2.25)), "center")
+	assert_almost(straight[1], 0.0, 0.0001, "faces -Z")
+	assert_almost(straight[2], 4.5, 0.0001, "length")
+	var diagonal := Zone.strip_between(Vector3(1.0, 0.5, 1.0), Vector3(4.0, 0.2, 5.0))
+	var yaw: float = diagonal[1]
+	assert_true(Vector2(-sin(yaw), -cos(yaw)).is_equal_approx(Vector2(0.6, 0.8)), "along the roll")
+	assert_almost(diagonal[2], 5.0, 0.0001, "horizontal length")
+	assert_almost((diagonal[0] as Vector3).y, 0.5, 0.0001, "at the start's height")
+
+
+func test_strip_size_follows_the_roll_length_and_speed() -> void:
+	var p := _strip_params()
+	assert_true(Zone.strip_size(p, 4.5, 1.0).is_equal_approx(Vector2(1.6, 4.5)), "a normal roll")
+	assert_true(Zone.strip_size(p, 8.1, 1.8).is_equal_approx(Vector2(1.92, 8.1)),
+			"Gust Roll: 1.8x longer and a bit wider")
+	assert_true(Zone.strip_size(p, 0.2, 1.0).is_equal_approx(Vector2(1.6, 1.0)),
+			"a roll stopped by a wall: the shortest strip")
+
+
+func test_a_turned_strip_contains_what_lies_along_the_roll() -> void:
+	var start := Vector3.ZERO
+	var end := Vector3(4.0, 0.0, 3.0)  # 5 m along (0.8, 0.6)
+	var strip := Zone.strip_between(start, end)
+	var z := Zone.new(_strip_params(), strip[0], strip[1], 7)
+	var size := Zone.strip_size(z.params, strip[2], 1.0)
+	z.width = size.x
+	z.depth = size.y
+	assert_true(z.contains(Vector3(2.0, 0.0, 1.5)), "the middle of the roll")
+	assert_true(z.contains(Vector3(0.4, 0.0, 0.3)), "near the start")
+	assert_true(z.contains(Vector3(3.6, 0.0, 2.7)), "near the end")
+	assert_false(z.contains(Vector3(4.8, 0.0, 3.6)), "1 m past the end")
+	var side := Vector3(2.0 - 0.6, 0.0, 1.5 + 0.8)  # 1 m to the side of the middle
+	assert_false(z.contains(side), "the feet 1 m to the side (half width 0.8)")
+	assert_true(z.contains(side, 0.3), "a body overlapping its edge")

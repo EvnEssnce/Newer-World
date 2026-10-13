@@ -6,23 +6,51 @@ extends Node3D
 ## it, "trap" a small wire between two stakes (dim until armed), "decoy" a
 ## burning copy of a player's body, "wall" three tall shields across the
 ## facing, "firewall" one glowing box (Flame Wall), "orb" a floating ball over
-## a faint circle (Life Spore). Everything fades out over its last FADE_SECONDS.
+## a faint circle (Life Spore), "strip" a burning strip on the ground (Fire
+## Trail: a glowing box `size` long with flames along it). Everything fades out
+## over its last FADE_SECONDS. setup_marker builds the faint landing preview of
+## an aimed zone instead (ZoneSystem._update_marker).
 
 const FADE_SECONDS := 0.5
 const RAIN_STREAKS := 8
 ## Meters the falling arrows drop from.
 const RAIN_HEIGHT := 6.0
+## Strip: meters between flames along it.
+const FLAME_SPACING := 0.55
 
 var _params: ZoneParams
 var _materials: Array[StandardMaterial3D] = []
 var _streaks: Array[Node3D] = []
+var _flames: Array[Node3D] = []
 var _time := 0.0
 
 
-func setup(p: ZoneParams, yaw: float) -> void:
+## `size`: a wall's (width, depth) for this placement; zero = the kind's.
+func setup(p: ZoneParams, yaw: float, size := Vector2.ZERO) -> void:
 	_params = p
 	rotation.y = yaw
+	var width := size.x if size != Vector2.ZERO else p.wall_width
+	var depth := size.y if size != Vector2.ZERO else p.wall_depth
 	match p.visual:
+		"strip":
+			_box(Vector3(width, 0.04, maxf(depth, 0.1)), Vector3(0.0, 0.03, 0.0), 0.5, true)
+			var count := maxi(2, ceili(depth / FLAME_SPACING))
+			for i in count:
+				var along := (i + 0.5) / count - 0.5
+				var across := (0.25 if i % 2 == 0 else -0.25) * width
+				var flame := Node3D.new()
+				flame.position = Vector3(across, 0.0, along * depth)
+				add_child(flame)
+				var mesh := SphereMesh.new()
+				mesh.radius = 0.22
+				mesh.height = 0.8
+				var instance := MeshInstance3D.new()
+				instance.mesh = mesh
+				instance.position = Vector3(0.0, 0.4, 0.0)
+				instance.material_override = _material(0.55, true)
+				instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				flame.add_child(instance)
+				_flames.append(flame)
 		"cloud":
 			for i in 5:
 				var angle := TAU * i / 5.0
@@ -38,16 +66,16 @@ func setup(p: ZoneParams, yaw: float) -> void:
 			_sphere(Vector3(0.0, 0.6, 0.0), 0.3, 0.8)
 			_disc(p.radius, 0.15)
 		"firewall":
-			_box(Vector3(p.wall_width, p.height, p.wall_depth), Vector3(0.0, p.height / 2.0, 0.0), 0.45)
+			_box(Vector3(width, p.height, depth), Vector3(0.0, p.height / 2.0, 0.0), 0.45)
 		"decoy":
 			var mesh := CapsuleMesh.new()
 			mesh.radius = Player.BODY_RADIUS
 			mesh.height = Player.BODY_HEIGHT
 			_add(mesh, Vector3(0.0, Player.BODY_HEIGHT / 2.0, 0.0), 0.55, true)
 		"wall":
-			var shield_width := p.wall_width / 3.0
+			var shield_width := width / 3.0
 			for i in 3:
-				_box(Vector3(shield_width * 0.92, p.height, p.wall_depth),
+				_box(Vector3(shield_width * 0.92, p.height, depth),
 						Vector3((i - 1) * shield_width, p.height / 2.0, 0.0), 0.85)
 		"rain":
 			_disc(p.radius, 0.25)
@@ -63,6 +91,22 @@ func setup(p: ZoneParams, yaw: float) -> void:
 				_streaks.append(streak)
 		_:
 			_disc(p.radius, 0.3)
+
+
+## The landing preview of an aimed zone of kind `p`: a thin ring of its radius
+## (a faint flat box for a wall), unshaded, never faded (no update calls).
+func setup_marker(p: ZoneParams) -> void:
+	_params = p
+	if p.wall:
+		_box(Vector3(p.wall_width, 0.03, maxf(p.wall_depth, 0.1)), Vector3(0.0, 0.04, 0.0), 0.22, true)
+		return
+	var ring := TorusMesh.new()
+	ring.inner_radius = maxf(0.0, p.radius - 0.1)
+	ring.outer_radius = p.radius
+	ring.rings = 48
+	ring.ring_segments = 6
+	_add(ring, Vector3(0.0, 0.05, 0.0), 0.6, true)
+	_disc(p.radius, 0.08)
 
 
 ## seconds_left of its life (fades out at the end); armed: a trap that can
@@ -81,6 +125,10 @@ func update(seconds_left: float, armed: bool, delta: float) -> void:
 		var angle := i * 2.4
 		var r := _params.radius * (0.25 + 0.7 * fmod(i * 0.61, 1.0))
 		_streaks[i].position = Vector3(cos(angle) * r, RAIN_HEIGHT * (1.0 - phase), sin(angle) * r)
+	for i in _flames.size():
+		# Flames flicker out of step with each other.
+		var flicker := 0.75 + 0.35 * sin(_time * 9.0 + i * 1.7)
+		_flames[i].scale = Vector3(1.0, flicker, 1.0)
 
 
 func _disc(radius: float, alpha: float) -> void:
@@ -98,10 +146,10 @@ func _sphere(at: Vector3, radius: float, alpha: float) -> void:
 	_add(mesh, at, alpha, false)
 
 
-func _box(size: Vector3, at: Vector3, alpha: float) -> void:
+func _box(size: Vector3, at: Vector3, alpha: float, glow := false) -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = size
-	_add(mesh, at, alpha, false)
+	_add(mesh, at, alpha, glow)
 
 
 func _add(mesh: Mesh, at: Vector3, alpha: float, glow: bool) -> void:
