@@ -113,10 +113,20 @@ var zone_tick := 0
 var zone_distance := 0.0
 ## A projectile of this attack places this zone where it stops.
 var zone_on_impact := ""
-## Recall: as it starts, each of the user's stuck projectiles (params.sticks)
-## flies back to it as this projectile kind, hitting what's between with this
-## attack's damage.
+## Embedded projectiles (server, ProjectileSystem with an EmbeddedKnives per
+## status). embeds: a projectile of this attack that damages a target stays in
+## it, shown as this status (data/status_effects.cfg; stacks = how many are in
+## it; its duration = how long one stays, its max_stacks = how many one thrower
+## can have in targets at once): Throwing Knives' light and heavy.
+var embeds := ""
+## recalls: as it starts, the user's projectiles embedded as this status are
+## ripped out: each deals this attack's damage to its target again (Recall),
+## then a cosmetic recall_projectile flies from the target back to the user.
+var recalls := ""
 var recall_projectile := ""
+## Shots it takes from the weapon's magazine (WeaponParams.ammo); it can't start
+## without them. Ignored for a weapon without a magazine.
+var ammo_cost := 0
 
 # Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
 ## Thrown at projectile_tick (from the attack's start), projectile_count of
@@ -225,6 +235,9 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)
 	zone_on_impact = Tuning.get_optional(file, section, "zone_on_impact", "")
 	recall_projectile = Tuning.get_optional(file, section, "recall_projectile", "")
+	embeds = Tuning.get_optional(file, section, "embeds", "")
+	recalls = Tuning.get_optional(file, section, "recalls", "")
+	ammo_cost = Tuning.get_optional(file, section, "ammo_cost", 0)
 
 
 ## The statuses this gives whoever it damages, as [id, stacks, duration ticks

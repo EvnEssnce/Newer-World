@@ -176,7 +176,7 @@ func test_ember_and_rebirth_fields_round_trip() -> void:
 	state.equip_left = 4
 	state.free_move_mask = 2
 	var data := state.to_array()
-	assert_eq(data.size(), 36, "35 = attack_speed_carry")
+	assert_eq(data.size(), 37, "35 = attack_speed_carry, 36 = ammo")
 	assert_eq(data[32], 63.5)
 	assert_eq(data[33], "test")
 	# combat, rebirth left/cooldown/charges, Z and C slots, equip time left,

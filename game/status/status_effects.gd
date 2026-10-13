@@ -466,6 +466,25 @@ func clear() -> void:
 	entries.clear()
 
 
+## Sets a status to exactly `stacks` stacks (not capped) with ticks_left left,
+## or removes it when stacks <= 0: a status that mirrors server bookkeeping
+## (embedded knives). Returns true if anything changed. No immunity check.
+func set_stacks(index: int, stacks: int, ticks_left_: int, source: int = 0) -> bool:
+	if stacks <= 0 or ticks_left_ <= 0:
+		return remove(index)
+	var e := find(index)
+	if e and e.stacks == stacks and e.ticks_left == ticks_left_:
+		return false
+	if e == null:
+		e = Entry.new()
+		e.status = index
+		entries.append(e)
+	e.stacks = stacks
+	e.ticks_left = ticks_left_
+	e.source = source
+	return true
+
+
 # --- Display ---
 
 ## "Bleed x3, Slow": names (with stacks above 1) for labels over heads.
