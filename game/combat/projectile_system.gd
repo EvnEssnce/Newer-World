@@ -8,7 +8,9 @@ extends Node3D
 ##
 ## Server: Player.projectile_released (the firing attack reached its
 ## projectile_tick, in the predicted timeline) → server_fire throws them from
-## the thrower's server position and facing. server_step flies every one once
+## the thrower's server position toward its aim point (World.aim_point: the
+## crosshair, rebuilt from that tick's input aim; pitch included unless the kind
+## has aim_pitch=false). server_step flies every one once
 ## per tick, after the players and enemies: walls by a ray against layer 1,
 ## targets by sweeping the step's segment against player and enemy capsules
 ## (Projectile.sweep_capsule), nearest first. Hits go through World's melee
@@ -94,13 +96,13 @@ func _physics_process(delta: float) -> void:
 # --- Server ---
 
 ## Server: `player`'s current attack just reached its release tick: throws its
-## projectiles from its server position and facing.
+## projectiles from its server position toward its aim point.
 func server_fire(player: Player) -> void:
 	server_fire_attack(player, player.state.current_attack(player.params))
 
 
-## Server: throws `attack`'s projectiles from `player`'s server position and
-## facing (server_fire, or a server-side throw outside the predicted timeline:
+## Server: throws `attack`'s projectiles from `player`'s server position toward
+## its aim point (server_fire, or a server-side throw outside the predicted timeline:
 ## the Earthshaker capstone's aftershock). Every client gets the spawn; the
 ## thrower's own client has no cosmetic copy waiting for a server-side throw,
 ## so it draws it on the render clock like anyone else's.
@@ -114,9 +116,10 @@ func server_fire_attack(player: Player, attack: AttackParams) -> void:
 			* player.state.statuses.damage_dealt_multiplier(player.params.statuses) * mods.x)
 	var yaw := player.state.yaw
 	var from := Projectile.release_point(p, player.global_position, yaw)
+	var aimed := aimed_direction(player, from)
 	for i in attack.projectile_count:
-		var proj := Projectile.new(p, from, Projectile.launch_velocity_for(p, yaw,
-				spread_offset(i, attack.projectile_count, attack.projectile_spread)))
+		var proj := Projectile.new(p, from, Projectile.launch_velocity_along(p, aimed,
+				spread_offset(i, attack.projectile_count, attack.projectile_spread), yaw))
 		proj.id = _next_id
 		_next_id += 1
 		proj.owner_id = player.peer_id
@@ -151,6 +154,13 @@ func server_fire_from(player: Player, attack: AttackParams, origin: Vector3, yaw
 	for peer_id in world._connected_player_ids():
 		_receive_spawn.rpc_id(peer_id, proj.id, p.id, proj.owner_id, origin, proj.velocity,
 				world.server_tick())
+
+
+## The unit direction from `from` (a release point) toward `player`'s aim point
+## (World.aim_point), the same on the server and in the thrower's cosmetic copy.
+func aimed_direction(player: Player, from: Vector3) -> Vector3:
+	return AimRay.launch_direction(from, world.aim_point(player), player.aim_ray().direction,
+			AimRay.tuned().min_ahead)
 
 
 ## Yaw offset of projectile i of count, fanned evenly over spread radians.
@@ -422,9 +432,10 @@ func client_fire(player: Player) -> void:
 		return
 	var yaw := player.state.yaw
 	var from := Projectile.release_point(p, player.global_position, yaw)
+	var aimed := aimed_direction(player, from)
 	for i in attack.projectile_count:
-		var f := _add_flying(p, from, Projectile.launch_velocity_for(p, yaw,
-				spread_offset(i, attack.projectile_count, attack.projectile_spread)), player.peer_id)
+		var f := _add_flying(p, from, Projectile.launch_velocity_along(p, aimed,
+				spread_offset(i, attack.projectile_count, attack.projectile_spread), yaw), player.peer_id)
 		f.local_clock = true
 		f.confirmed = false
 		_cosmetic_fired += 1

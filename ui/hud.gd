@@ -2,7 +2,8 @@ class_name Hud
 extends CanvasLayer
 ## In-game overlay: health, stamina and Ember bars (Ember with a Rebirth marker
 ## and line), ability bar, Wing slots, current weapon, connection stats and
-## controls. The ability bar, Wing slots and Ember bar are built in code.
+## controls. The ability bar, Wing slots, Ember bar and crosshair (Crosshair)
+## are built in code.
 
 const SLOT_KEYS := ["Q", "E", "R"]
 const WING_KEYS := ["Z", "C"]
@@ -60,6 +61,8 @@ func _ready() -> void:
 	_blind_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_blind_overlay)
 	move_child(_blind_overlay, 0)
+	add_child(Crosshair.new())
+	move_child(get_child(-1), 1)  # above the blind haze, under the bars and panels
 
 
 func set_info(text: String) -> void:
