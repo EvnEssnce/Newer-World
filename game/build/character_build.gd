@@ -219,6 +219,29 @@ func weapon_effect(weapon_id: String, effect: String) -> MasteryTree.MasteryNode
 	return tree.effect_node(get_allocated(weapon_id), effect) if tree else null
 
 
+## Tree effects whose node's applies_to names a mark status that only exists
+## for that node (Hooked, for Caught on the Hook).
+const MARK_EFFECTS: Array[String] = ["hook_stagger"]
+
+
+## False if status_id is a capstone's mark in this weapon's tree (the
+## applies_to of a MARK_EFFECTS node) and no such node is allocated: Hooking
+## Pull only marks Hooked with Caught on the Hook. True for any other status.
+func applies_mark(weapon_id: String, status_id: String) -> bool:
+	var tree: MasteryTree = trees.get(weapon_id)
+	if tree == null or status_id.is_empty():
+		return true
+	var is_mark := false
+	var learned := get_allocated(weapon_id)
+	for id in tree.node_order:
+		var n := tree.get_node(id)
+		if n and n.effect in MARK_EFFECTS and n.applies_to == status_id:
+			is_mark = true
+			if id in learned:
+				return true
+	return not is_mark
+
+
 func block_stamina_multiplier(weapon_id: String) -> float:
 	var tree: MasteryTree = trees.get(weapon_id)
 	var result := tree.block_stamina_multiplier(get_allocated(weapon_id)) if tree else 1.0

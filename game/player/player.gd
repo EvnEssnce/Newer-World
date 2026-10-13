@@ -235,6 +235,8 @@ var _rebirth_mesh: CylinderMesh
 var _beam: BeamVisual
 ## Placeholder War Hammer, built in code (client; _build_hammer_model).
 var _hammer_pivot: Node3D
+## Upheaval's impact puff was shown for the current use (_upheaval_puff).
+var _upheaval_puffed := false
 
 @onready var _model: Node3D = $Model
 @onready var _roll_pivot: Node3D = $Model/RollPivot
@@ -1363,10 +1365,22 @@ const HAMMER_CLOUT_WOUND := Vector3(0.2, -1.6, 0.0)
 const HAMMER_CLOUT_STRUCK := Vector3(0.0, 1.0, 0.0)
 ## Steadfast: the head planted on the ground in front.
 const HAMMER_PLANTED := Vector3(-1.45, 0.0, 0.0)
+## Upheaval: hoisted straight up overhead, then driven head-first into the
+## ground just in front (and held there a moment).
+const HAMMER_HOISTED := Vector3(1.75, 0.0, 0.15)
+const HAMMER_DRIVEN := Vector3(-1.55, 0.0, -0.3)
+## Upheaval: fraction of the windup spent hoisting (the rest is the slam
+## down), and of the recovery spent holding the head in the ground.
+const UPHEAVAL_HOIST := 0.7
+const UPHEAVAL_HOLD := 0.45
+## Upheaval's impact puff (cosmetic): dust color, seconds to reach the hit
+## radius.
+const UPHEAVAL_PUFF_COLOR := Color(0.62, 0.52, 0.4, 1.0)
+const UPHEAVAL_PUFF_TIME := 0.25
 const HAMMER_HANDLE_COLOR := Color(0.42, 0.28, 0.16)
 const HAMMER_HEAD_COLOR := Color(0.45, 0.47, 0.52)
 ## Abilities drawn as an overhead slam.
-const HAMMER_SLAMS := ["seismic_slam", "shatter", "upheaval", "shockwave", "meteor_drop"]
+const HAMMER_SLAMS := ["seismic_slam", "shatter", "shockwave", "meteor_drop"]
 
 
 ## A two-handed hammer: a long handle along -Z with a block head across its end.
@@ -1402,12 +1416,33 @@ func _show_hammer(shown: bool, attack: AttackParams, attack_type: int, ability_i
 	var pose := _hammer_pose(attack, attack_type, ability_id, attack_tick)
 	_hammer_pivot.rotation = Vector3(lerpf(pose.x, WEAPON_LOWERED, lowered), pose.y, 0.0)
 	_hammer_pivot.position = Vector3(0.4, 0.3, -0.1 + pose.z)
+	_upheaval_puff(attack, ability_id, attack_tick)
+
+
+## Upheaval (client, cosmetic): a quick dust ring out to the hit radius as the
+## head hits the ground (the hit window starts), once per use.
+func _upheaval_puff(attack: AttackParams, ability_id: String, tick: float) -> void:
+	if ability_id != "upheaval" or attack == null or tick < attack.windup_ticks:
+		_upheaval_puffed = false
+		return
+	if _upheaval_puffed or tick > attack.recovery_start_tick():
+		return
+	_upheaval_puffed = true
+	var puff := ShockRingVisual.new()
+	puff.top_level = true
+	add_child(puff)
+	puff.setup(global_position, attack.hitbox_range / UPHEAVAL_PUFF_TIME, attack.hitbox_range,
+			0.8, UPHEAVAL_PUFF_COLOR, 0.0)
+	if LaunchArgs.has_flag("verbose"):
+		print("[client] %d upheaval lands (frame %d)" % [peer_id, Time.get_ticks_msec() / 250])
 
 
 static func _hammer_pose(attack: AttackParams, attack_type: int, ability_id: String,
 		tick: float) -> Vector3:
 	if attack == null:
 		return HAMMER_IDLE
+	if ability_id == "upheaval":
+		return _upheaval_pose(attack, tick)
 	if ability_id in HAMMER_SLAMS or attack_type == PlayerState.ATTACK_HEAVY:
 		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_SLAM_WOUND, HAMMER_SLAM_STRUCK)
 	if ability_id == "clout":
@@ -1417,5 +1452,25 @@ static func _hammer_pose(attack: AttackParams, attack_type: int, ability_id: Str
 	if attack_type == PlayerState.ATTACK_LIGHT:
 		return _phase_pose3(attack, tick, HAMMER_IDLE, HAMMER_LIGHT_WOUND, HAMMER_LIGHT_STRUCK)
 	return HAMMER_IDLE  # other Wing abilities: held ready
+
+
+## Upheaval: hoisted straight up over most of the windup, slammed down
+## head-first (eased in, fastest at the end) so it hits the ground as the hit
+## window starts, held there through the window and part of the recovery,
+## then lifted back to idle.
+static func _upheaval_pose(attack: AttackParams, tick: float) -> Vector3:
+	var windup := maxf(float(attack.windup_ticks), 1.0)
+	var hoist := windup * UPHEAVAL_HOIST
+	if tick < hoist:
+		var t := tick / hoist
+		return HAMMER_IDLE.lerp(HAMMER_HOISTED, 1.0 - (1.0 - t) * (1.0 - t))
+	if tick < windup:
+		var t := (tick - hoist) / maxf(windup - hoist, 1.0)
+		return HAMMER_HOISTED.lerp(HAMMER_DRIVEN, t * t)
+	var hold_end := attack.recovery_start_tick() + attack.recovery_ticks * UPHEAVAL_HOLD
+	if tick < hold_end:
+		return HAMMER_DRIVEN
+	var t := (tick - hold_end) / maxf(attack.total_ticks() - hold_end, 1.0)
+	return HAMMER_DRIVEN.lerp(HAMMER_IDLE, t)
 
 
