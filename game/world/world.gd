@@ -2511,12 +2511,12 @@ func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float
 	return 0
 
 
-## Bot: what a Wing ability is for. "dive": it dashes (Diving Strike, Meteor
-## Drop); "burst": it hits around you (Gale Burst, Challenger's Roar); "heal":
+## Bot: what a Wing ability is for. "dive": it dashes or teleports (Diving
+## Strike, Meteor Drop, Ashstep); "burst": it hits around you (Gale Burst, Challenger's Roar); "heal":
 ## its self-buff heals (Pyre Heart); "offense": its self-buff adds damage
 ## (Wingbeat Surge); "guard": any other self-buff (Ember Mantle, Unbowed).
 func _bot_wing_role(wing: AbilityParams) -> String:
-	if wing.dash_speed > 0.0:
+	if wing.moves_user():  # a dash or a teleport (Ashstep)
 		return "dive"
 	if wing.shape != AttackParams.SHAPE_NONE:
 		return "burst"

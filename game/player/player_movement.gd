@@ -5,6 +5,9 @@ class_name PlayerMovement
 ## exact same code to predict its own movement. Keep it deterministic: no
 ## randomness, no frame-time dependence, no reading of Input here.
 
+## A teleport follows at most this many slopes before it stops.
+const TELEPORT_MAX_SLIDES := 4
+
 
 ## aim_pitch: the camera's pitch (radians, up = positive); see PlayerState.step.
 static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, buttons: int,
@@ -18,6 +21,11 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	if rooted:
 		move = Vector2.ZERO  # rooted: stop, no jump or dash (attacks still work)
 		buttons &= ~PlayerState.BUTTON_JUMP
+	# A teleport (Blink, Ashstep) moves the body at once on its tick; the rest
+	# of the step carries on from the new spot. Root stops it like a dash.
+	var ability := state.current_ability(params)
+	if ability and ability.teleports_at(state.attack_tick) and state.can_act() and not rooted:
+		teleport(body, state.ability_dir * ability.teleport_distance, on_floor)
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	# Forced movement (knockback, pull) overrides everything horizontal; a
@@ -74,6 +82,45 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	body.velocity = Vector3(horizontal.x, vertical, horizontal.z)
 	body.move_and_slide()
 	state.on_floor = body.is_on_floor()
+
+
+## Moves the body `offset` (world XZ, meters) at once: across the ground,
+## climbing walkable slopes, stopping short of walls and anything else in the
+## way (it can't end inside geometry or pass through it). If it was on the
+## floor, it then settles onto the floor below, as far down as a walkable slope
+## could drop over that distance; with no floor there it's left in the air to
+## fall. Deterministic (only the static world is tested), so the server and
+## prediction agree. Velocity is untouched.
+static func teleport(body: CharacterBody3D, offset: Vector2, on_floor: bool) -> void:
+	var up := body.up_direction
+	var motion := Vector3(offset.x, 0.0, offset.y)
+	var travelled := 0.0
+	for i in TELEPORT_MAX_SLIDES:
+		if motion.length_squared() < 0.000001:
+			break
+		var hit := body.move_and_collide(motion)
+		if hit == null:
+			travelled += _horizontal_length(motion, up)
+			break
+		travelled += _horizontal_length(hit.get_travel(), up)
+		var normal := hit.get_normal()
+		if normal.angle_to(up) > body.floor_max_angle:
+			break  # a wall: stop short of it
+		# A walkable slope: go on along it with the same horizontal heading,
+		# rising (or sinking) as the slope needs.
+		var rest := hit.get_remainder()
+		rest -= up * rest.dot(up)
+		motion = rest - up * (rest.dot(normal) / normal.dot(up))
+	if not on_floor:
+		return
+	var drop := travelled * tan(body.floor_max_angle) + body.floor_snap_length
+	var down := body.move_and_collide(-up * drop, true)
+	if down and down.get_normal().angle_to(up) <= body.floor_max_angle:
+		body.global_position += down.get_travel()
+
+
+static func _horizontal_length(v: Vector3, up: Vector3) -> float:
+	return (v - up * v.dot(up)).length()
 
 
 ## An ability that launches its user (launch_height, Updraft) on its
