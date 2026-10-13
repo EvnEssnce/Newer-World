@@ -252,6 +252,7 @@ func _ready() -> void:
 		Player.show_hitboxes = LaunchArgs.has_flag("hitboxes")
 		_hud = HUD_SCENE.instantiate()
 		add_child(_hud)
+		_hud.setup_equipment(loot)
 		_mastery_panel = MasteryPanel.new()
 		_hud.add_child(_mastery_panel)
 		_mastery_panel.setup(_builds)

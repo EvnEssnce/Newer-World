@@ -163,3 +163,19 @@ func test_average_gear_score_weighs_slots() -> void:
 	worn.equip("weapon_1", _item("sword", 120))
 	worn.equip("head", _item("cap", 100))
 	assert_almost(worn.stats(db, weights).average_gear_score, 0.5 * 120 + 0.25 * 100)
+
+
+func test_summary_lines_show_only_what_gear_adds() -> void:
+	assert_eq(Equipment.new().stats(db, {}).summary_lines(), PackedStringArray(),
+			"no gear: nothing to list")
+	var stats := Equipment.Stats.new()
+	stats.armor = 84.4
+	stats.weapon_power["dual_axes"] = 1.12
+	stats.wing_power = 1.08
+	stats.wing_gear_score = 110
+	stats.bonuses["mystery_stat"] = 2.0
+	stats.bonuses["crit_chance"] = 0.031
+	stats.bonuses["max_health"] = 42.0
+	assert_eq(stats.summary_lines(), PackedStringArray(["Armor 84", "Dual Axes power 112%",
+			"Wing power 108%", "+3.1% crit chance", "+42 max health", "mystery_stat +2"]),
+			"armor, weapon and wing power, then bonuses in STAT_TEXT order, unknown last")
