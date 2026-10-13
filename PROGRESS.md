@@ -137,7 +137,7 @@ built and playtested.
    - **Shield Wall first-use hitch:** about 1 s frozen the first time it's cast, fine
      after. Probably first-use mesh/material/shader setup on the client (or the
      server's first wall body); find it with `--perf-log` and pre-warm it.
-4. **Throwing Knives ammo:** DPS is too high (light ≈ 32 dmg every ~0.35 s at range).
+4. **Done (session 41, agent; needs a playtest).** (6 knives, 1.5 s reload, 2 s refill; light 1, heavy 3; HUD pips) **Throwing Knives ammo:** DPS is too high (light ≈ 32 dmg every ~0.35 s at range).
    Decided: an **ammo count + reload** (e.g. 6 knives, ~1.5 s reload when empty, refills
    if you stop throwing; numbers in `weapon_throwing_knives.cfg`). Ammo changes what
    the sim allows, so it's synced `PlayerState` (predicted, append to `to_array()`), with
@@ -147,7 +147,7 @@ built and playtested.
    the rest** (dodge does this today; abilities will too). During the hit windows the
    press is buffered, as today. The swing animation stops at once. In
    `PlayerState.step` (predicted, deterministic).
-6. **Ability combos in the trees:** a new tree rule, a node can **require another
+6. **Done (session 41, agent; needs a playtest).** (`requires`; Shadow Swap in Trickster tier 3; 44 nodes across all trees now require their ability; Shadow Swap and Second Step no longer fit in 12 points together) **Ability combos in the trees:** a new tree rule, a node can **require another
    node** (e.g. `requires="node_ember_double"`), checked in `MasteryTree` and the K
    panel. **Shadow Swap** moves into Trickster, below Ember Double, and requires it.
    Then audit every class for abilities that do nothing without another one and apply
@@ -172,7 +172,7 @@ Sessions (A3.1 before A3.2; the others are independent):
    **Projectiles fly toward it**, pitch included (today they fly flat): arrows, knives,
    firebolts, javelins can shoot up and down, and shooting while Updraft-hovering works.
    The local cosmetic copy uses the same point.
-2. **AoE at the crosshair:** every placed ground ability lands at the aim point,
+2. **Done (session 41, agent; needs a playtest).** (ranges now: Sanctified Ground aimed 8 m, Life Spore 8 m, Renewal Pulse 10 m, Flame Wall 10 m; a windup marker; Tripwire also stays at your feet) **AoE at the crosshair:** every placed ground ability lands at the aim point,
    clamped to its range (`zone_distance` becomes the max range; aiming at the sky = max
    range along the aim, snapped to the ground): Meteor Fall, Binding Embers, Renewal
    Pulse, Flame Wall, Life Spore, Arrow Rain, Sanctified Ground and the rest. **Not**
@@ -190,10 +190,10 @@ Sessions (A3.1 before A3.2; the others are independent):
    - **Flame Wall burns what's inside when it appears.** The code already pulses on the
      first tick (`first_pulse` 0), so find why targets standing in it weren't hit
      (placement height, the 1.2 m depth, `Zone.contains`?) and fix that.
-5. **Fire Trail along the roll:** a rectangular burning strip from where the roll
+5. **Done (session 41, agent; needs a playtest).** **Fire Trail along the roll:** a rectangular burning strip from where the roll
    started to where it ended (oriented along it, placed when the roll ends), instead of
    a disc; Gust Roll's 1.8× longer rolls make it 1.8× longer (and a bit wider).
-6. **Recall rework:** only knives from **light/heavy throws that hit** count: they stay
+6. **Done (session 41, agent; needs a playtest).** (one Recall hit per target: 35 × knives, untuned; status "Knives xN") **Recall rework:** only knives from **light/heavy throws that hit** count: they stay
    embedded in that enemy/player (at most **8** across targets, ~10 s); missed knives
    just drop. Recall rips them out: each embedded knife damages its target again, then
    flies back to you (cosmetic). Recall no longer rewards missing.
@@ -209,10 +209,10 @@ Sessions (A3.1 before A3.2; the others are independent):
    takes damage) during the windup and swing of their heavies and big abilities. Likely
    `armor_start`/`armor_end` attack keys checked where the server staggers a player
    (`apply_stagger` callers); decide whether it also resists knockback.
-4. **Earthshaker:** the every-3rd-heavy aftershock becomes one **expanding ring** around
+4. **Done (session 41, agent; needs a playtest).** (`ShockRing`: 12 m/s to 6 m; Shockwave hit radius 0.8 → 1.2) **Earthshaker:** the every-3rd-heavy aftershock becomes one **expanding ring** around
    the user (hits each target once), not a forward wave. The **Shockwave** ability stays
    a single forward wave, a bit **wider** (`projectile_shockwave` `hit_radius`/`length`).
-5. **Small ones:** **Hooked** only applied when the Warden capstone is learned;
+5. **Done (session 41, agent; needs a playtest).** (Meteor Drop climb 0.22 → 0.29 s; Upheaval has its own slam pose and a dust puff) **Small ones:** **Hooked** only applied when the Warden capstone is learned;
    **Shatter** cooldown 12 → ~6 s; **Meteor Drop** rises slower (~30% longer climb, same
    fast crash); **Upheaval** animation reads as slamming the ground, not a swing.
 6. **Done (session 34)**, except that hostile players in PvP walk through it (the
@@ -609,7 +609,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
-| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main. Then the class playtest (Ranger, Mage, Assassin leftovers; Paladin fine) → Step A3; Firebolts ×1.6 slower, Withering Touch 10 m, Gauntlet heavy 8 m; A3.1 (crosshair, `AimRay`, aimed projectiles with pitch, 0.7 m shoulder camera), A3.3 (Blink/Ashstep teleports), A3.4 (beam visuals, wall zones count overlapping bodies) by three parallel agents, merged on `feedback-a3` (no conflicts). 562 tests; smoke default, `-Party`, Mage, Ranger, Assassin pass first time, 0 corrections |
+| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main. Then the class playtest (Ranger, Mage, Assassin leftovers; Paladin fine) → Step A3; Firebolts ×1.6 slower, Withering Touch 10 m, Gauntlet heavy 8 m; A3.1 (crosshair, `AimRay`, aimed projectiles with pitch, 0.7 m shoulder camera), A3.3 (Blink/Ashstep teleports), A3.4 (beam visuals, wall zones count overlapping bodies) by three parallel agents, merged on `feedback-a3` (no conflicts). 562 tests; smoke default, `-Party`, Mage, Ranger, Assassin pass first time, 0 corrections. After the limit reset, batch 1 of the rest (four agents): A3.2 + A3.5 (zones at the crosshair, Fire Trail strips), A2.4 + A3.6 (knife ammo, Recall rips out embedded knives), A2.6 (`requires`, Shadow Swap under Ember Double, a 44-node audit), Step B 4–5 (Earthshaker `ShockRing`, wider Shockwave, Hooked needs its capstone, Shatter 6 s, slower Meteor Drop climb, Upheaval slam pose); one keep-both conflict (the key list in `weapon_broadsword.cfg`). 607 tests; smoke default, `-Party` and all six classes pass first time, 0 corrections |
 
 ---
 

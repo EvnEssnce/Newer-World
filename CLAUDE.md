@@ -69,6 +69,11 @@ game/
                              unit tested. `World.aim_point(player)` (server, during the physics step).
   combat/beam_visual.gd      Client look of a beam attack (`beam_color`): core, sheath, hand orb,
                              tip glow; from the predicted/interpolated PlayerState (`Player._show`).
+  combat/shock_ring.gd       ShockRing: an expanding ground ring (Earthshaker): growth, swept band,
+                             hit once. Pure logic, unit tested. shock_ring_visual.gd: its look
+                             (band + ridge; also Upheaval's dust puff).
+  combat/embedded_knives.gd  Knives embedded in targets (per-thrower cap, expiry, Recall).
+                             Pure logic, unit tested.
   combat/projectile_params.gd  One projectile kind (data/projectiles.cfg [projectile_<id>]).
   combat/projectile.gd       One projectile in flight: steps, boomerang legs, pierce, hit-once
                              bookkeeping, swept segment-vs-capsule test. Pure logic, unit tested.
@@ -252,7 +257,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
   charge_mask, spare_charges, Wing cooldowns by pool index without trailing zeros]`
   (`PACKED_WING_HEADER` = 10; new small ints can go in that header too); 35 =
-  `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects).
+  `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects); 36 =
+  ammo, a `PackedInt32Array` `[spent slot0, spent slot1, timer slot0, timer slot1]`
+  (Throwing Knives magazine; zeros in `view_array()`).
   Append new fields at the end. **Snapshot size** (`SUMMARY net` on the server; the
   smoke test fails a snapshot over 1360 bytes, ENet's 1392-byte MTU less the RPC
   header): own entry ~200–240 bytes, each other player ~145–175, each Husk ~50–60;
@@ -285,9 +292,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   Seeker Spark) send `_receive_redirect(id, age, position, velocity)` (event type
   `EVENT_REDIRECT` 5) when the server changes their course (each bounce; homing every
   `HOMING_SYNC_ANGLE` of turn); clients rewind their copy to it like a TURN.
-  `sticks` kinds (knives) that hit a wall or run out stay on the server for
-  `stick_time` (`ProjectileSystem._stuck`, no visual) until Recall (`recall_projectile`)
-  fires each back as a returning kind (`server_recall` → `server_fire_from`).
+  **Embedded knives** (session 41): light/heavy knives (`embeds="embedded_knife"`) that
+  damage a target stay in it (`EmbeddedKnives`, server; the `embedded_knife` status shows
+  the count; at most 8 per thrower, 10 s; missed knives just drop). Recall
+  (`recalls="embedded_knife"`) strikes each target once for its damage × that target's
+  knives, then cosmetic `knife_recall` projectiles (`hits=false`) fly back.
 
 ## Zones and summons (AREA, SUMMON)
 
@@ -308,10 +317,17 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   to every connected player; clients draw a `ZoneVisual` and count down their own
   copy. Late joiners don't see zones placed before they joined (all last ≤ 30 s).
 - **Placing**: an attack/ability's `zone` (kind), `zone_time` (s from its start),
-  `zone_distance` (m ahead along the facing) → `Player.zone_placed` (server) →
-  `ZoneSystem.server_place_for_attack`; a projectile's `zone_on_impact` where it stops
+  `zone_distance` (the max range, m, horizontal) → `Player.zone_placed` (server) →
+  `ZoneSystem.server_place_for_attack`: it lands at `World.aim_point` (the crosshair)
+  clamped to that range (sky or farther = max range along the crosshair's line), unless
+  `zone_aimed=false` (Shield Wall, Sheltering Wings, Tripwire: straight ahead); the
+  local player sees a marker during the windup (`ZoneSystem._update_marker`);
+  a projectile's `zone_on_impact` where it stops
   (hit, wall or expiry; `ProjectileSystem.server_step`); a roll while a status has
-  `roll_zone` (`World._roll_zone`, uses a stack). Always snapped to the ground below.
+  `roll_zone` (`World._roll_zone`, uses a stack; a `strip` kind (Fire Trail) is laid
+  from the roll's start to its end when it ends: `Player.roll_ended`/`roll_start`,
+  per-placement `Zone.width`/`depth`, sent as `_receive_zone`'s last arg `size`).
+  Always snapped to the ground below.
 - **Effects**: `ZoneSystem.server_step` (each tick after projectiles) →
   `World.zone_effect(zone, target)` for every target of the zone's side inside
   (`Zone.contains`: circle + height band, or the wall's box); traps hit the first
@@ -404,6 +420,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   parry (`parry_arc` + `counter`: Riposte). **Parry**: a hit on a player in a parry
   window from within the arc in front is negated (`HIT_PARRIED`) and the server calls
   `start_counter`, which starts the internal counter ability facing the attacker.
+- **Prerequisites** (session 41): a tree node may list `requires` (node ids, same or
+  lower tier, any branch); learning needs them, unlearning cascades (`remove`/`prune`);
+  `MasteryTree.check()` validates every tree at load and in a unit test (every upgrade or
+  capstone aimed at one of its tree's abilities must require it); K shows "Requires X".
 - **Mastery** (`data/mastery_<weapon>.cfg`, rules in `data/mastery.cfg`): two
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
   branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
@@ -450,10 +470,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (self). Tree `mastery_war_hammer.cfg`: Earthshaker (Slam, Upheaval, Shockwave) and
   Breaker (Clout, Shatter, Steadfast); default slots Slam, Clout, Upheaval. Capstones
   (server, `World._with_hammer_capstones`, every live heavy tick): **Earthshaker**
-  (`heavy_shockwave`: `Player.heavy_counter` (`HeavyCounter`, by `attack_serial`) sends
-  the internal `aftershock`'s wave every `amount`-th heavy via
-  `ProjectileSystem.server_fire_attack`; no cosmetic copy waits on the thrower's
-  client, so it draws the server's spawn on the render clock) and **Breaker**
+  (`heavy_shockwave`: `Player.heavy_counter` (`HeavyCounter`, by `attack_serial`) starts
+  a `ShockRing` around the user every `amount`-th heavy (`World._spawn_shock_ring`,
+  `ring_*` keys in `[ability_aftershock]`: 12 m/s to 6 m, 1 m band, feet ≤ 0.8 m up;
+  `_step_shock_rings` after projectiles; each target once via `resolve_strike` /
+  `strike_enemy` from the ring centre; clients `_receive_shock_ring`) and **Breaker**
   (`heavy_breaks_block`: the heavy's hits use `AttackParams.copy()` with
   `breaks_block=true`, made after `damage_multiplier`, which tells heavies apart by
   identity). Counted on the `SUMMARY juggernaut` line (aftershocks, wall_stuns,
@@ -574,7 +595,8 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
   wire; server results stay `HIT_DAMAGED`) and show "Critical! -N". Gear crit chance
   can reuse the multiplier.
 - **Caught on the Hook** (Warden capstone, `effect="hook_stagger"`, `applies_to="hooked"`,
-  `amount` 0.8 s): Hooking Pull always applies **Hooked** (2.5 s debuff, no effect of its
+  `amount` 0.8 s): Hooking Pull applies **Hooked** only if the hooker has this capstone
+  (`CharacterBuild.applies_mark` via `World._mark_learned`) (2.5 s debuff, no effect of its
   own; `Entry.source` = the hooker). With the node (Halberd out), the hooker's next
   damaging hit on that target staggers ≥ 0.8 s and removes the mark
   (`World._with_hook_stagger`; players via `PlayerState.remove_status`, a server event).
@@ -635,7 +657,10 @@ behind, bonus or not).
   each). Fan of Knives (5 over 50°), Pinning Knife (Slow 3 s), Marked Blade (Marked),
   Venom Coat (self: next 5 hits poison, like Bloodlust). Defaults: all four learned,
   Q/E/R = Fan of Knives, Pinning Knife, Venom Coat. Ricochet (`[projectile_knife_ricochet]`,
-  2 bounces within 7 m) and Recall (stuck knives fly back) are Flurry tier 2.
+  2 bounces within 7 m) and Recall (rips out embedded knives, see "Projectiles") are
+  Flurry tier 2. **Magazine** (`[weapon] ammo` 6, `reload_time` 1.5 s when empty,
+  `refill_delay` 2 s without throwing; per attack `ammo_cost`: light 1, heavy 3): a throw
+  without ammo can't start (buffered); synced `to_array()` 36; HUD pips left of Q.
 - **Marked** (`marked_bonus` 0.5, `StatusEffects.mark_from(defs, source)`): the
   marker's next *melee* hit (an attack without `projectile`) on the target deals +50%
   and removes the mark (`World._marked_scale`, players via `remove_status`).
@@ -650,7 +675,8 @@ behind, bonus or not).
   Trickster, 12 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
   and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
   dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
-  damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s: trade
+  damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s, Trickster
+  tier 3, requires Ember Double: trade
   places with your decoy, or the nearest target you Marked within 15 m). Defaults Z
   Ashstep, C Plumage Flash. Capstones: **Mirror Image** (`decoy_burst`: the decoy
   bursts as it ends, 80 damage + Dazzled within 3 m) and **Second Step**
