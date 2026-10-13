@@ -66,7 +66,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Milestone (original build order) | Status |
 |---|---|
 | 1. Networked combat slice | **Done** (session 9; developer: "the combat loop is great") |
-| 2. Loot loop | **Built** (sessions 10, 27, 28); needs its playtest |
+| 2. Loot loop | **Built** (sessions 10, 27, 28); playtested in session 41, fixes in Step A2 |
 | 3. Gathering and crafting | Not started |
 | 4. Second weapon and weapon swap | **Done**, and well past it: Fighter (Broadsword, Spear, Dual Axes) and Juggernaut (Halberd, Greataxe, War Hammer), all abilities and capstones, Wings, statuses, forced movement, projectiles, parties, enemy threat (sessions 11–25) |
 | 5. Persistence | Not started |
@@ -99,12 +99,62 @@ and playtested). Each numbered item is roughly one session with one testable goa
 
 ### Step A: Close out Milestone 2 (loot loop)
 
-1. **Playtest** sessions 27–28 and 30 (no code; checklist in §4). Fix what the
-   playtest finds. Then Milestone 2 is done. (The smoke scripts themselves were run in
-   session 31 with PowerShell 7 on Linux, which found and fixed a quoting bug in the
-   loot `--tune`; a Windows run is still worth doing once.)
+1. **Done (session 41):** playtested loot, gear, the training dummy and the class
+   picker (plus most of the Assassin, Shield Wall and Ember Double/Shadow Swap).
+   Verdicts: weapon items follow their type, a full armor set's damage reduction feels
+   good, the dummy's readout matches ("exactly how I wanted"), the class picker needs
+   no changes. Already applied: drops roll **GS 101–140** (100 is the plain starting
+   weapon's), equip time **0.75 s** (`gear.cfg`). The smoke scripts pass on Windows.
    - Item weight and durability are in the brief but not built: durability goes with
      repairs in Step D; weight is an open decision (§4).
+
+### Step A2: Session 41 playtest feedback (decided, in this order)
+
+The developer's notes, grouped into sessions. Milestone 2 is done once A2.1–A2.2 are
+built and playtested.
+
+1. **Inventory and K panels (client UI only):**
+   - I panel: smaller item rows and slots; the window big enough that 20 bag slots
+     never need a scroll.
+   - Bag **sort/filter** by item type (weapon, armor slot, Wing Enhancement) and by class.
+   - **Comparison** includes affixes, not just the primary stat (today a Rare chest with
+     bonus max health looks worse than a Common one).
+   - **Hovering an equipped item** shows its stats and affixes.
+   - A weapon for another class says which class it's for, like Wing Enhancements do
+     (instead of "Your class can't use ...").
+   - I and K are **mutually exclusive** (opening one closes the other).
+   - K panel **larger**, so the trees don't need a scroll either.
+2. **HUD:** the current/max health number over the HP bar; a new **equipment
+   summary** (small symbols for the equipped armor slots, plus the total stat bonuses
+   from gear).
+3. **Small fixes:**
+   - **Dummy backstab bug:** the "unaware enemy" rule (an enemy not targeting you)
+     makes every hit on the dummy a backstab, since the dummy never targets anyone.
+     The dummy should count as aware of everyone (positional backstabs only). Likely a
+     key in `enemy_dummy.cfg`.
+   - **Kindle** (`ember_gain_pct`): only on **Epic and Legendary**, about **+20% at GS
+     101 to +30% at GS 140** (a new per-affix minimum-rarity key in `affixes.cfg`).
+   - **Shield Wall first-use hitch:** about 1 s frozen the first time it's cast, fine
+     after. Probably first-use mesh/material/shader setup on the client (or the
+     server's first wall body); find it with `--perf-log` and pre-warm it.
+4. **Throwing Knives ammo:** DPS is too high (light ≈ 32 dmg every ~0.35 s at range).
+   Decided: an **ammo count + reload** (e.g. 6 knives, ~1.5 s reload when empty, refills
+   if you stop throwing; numbers in `weapon_throwing_knives.cfg`). Ammo changes what
+   the sim allows, so it's synced `PlayerState` (predicted, append to `to_array()`), with
+   a HUD readout.
+5. **Animation canceling** (every class): a dodge or ability press during a light/heavy
+   attack's **windup cancels the attack** (no damage), and during its **recovery skips
+   the rest** (dodge does this today; abilities will too). During the hit windows the
+   press is buffered, as today. The swing animation stops at once. In
+   `PlayerState.step` (predicted, deterministic).
+6. **Ability combos in the trees:** a new tree rule, a node can **require another
+   node** (e.g. `requires="node_ember_double"`), checked in `MasteryTree` and the K
+   panel. **Shadow Swap** moves into Trickster, below Ember Double, and requires it.
+   Then audit every class for abilities that do nothing without another one and apply
+   the same rule.
+7. **Husks path around obstacles** (pulls Step G's navigation forward): today they walk
+   into Shield Wall and stand still. Navmesh steering with summoned walls as dynamic
+   obstacles (also fixes Husks stalling on crates).
 
 ### Step B: Wave 3 combat feedback (decided in session 26, in this order)
 
@@ -229,30 +279,12 @@ trees, Wings, models), plus the systems it needs:
 
 ### Needs a hand playtest (`run_local_test.ps1`)
 
-**Class picker (session 40):** K, then the Class picker above "Equipped weapons": does
-the switch feel instant and clean (new weapons in hand, Wings on Z/C, full health,
-Ember 50, no cooldowns)? In combat (6 s after a hit) it's refused with a reason. Gear
-of the old class (weapons, Wing Enhancement) should land in the bag (I). Does the bot
-window still see you right after you switch?
+**Done in session 41:** class picker, loot, gear, training dummy (feedback in Step A2).
+Recheck after A2: the I/K panels, gear comparisons, Kindle, 0.75 s equip.
 
-**Loot (session 27):**
-- Kill Husks: do drops read well (sack, beam, name, rarity colours)? Is the 2.5 m pickup
-  reach right?
-- The F prompt and the pickup feed; the I panel (scroll, Discard twice, I/Esc close,
-  mouse comes back).
-- With the bot (`-Party` too): you only see your own drops.
-
-**Gear (session 28):**
-- Equip armor: is ~20% less damage from a full set noticeable? Is 1 s to equip right?
-- Equip a weapon type you don't have out ("Replace ..."), then change weapons in K: the
-  item should follow its type or return to the bag.
-- A Wing Enhancement: Wing abilities hit a bit harder; Kindle gives more Ember.
-
-**Training dummy (session 30):** walk to z = +18 (past Crate3): does the "You: N dmg
-N DPS N s" readout above it read well and match what you dealt (bleed ticks too)? Does
-it heal and stand back up 4 s after you stop? It drops nothing.
-
-**Assassin (session 32, `run_local_test.ps1 -Class assassin`):**
+**Assassin (session 32, `run_local_test.ps1 -Class assassin`):** mostly playtested in
+session 41 (feedback in Step A2); recheck backstabs on the dummy, knife ammo and the
+Wing tree after A2.
 - Talons feel: is a 0.28 s light too fast/too weak? Pounce's reach and hop; Talon Spin;
   Hook Talon's 2 m pull; Eviscerate on a low Husk.
 - Backstabs: hit a Husk that's chasing the bot (or from behind): with Unseen Strike
@@ -278,7 +310,9 @@ it heal and stand back up 4 s after you stop? It drops nothing.
   fall (shoot while floating).
 - Models: bow on the left hand, crossbow, glowing wraps.
 
-**Zones and summons (session 34; no screenshot of them yet, so check the looks):**
+**Zones and summons (session 34):** Shield Wall and Ember Double/Shadow Swap playtested in
+session 41 (first-cast hitch, Husks stuck at the wall, Swap with no double: Step A2).
+Still to check: the Ranger zones below.
 - Shield Wall (Broadsword, K to slot it): three tall shields 3 m ahead. Husks walk
   around it, never through; you and a party member walk through; the bot's
   Javelin/Boomerang (`-NoBot` second window) stops at it.
@@ -321,10 +355,6 @@ wall, then pull them back through a Husk), Seeker Spark (the spark curving onto 
 watch for visible kinks from the server's course corrections).
 
 **Still unseen from Wave 3:** the War Hammer's Breaker capstone breaking a real guard.
-
-**Run on Windows once:** `smoke_test.ps1`, `-Party` and `-Class juggernaut`. Session 31
-ran the real scripts under PowerShell 7 on Linux; Windows PowerShell 5.1 builds the
-command line the same way, but hasn't been tried with the fixed loot `--tune`.
 
 ### Decisions to confirm (the defaults that were built)
 
@@ -537,6 +567,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
+| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. 525 tests |
 
 ---
 
