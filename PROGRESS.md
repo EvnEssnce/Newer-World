@@ -165,7 +165,7 @@ an 8 m drain beam (was a 3 m blast). Decided rule: Mage abilities aimed at one t
 are never melee range; around-yourself AoEs (Pyroclasm, Wingfall) stay.
 
 Sessions (A3.1 before A3.2; the others are independent):
-1. **Aim point and crosshair:** a visible crosshair; the server rebuilds the camera's
+1. **Done (session 41, agent; needs a playtest: crosshair feel, the new 0.7 m `shoulder_offset`, the -20° start pitch that aims at the ground ~4.4 m ahead, shooting from an Updraft hover).** **Aim point and crosshair:** (`AimRay`, `World.aim_point(player)` for A3.2) a visible crosshair; the server rebuilds the camera's
    aim ray from the player's position, `aim_yaw`/`aim_pitch` and `camera.cfg` (no new
    input field; client and server compute the same point; camera collision pulling the
    camera in can be ignored or mirrored) and raycasts the world for the **aim point**.
@@ -178,12 +178,12 @@ Sessions (A3.1 before A3.2; the others are independent):
    Pulse, Flame Wall, Life Spore, Arrow Rain, Sanctified Ground and the rest. **Not**
    Shield Wall and Sheltering Wings (defensive walls stay a fixed distance in front).
    Maybe a ground marker for the target while the ability is ready.
-3. **Blink and Ashstep are instant teleports:** displacement applied at once in the sim
+3. **Done (session 41, agent; needs a playtest).** **Blink and Ashstep are instant teleports:** (`teleport=true`, `dash_direction="input_forward"`; root blocks them; the bot never slots Blink) displacement applied at once in the sim
    (`PlayerMovement`, predicted, deterministic), not a velocity burst (Blink's 7 m in
    0.08 s sent players flying off the map); stop short of walls (shape cast); the way
    you move, **forward (facing) with no input** (today both default backward; Vault
    keeps its backward default: a new `dash_direction` value). I-frames as before.
-4. **Mage beams and Flame Wall:**
+4. **Done (session 41, agent; needs a playtest).** **Mage beams and Flame Wall:** (cause: a wall zone tested only the feet against a 1.2 m-deep box, so bodies standing in the fire were missed; now any overlapping body counts. Left open: a runner faster than ~4 m/s or a roll can cross between pulses in PvP; fix with a hit as each target enters)
    - A conjured **beam visual** for Searing Ray (no visible sign today without F3), and
      the other beams (Mending Beam, Siphon, Ward, Withering Touch, the Gauntlet heavy,
      Searing Glare), drawn from the (interpolated) `PlayerState` so others see it too.
@@ -496,7 +496,7 @@ Gameplay:
   stall it (step 16).
 - A heavy's hitbox can hit both Husks at once when they stand together.
 - Attacks pass through crates (hitboxes ignore world geometry).
-- Projectiles fly flat (no aim pitch); no impact effect; rarely a thrower sees its own
+- No projectile impact effect; rarely a thrower sees its own
   throw twice.
 - Statuses only tick while a player's inputs arrive (keeps prediction exact; a lagging
   player's bleed pauses). Bloodlust survives a weapon swap.
@@ -609,7 +609,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 38 | 2026-10-11 | Snapshot size (branch `snapshot-size`, built on the session 26 main): `NetCodec` (`core/net_codec.gd`), a compact lossless binary encoding (1-byte tags, varints, small ints in the tag, 32-bit floats when exact); per-recipient snapshots: your own entry full, other players' `PlayerState.view_array()` (owner-only fields at defaults: smaller and private); `SUMMARY net` and a smoke check (no snapshot over 1,360 bytes); `smoke_test.ps1 -Bots N`. 13 new tests |
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
-| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main |
+| 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main. Then the class playtest (Ranger, Mage, Assassin leftovers; Paladin fine) → Step A3; Firebolts ×1.6 slower, Withering Touch 10 m, Gauntlet heavy 8 m; A3.1 (crosshair, `AimRay`, aimed projectiles with pitch, 0.7 m shoulder camera), A3.3 (Blink/Ashstep teleports), A3.4 (beam visuals, wall zones count overlapping bodies) by three parallel agents, merged on `feedback-a3` (no conflicts). 562 tests; smoke default, `-Party`, Mage, Ranger, Assassin pass first time, 0 corrections |
 
 ---
 

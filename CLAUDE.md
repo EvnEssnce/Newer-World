@@ -64,6 +64,11 @@ game/
                              pushed_into_wall (Tempest Wings). Unit tested.
   combat/heavy_counter.gd    Counts heavies once each (War Hammer Earthshaker). Unit tested.
   combat/hit_feedback.gd     Floating combat text over whoever was hit (client).
+  combat/aim_ray.gd          AimRay: the crosshair's line from position, aim yaw/pitch and
+                             camera.cfg (shoulder offset); `cast` finds the aim point. Pure math,
+                             unit tested. `World.aim_point(player)` (server, during the physics step).
+  combat/beam_visual.gd      Client look of a beam attack (`beam_color`): core, sheath, hand orb,
+                             tip glow; from the predicted/interpolated PlayerState (`Player._show`).
   combat/projectile_params.gd  One projectile kind (data/projectiles.cfg [projectile_<id>]).
   combat/projectile.gd       One projectile in flight: steps, boomerang legs, pierce, hit-once
                              bookkeeping, swept segment-vs-capsule test. Pure logic, unit tested.
@@ -108,7 +113,8 @@ game/
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
                              cleanse, on-hit (Bloodlust), immunities, taunt source.
                              Pure logic, unit tested.
-ui/                  connect_menu (client start screen), hud (health/stamina/Ember bars with a
+ui/                  connect_menu (client start screen), crosshair (screen-centre ticks + dot,
+                     hidden under modal panels), hud (health/stamina/Ember bars with a
                      current/max health number, ability bar, Wing slots, weapon line, status
                      row, Rebirth banner, debug info),
                      equipment_summary (top-right gear box: average gear score, a drawn symbol
@@ -225,7 +231,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   carries it. Server-side teleports (respawn) should still land exactly on the ground.
 - **Remote players**: drawn `interpolation_delay` seconds in the past, interpolated
   between snapshots on a render clock synced to server ticks. Roll and i-frame visuals
-  come from the interpolated `PlayerState`.
+  come from the interpolated `PlayerState`. A teleport between two snapshots snaps
+  instead of gliding (`PlayerState.ticks_since_teleport`).
 - **ENet's packet throttle is off** (`Net._disable_packet_throttle`, both directions).
   Left on, it drops unreliable packets (inputs, snapshots) in bursts whenever ping
   spikes, e.g. while several clients start at once; enough to defeat input
@@ -329,6 +336,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - `wall=true` makes the area a box; only `solid=true` stops projectiles, and collides
   with enemies unless `blocks_enemies=false` (Sheltering Wings). `affects="both"`:
   allies get its heal, hostiles its damage and status (Sanctified Ground).
+  A wall's area counts any body overlapping the box (`Zone.contains(point, body_radius)`,
+  player/enemy `BODY_RADIUS`; a thin Flame Wall missed Husks standing in it); discs test
+  the feet.
   Traps hit the first target of their `affects` side (allies for Life Spore).
 - `SUMMARY zones spawned= pulses= affected= trap_triggers= decoys= walls=
   projectiles_stopped=` and `SUMMARY summons decoy_bursts= shadow_swaps=` (no checks;
@@ -377,7 +387,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   front, `AttackParams.hitbox_arc`: Seismic Slam; the F3 debug draws the full circle), dash (`dash_distance`, moved in
   `PlayerMovement` like a dodge: Shield Charge, Crashing Leap, Lunge;
   `dash_direction="back"` dashes away from the facing, `"input"` the way the movement input
-  points, backward with none: Vault; `dash_ease="in"` speeds up over the dash, same
+  points, backward with none: Vault; `"input_forward"` the same but forward with none;
+  `teleport=true` moves the whole `dash_distance` at once on `dash_start`
+  (`PlayerMovement.teleport`: `move_and_collide` on the world, climbs walkable slopes,
+  stops at the first wall, settles onto the floor if it was on one; root blocks it; not a
+  velocity burst): Blink, Ashstep; `dash_ease="in"` speeds up over the dash, same
   distance, `AbilityParams.dash_speed_at`: Diving Strike; `dash_aim_pitch` with
   `aim_full_pitch`/`aim_zero_pitch` shortens it as the camera looks up, to 0 m:
   Crashing Leap, the fraction stored as the length of `PlayerState.ability_dir`, so
@@ -487,6 +501,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   counter turns toward where it came from). Enemies: `World.strike_enemy` (same as
   melee). `pierce` = targets it passes through (0 = stops at the first); a returning one
   that runs out turns back instead.
+  **Aiming** (session 41): throws fly from the release point toward `World.aim_point`
+  (the crosshair: `AimRay` from the last simulated input's `aim_yaw`/`aim_pitch`,
+  `Player.last_aim_*`, rebuilt on the server, never sent by the client; it isn't sim
+  state), pitch included (`ProjectileSystem.aimed_direction`, the same on the server and
+  the local cosmetic copy). A kind's `pitch` is degrees above the aim line; spreads fan
+  around the aim's heading; `aim_pitch=false` keeps a kind level (Shockwave); an aim point
+  under `[aim] min_ahead` ahead goes along the ray. The camera is over the shoulder
+  (`camera.cfg shoulder_offset`, read by the server too: restart both after editing).
   Fighter: Spear **Javelin Cast** (feather javelin, 28 m/s, ~22 m, slows 3 s) and Dual
   Axes **Boomerang Axe** (9 m out, back to the thrower, pierces, hits each target once
   each way; a guard doesn't stop it). Both are tier-1 nodes in their trees and in the
@@ -625,7 +647,7 @@ behind, bonus or not).
   throws (`Player.throw_counter`, a `HeavyCounter` by `attack_serial`); every 5th also
   fires Fan of Knives via `ProjectileSystem.server_fire_attack` (no cooldown used).
 - **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
-  Trickster, 12 points): Ashstep (15 Ember, 6 s: 4.5 m blink the way you move, i-frames)
+  Trickster, 12 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
   and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
   dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
   damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s: trade
@@ -711,7 +733,7 @@ ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
   ahead, one 220 blast after 1.2 s), Flame Wall (20: zone `flame_wall`, a 6 m box of fire
   5 m ahead, not solid: 20 + Burn every 0.5 s), Searing Ray (15: a 10 m beam, 6 windows,
   `window_ramp` 0.3: window i deals ×(1 + 0.3 i), applied to `damage_scale` in
-  `_on_attack_stepped`), Blink (10: 7 m `input` dash in 0.08 s with i-frames),
+  `_on_attack_stepped`), Blink (10: a 7 m teleport the way you move, forward with none, i-frames),
   Pyroclasm (20: 3.5 m radial, knockback 4 m). Capstones: **Wildfire Spread**
   (`zone_grow`, applies_to burn: your Burn-applying pulse zones grow 15% per pulse up
   to 2×, `World.zone_growth` → `Zone.scale`, `_receive_zone_scaled`) and **Clear Mind**
@@ -1206,6 +1228,7 @@ still swings at its ally when no Husk is near, which the server ignores; see
 refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--mastery-panel` (open the K panel at start, for screenshot checks; `--mastery-panel=wings`
 opens it on the Wings tab), `--inventory-panel` (open the I panel at start, same use),
+`--bot-aim-pitch=DEG` (the bot's aim pitch, up = positive; default 0),
 `--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
 `SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),
 `--screenshot-dir=PATH` (save the game window every 0.25 s as `frame_<N>.png`, for
