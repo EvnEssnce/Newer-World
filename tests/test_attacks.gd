@@ -167,11 +167,12 @@ func test_dodge_cooldown_after_a_roll_buffers_the_next_dodge() -> void:
 	assert_true(restored.matches(state))
 
 
-func test_dodge_waits_through_windup_and_active() -> void:
+func test_dodge_waits_through_active() -> void:
 	_tap()
-	_step(DODGE)  # tick 1, windup
-	assert_false(state.is_dodging(), "windup")
-	_steps(3)  # tick 4, active
+	_steps(2)  # tick 2, windup
+	_step(DODGE)  # tick 3, active
+	assert_false(state.is_dodging(), "active")
+	_step()  # tick 4, active
 	assert_false(state.is_dodging(), "active")
 	_step()  # tick 5, recovery: the buffered dodge fires
 	assert_true(state.is_dodging())

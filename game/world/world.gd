@@ -2592,7 +2592,11 @@ func _bot_ability_button(turn: int, first: bool = false) -> int:
 ## 0.4 s later by a hitting ability, so the buffed hits land while the target
 ## is close.
 func _bot_self_buff_input(distance: float, t: float, cycle: int) -> int:
-	if _bot_followup_at > 0.0 and t >= _bot_followup_at:
+	# The follow-up waits out a light/heavy's windup, which a press would cancel
+	# (animation canceling), so the bot's heavies still land.
+	var in_windup := (_local_player.state.attack_cancel_phase(_local_player.params)
+			== PlayerState.CANCEL_WINDUP)
+	if _bot_followup_at > 0.0 and t >= _bot_followup_at and not in_windup:
 		_bot_followup_at = -1.0
 		return _bot_ability_button(cycle * 2 + 1, false)
 	if distance > BOT_BUFF_REACH or _local_player.state.is_attacking():
