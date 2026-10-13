@@ -668,7 +668,7 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   `damage_scale` and raise `pierce_left`). Tripwire (a trap at your feet) and Smoke
   Bolt (a cloud where the bolt stops), Trapper tier 2; the Trapper capstone **Rearm**
   (`trap_rearm` 1: traps re-arm once).
-- **Firebolts** (Kindling / Flashfire): light firebolt (26, 0.28 s, +1 **Burn**),
+- **Firebolts** (Kindling / Flashfire): light firebolt (26, 0.4 s; Overheat's ×1.6 brings it to 0.27 s, +1 **Burn**),
   heavy 3 bolts (60 each, Burn). Burn: 6 dps per stack, max 6, 4 s. Scatterflame (5
   bolts, 40°, Burn), **Ignite** (`detonates_status="burn"`, `detonate_damage` 35: on a
   hit, every Burn stack is removed for +35 base damage each, `World._detonate`, before
@@ -717,7 +717,7 @@ ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
   to 2×, `World.zone_growth` → `Zone.scale`, `_receive_zone_scaled`) and **Clear Mind**
   (`focus_refund`: an ability started within 3 s of landing a heavy refunds its Ember,
   `Player.last_heavy_hit_tick`, `World._mage_ability_started`).
-- **Gauntlet** (Lifeweaver / Siphon): light life bolt (35), heavy 3 m drain blast (90,
+- **Gauntlet** (Lifeweaver / Siphon): light life bolt (35), heavy 8 m drain beam (90,
   `lifesteal` 0.3). Mending Beam (15: 10 m beam, 6 windows, `ally_heal` 30 per window,
   `allies_only`), Renewal Pulse (25: zone `renewal_pulse`, 160 to your side in a 3 m
   circle 6 m ahead), Siphon (10: 8 m beam, 5 windows of 30, `lifesteal` 0.5), Ward (20:

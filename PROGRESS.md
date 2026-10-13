@@ -156,6 +156,48 @@ built and playtested.
    into Shield Wall and stand still. Navmesh steering with summoned walls as dynamic
    obstacles (also fixes Husks stalling on crates).
 
+### Step A3: Session 41 class playtest feedback (decided)
+
+Playtest of the Ranger, Mage and Assassin leftovers. **Already applied** (data only):
+Firebolts light/heavy ×1.6 slower (light ~0.4 s; Overheat's ×1.6 is now what brings it
+back to the old speed), Withering Touch a 10 m beam (was a 3 m box), the Gauntlet heavy
+an 8 m drain beam (was a 3 m blast). Decided rule: Mage abilities aimed at one target
+are never melee range; around-yourself AoEs (Pyroclasm, Wingfall) stay.
+
+Sessions (A3.1 before A3.2; the others are independent):
+1. **Aim point and crosshair:** a visible crosshair; the server rebuilds the camera's
+   aim ray from the player's position, `aim_yaw`/`aim_pitch` and `camera.cfg` (no new
+   input field; client and server compute the same point; camera collision pulling the
+   camera in can be ignored or mirrored) and raycasts the world for the **aim point**.
+   **Projectiles fly toward it**, pitch included (today they fly flat): arrows, knives,
+   firebolts, javelins can shoot up and down, and shooting while Updraft-hovering works.
+   The local cosmetic copy uses the same point.
+2. **AoE at the crosshair:** every placed ground ability lands at the aim point,
+   clamped to its range (`zone_distance` becomes the max range; aiming at the sky = max
+   range along the aim, snapped to the ground): Meteor Fall, Binding Embers, Renewal
+   Pulse, Flame Wall, Life Spore, Arrow Rain, Sanctified Ground and the rest. **Not**
+   Shield Wall and Sheltering Wings (defensive walls stay a fixed distance in front).
+   Maybe a ground marker for the target while the ability is ready.
+3. **Blink and Ashstep are instant teleports:** displacement applied at once in the sim
+   (`PlayerMovement`, predicted, deterministic), not a velocity burst (Blink's 7 m in
+   0.08 s sent players flying off the map); stop short of walls (shape cast); the way
+   you move, **forward (facing) with no input** (today both default backward; Vault
+   keeps its backward default: a new `dash_direction` value). I-frames as before.
+4. **Mage beams and Flame Wall:**
+   - A conjured **beam visual** for Searing Ray (no visible sign today without F3), and
+     the other beams (Mending Beam, Siphon, Ward, Withering Touch, the Gauntlet heavy,
+     Searing Glare), drawn from the (interpolated) `PlayerState` so others see it too.
+   - **Flame Wall burns what's inside when it appears.** The code already pulses on the
+     first tick (`first_pulse` 0), so find why targets standing in it weren't hit
+     (placement height, the 1.2 m depth, `Zone.contains`?) and fix that.
+5. **Fire Trail along the roll:** a rectangular burning strip from where the roll
+   started to where it ended (oriented along it, placed when the roll ends), instead of
+   a disc; Gust Roll's 1.8× longer rolls make it 1.8× longer (and a bit wider).
+6. **Recall rework:** only knives from **light/heavy throws that hit** count: they stay
+   embedded in that enemy/player (at most **8** across targets, ~10 s); missed knives
+   just drop. Recall rips them out: each embedded knife damages its target again, then
+   flies back to you (cosmetic). Recall no longer rewards missing.
+
 ### Step B: Wave 3 combat feedback (decided in session 26, in this order)
 
 2. **Done (session 30).** **Training dummy:** a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
@@ -297,7 +339,7 @@ Wing tree after A2.
   other window: its screen should go 60% white and clear over the last ~1 s.
 - Models: claws on the fists, knives in the hands (no throw animation beyond the swing).
 
-**Ranger (session 33, `run_local_test.ps1 -Class ranger`):**
+**Ranger (session 33, `run_local_test.ps1 -Class ranger`):** playtested in session 41 (feedback in Step A3); recheck after A3.
 - Longbow: light vs full draw (0.6 s): readable? Arrow Rain lands ~14 m ahead in a
   spread (no aim pitch yet); Backstep Shot's hop; Snare Arrow root; Hunter's Mark
   (+15% from you); Rapid Nock.
@@ -322,7 +364,7 @@ Still to check: the Ranger zones below.
 - Assassin: Ember Double (Husks turn to the burning copy; you're faint for 2 s) and
   Shadow Swap (back to the copy, or onto a Husk you Marked).
 
-**Mage (session 35, `run_local_test.ps1 -Class mage`):**
+**Mage (session 35, `run_local_test.ps1 -Class mage`):** playtested in session 41 (feedback in Step A3); recheck after A3.
 - Ember: abilities cost 5–30 Ember and the Mage gains Ember twice as fast. Does it run
   dry, or never? (`ember_gain` in `data/class_mage.cfg`, costs in the weapon files.)
 - Great Staff: Meteor Fall's 1.2 s warning circle, Flame Wall, Searing Ray's ramp,
