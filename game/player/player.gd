@@ -30,6 +30,9 @@ signal equip_finished(player: Player)
 signal projectile_released(player: Player)
 ## Server: a roll started this step (the Ranger's Parting Shot capstone).
 signal dodged(player: Player)
+## Server: the roll that started at roll_start ended (or was cut short) by this
+## step: Fire Trail's strip (ZoneSystem.server_roll_ended).
+signal roll_ended(player: Player)
 ## Server: the current attack reached its zone_tick (it places a zone).
 signal zone_placed(player: Player)
 
@@ -191,6 +194,10 @@ var wall_stun_source := 0
 ## (aim_ray; not sim state: only projectiles, server state, use it).
 var last_aim_yaw := 0.0
 var last_aim_pitch := 0.0
+## Server: where the current (or last) roll started, and whether the last step
+## ended rolling (for roll_ended).
+var roll_start := Vector3.ZERO
+var _was_rolling := false
 var _input_queue: Array[Array] = []
 var _last_queued_seq := 0
 
@@ -282,10 +289,16 @@ func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, de
 	last_aim_pitch = aim_pitch
 	var was_on_floor := is_on_floor()
 	var was_equipping := state.is_equipping()
+	var before := global_position
 	PlayerMovement.step(self, state, move, buttons, aim_yaw, params, delta, aim_pitch)
+	if multiplayer.is_server():
+		if _was_rolling and (not state.is_dodging() or state.dodge_tick == 0):
+			roll_ended.emit(self)
+		_was_rolling = state.is_dodging()
 	if state.dodge_tick == 0:
 		dodges += 1
 		if multiplayer.is_server():
+			roll_start = before
 			dodged.emit(self)
 		if not was_on_floor:
 			air_dodges += 1

@@ -107,10 +107,14 @@ var heals_lowest_ally := 0.0
 var heal_radius := 0.0
 
 # Zones and summons (data/zones.cfg ids; "" = none; server, ZoneSystem)
-## Placed zone_tick after the start, zone_distance m ahead of the user.
+## Placed zone_tick after the start. Aimed (zone_aimed, the default when
+## zone_distance > 0): at the crosshair's aim point, at most zone_distance m
+## (horizontally) from the user (ZoneSystem.server_place_for_attack). Not aimed:
+## zone_distance m straight ahead (defensive walls; 0 = at the user's feet).
 var zone := ""
 var zone_tick := 0
 var zone_distance := 0.0
+var zone_aimed := true
 ## A projectile of this attack places this zone where it stops.
 var zone_on_impact := ""
 ## Recall: as it starts, each of the user's stuck projectiles (params.sticks)
@@ -223,6 +227,7 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	zone = Tuning.get_optional(file, section, "zone", "")
 	zone_tick = roundi(float(Tuning.get_optional(file, section, "zone_time", 0.0)) * tps)
 	zone_distance = Tuning.get_optional(file, section, "zone_distance", 0.0)
+	zone_aimed = Tuning.get_optional(file, section, "zone_aimed", true)
 	zone_on_impact = Tuning.get_optional(file, section, "zone_on_impact", "")
 	recall_projectile = Tuning.get_optional(file, section, "recall_projectile", "")
 

@@ -51,7 +51,16 @@ var solid := false
 ## (with solid) false = projectiles stop at it but enemies walk through
 ## (Sheltering Wings).
 var blocks_enemies := true
-## Client look: "disc", "cloud", "rain", "trap", "decoy" or "wall", and its color.
+## Strip (with `wall`, placed by a roll: Fire Trail): the box runs from where
+## the roll started to where it ended, as long as the distance rolled (at least
+## wall_depth), wall_width across; a faster roll (Gust Roll's
+## dodge_speed_multiplier m) makes it wider: × (1 + fast_roll_widen × (m − 1)).
+## A "roll" longer than max_length (a respawn or teleport mid-roll) places none.
+var strip := false
+var fast_roll_widen := 0.0
+var max_length := 12.0
+## Client look: "disc", "cloud", "rain", "trap", "decoy", "wall", "firewall",
+## "orb" or "strip", and its color.
 var visual := "disc"
 var color := Color.WHITE
 
@@ -100,6 +109,9 @@ static func from_tuning(kind: String, tps: float) -> ZoneParams:
 	p.wall_depth = Tuning.get_optional(f, s, "depth", 0.0)
 	p.solid = Tuning.get_optional(f, s, "solid", false)
 	p.blocks_enemies = Tuning.get_optional(f, s, "blocks_enemies", true)
+	p.strip = Tuning.get_optional(f, s, "strip", false)
+	p.fast_roll_widen = Tuning.get_optional(f, s, "fast_roll_widen", 0.0)
+	p.max_length = Tuning.get_optional(f, s, "max_length", 12.0)
 	p.visual = Tuning.get_optional(f, s, "visual", "disc")
 	p.color = Tuning.get_optional(f, s, "color", Color.WHITE)
 	return p

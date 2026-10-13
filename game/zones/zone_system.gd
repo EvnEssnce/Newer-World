@@ -6,16 +6,19 @@ extends Node3D
 ## predicted simulation: the server sends reliable events and clients only draw.
 ##
 ## Server: placed by an attack or ability reaching its zone_tick
-## (Player.zone_placed: `zone` kind, `zone_distance` m ahead), by a projectile
-## ending (`zone_on_impact`, where it stopped), or by a roll while a status
-## with `roll_zone` is on (World._roll_zone). server_step ticks each one once
+## (Player.zone_placed: `zone` kind at the crosshair, at most `zone_distance` m
+## away; or `zone_distance` m straight ahead with zone_aimed=false), by a
+## projectile ending (`zone_on_impact`, where it stopped), or by a roll while a
+## status with `roll_zone` is on (World._roll_zone; a `strip` kind is laid
+## along the roll when it ends, Player.roll_ended). server_step ticks each one once
 ## per tick after players, enemies and projectiles: a pulse zone applies its
 ## effect (World.zone_effect: damage, healing, a status) to everything of its
 ## `affects` side standing in it; an armed trap fires on the first hostile in
 ## it, then re-arms or ends. Decoys stand in for their owner as enemies' target
 ## (World._enemy_targets). Walls get a collision box on WALL_LAYER, which only
 ## enemies collide with, and stop hostile projectiles (wall_hit).
-## Events to clients: _receive_zone(id, kind, position, yaw, ticks_left),
+## Events to clients: _receive_zone(id, kind, position, yaw, ticks_left,
+## size: a wall's (width, depth) for this placement),
 ## _receive_zone_moved(id, position), _receive_zone_triggered(id),
 ## _receive_zone_end(id).
 
@@ -24,6 +27,9 @@ extends Node3D
 const WALL_LAYER := 16
 ## Meters above a placement point the ground snap starts from.
 const SNAP_FROM := 1.0
+## The same for an aimed zone clamped to its range (placed at the feet's
+## height, so ground rising toward it needs a higher start).
+const CLAMPED_SNAP_FROM := 4.0
 ## Client: frames the invisible warm-up looks stay in front of the camera.
 const PREWARM_FRAMES := 3
 
@@ -43,12 +49,21 @@ var _decoys := 0
 var _walls_placed := 0
 var _projectiles_stopped := 0
 var _grown := 0
+var _aimed := 0
+var _strips := 0
+# Server: peer id -> [strip zone kind, roll start, roll speed multiplier] of a
+# roll in progress that lays a strip when it ends (server_roll_started).
+var _rolls: Dictionary[int, Array] = {}
 # Client: id -> [Zone (its own countdown), ZoneVisual]
 var _shown: Dictionary[int, Array] = {}
 # Client: the invisible warm-up looks (see _prewarm_step), and frames left
 # before they go (-1 = not placed yet, 0 = done).
 var _prewarm_node: Node3D
 var _prewarm_frames := -1
+# Client: the landing marker of the local player's aimed zone in its windup
+# (_update_marker), and the zone kind it was built for.
+var _marker: ZoneVisual
+var _marker_kind := ""
 
 
 func _physics_process(_delta: float) -> void:
@@ -56,6 +71,7 @@ func _physics_process(_delta: float) -> void:
 		for id: int in _shown:
 			var zone: Zone = _shown[id][0]
 			zone.step()
+		_update_marker()
 
 
 func _process(delta: float) -> void:
@@ -73,13 +89,20 @@ func _process(delta: float) -> void:
 # --- Server ---
 
 ## Server: places a zone of `kind` owned by `owner_id` on the ground below
-## `at`, facing `yaw`. Returns it, or null for an unknown kind.
-func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float) -> Zone:
+## `at` (the snap starts `snap_from` m above it), facing `yaw`; a wall's box
+## `size` (width, depth) if given, else the kind's. Returns it, or null for an
+## unknown kind.
+func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float,
+		size := Vector2.ZERO, snap_from := SNAP_FROM) -> Zone:
 	var p := ZoneParams.get_kind(kind)
 	if p == null:
 		push_error("ZoneSystem: unknown zone kind \"%s\"" % kind)
 		return null
-	var zone := Zone.new(p, _ground_below(at), yaw, owner_id, world.trap_rearms(owner_id, p))
+	var zone := Zone.new(p, _ground_below(at, snap_from), yaw, owner_id,
+			world.trap_rearms(owner_id, p))
+	if size != Vector2.ZERO:
+		zone.width = size.x
+		zone.depth = size.y
 	zone.id = _next_id
 	_next_id += 1
 	_active.append(zone)
@@ -91,18 +114,76 @@ func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float) -> Zone:
 			_add_wall_body(zone)
 		_walls_placed += 1
 	for peer_id in world._connected_player_ids():
-		_receive_zone.rpc_id(peer_id, zone.id, kind, zone.position, yaw, zone.ticks_left)
+		_receive_zone.rpc_id(peer_id, zone.id, kind, zone.position, yaw, zone.ticks_left,
+				Vector2(zone.width, zone.depth))
 	if world.is_verbose():
-		print("[server] peer %d places %s #%d" % [owner_id, kind, zone.id])
+		print("[server] peer %d places %s #%d at %s" % [owner_id, kind, zone.id, zone.position])
 	return zone
 
 
 ## Server: a player's attack or ability reached its zone_tick: places its
-## `zone` zone_distance m ahead of the player, facing the same way.
+## `zone`, facing the player's facing. Aimed (AttackParams.zone_aimed with a
+## zone_distance): at the crosshair (aimed_target), at most zone_distance m
+## away. Otherwise zone_distance m straight ahead (Shield Wall, Sheltering
+## Wings, Tripwire; 0 = at the feet).
 func server_place_for_attack(player: Player, attack: AttackParams) -> void:
 	var yaw := player.state.yaw
+	if is_aimed(attack):
+		var target := aimed_target(player, attack)
+		server_spawn(attack.zone, player.peer_id, target[0], yaw, Vector2.ZERO, target[1])
+		_aimed += 1
+		return
 	var ahead := Vector3(-sin(yaw), 0.0, -cos(yaw)) * attack.zone_distance
 	server_spawn(attack.zone, player.peer_id, player.global_position + ahead, yaw)
+
+
+## True if `attack` places its zone at the crosshair.
+static func is_aimed(attack: AttackParams) -> bool:
+	return not attack.zone.is_empty() and attack.zone_aimed and attack.zone_distance > 0.0
+
+
+## Where `player`'s aimed zone lands (before the ground snap) and how far above
+## it the snap starts: [point, snap_from]. Uses World.aim_point (the last
+## simulated input's aim), so the server and the local client's marker agree.
+## Physics step only.
+func aimed_target(player: Player, attack: AttackParams) -> Array:
+	var ray := player.aim_ray()
+	var aim := world.aim_point(player)
+	var hit := not aim.is_equal_approx(ray.point_at(AimRay.tuned().max_distance))
+	var point := Zone.aimed_target(player.global_position, ray, aim, hit, player.last_aim_yaw,
+			attack.zone_distance)
+	# A clamped point sits at the feet's height: snap from higher up so a rising
+	# slope ahead still catches it.
+	var clamped := not hit or point.distance_to(aim) > Zone.AIM_BACKOFF * 2.0
+	return [point, CLAMPED_SNAP_FROM if clamped else SNAP_FROM]
+
+
+## Server: a roll started while a status with this strip `kind` as its
+## roll_zone is up (World._roll_zone): remembered until it ends.
+func server_roll_started(player: Player, kind: String) -> void:
+	if _rolls.has(player.peer_id):
+		server_roll_ended(player)  # back to back: the last one ended where this began
+	var speed := player.state.statuses.dodge_speed_multiplier(player.params.statuses)
+	_rolls[player.peer_id] = [kind, player.roll_start, speed]
+
+
+## Server: Player.roll_ended: lays the strip of a roll that had one along it,
+## from where it started to where the player is now (walls cut a roll short).
+func server_roll_ended(player: Player) -> void:
+	if not _rolls.has(player.peer_id):
+		return
+	var roll: Array = _rolls[player.peer_id]
+	_rolls.erase(player.peer_id)
+	var p := ZoneParams.get_kind(roll[0])
+	var end := player.global_position
+	if roll[0] == "" or p == null:
+		return
+	var strip := Zone.strip_between(roll[1], end)
+	if strip[2] > p.max_length:
+		return  # moved by something other than the roll (respawn)
+	var size := Zone.strip_size(p, strip[2], roll[2])
+	server_spawn(roll[0], player.peer_id, strip[0], strip[1], size)
+	_strips += 1
 
 
 ## Server: every zone one tick (after players, enemies and projectiles).
@@ -176,9 +257,9 @@ func note_projectile_stopped() -> void:
 
 
 func print_summary() -> void:
-	print("SUMMARY zones spawned=%d pulses=%d affected=%d trap_triggers=%d decoys=%d walls=%d projectiles_stopped=%d grown=%d" % [
+	print("SUMMARY zones spawned=%d pulses=%d affected=%d trap_triggers=%d decoys=%d walls=%d projectiles_stopped=%d grown=%d aimed=%d strips=%d" % [
 			_spawned, _pulses, _affected, _trap_triggers, _decoys, _walls_placed,
-			_projectiles_stopped, _grown])
+			_projectiles_stopped, _grown, _aimed, _strips])
 
 
 func _end(zone: Zone) -> void:
@@ -238,7 +319,7 @@ func _add_wall_body(zone: Zone) -> void:
 	body.collision_mask = 0
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(zone.params.wall_width, zone.params.height, zone.params.wall_depth)
+	box.size = Vector3(zone.width, zone.params.height, zone.depth)
 	shape.shape = box
 	body.add_child(shape)
 	add_child(body)
@@ -247,16 +328,53 @@ func _add_wall_body(zone: Zone) -> void:
 	_walls[zone.id] = body
 
 
-## The ground straight below `from` (or `from` if there's none within 50 m).
-func _ground_below(from: Vector3) -> Vector3:
+## The ground straight below `from` (or `from` if there's none within 50 m),
+## searching from `snap_from` m above it.
+func _ground_below(from: Vector3, snap_from := SNAP_FROM) -> Vector3:
 	var space := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP * SNAP_FROM,
+	var query := PhysicsRayQueryParameters3D.create(from + Vector3.UP * snap_from,
 			from + Vector3.DOWN * 50.0, 1)
 	var hit := space.intersect_ray(query)
 	return hit["position"] if not hit.is_empty() else from
 
 
 # --- Client ---
+
+## Client: while the local player's aimed zone ability is in its windup (before
+## its zone_time), a faint outline of the zone's size where it will land, from
+## the same aim math as the server (aimed_target); it follows the crosshair. Only
+## a preview: the server places the real one with its own aim.
+func _update_marker() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var player: Player = null
+	for p: Player in players.get_children():
+		if p.is_local:
+			player = p
+	var attack: AttackParams = null
+	if player and not player.state.dead:
+		var current := player.state.current_attack(player.params)
+		if current and is_aimed(current) and player.state.attack_tick < current.zone_tick:
+			attack = current
+	if attack == null:
+		if _marker:
+			_marker.visible = false
+		return
+	var params := ZoneParams.get_kind(attack.zone)
+	if params == null:
+		return
+	if _marker == null or _marker_kind != attack.zone:
+		if _marker:
+			_marker.queue_free()
+		_marker = ZoneVisual.new()
+		_marker.setup_marker(params)
+		add_child(_marker)
+		_marker_kind = attack.zone
+	var target := aimed_target(player, attack)
+	_marker.global_position = _ground_below(target[0], target[1])
+	_marker.rotation.y = player.state.yaw
+	_marker.visible = true
+
 
 ## Client: as soon as there's a camera, shows one fully transparent copy of
 ## every zone look (one per `visual`) and of the beam look just in front of it for PREWARM_FRAMES
@@ -298,17 +416,24 @@ func _prewarm_step() -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func _receive_zone(id: int, kind: String, position_: Vector3, yaw: float, ticks_left: int) -> void:
+func _receive_zone(id: int, kind: String, position_: Vector3, yaw: float, ticks_left: int,
+		size: Vector2) -> void:
 	var p := ZoneParams.get_kind(kind)
 	if p == null or _shown.has(id):
 		return
 	var zone := Zone.new(p, position_, yaw, 0)
 	zone.ticks_left = ticks_left
+	zone.width = size.x
+	zone.depth = size.y
 	var visual := ZoneVisual.new()
-	visual.setup(p, yaw)
+	visual.setup(p, yaw, size)
 	add_child(visual)
 	visual.global_position = position_
 	_shown[id] = [zone, visual]
+	if world.is_verbose():
+		# The --screenshot-dir frame number, to find the zone in the frames.
+		print("[client] zone %s at %s size %s (frame %d)" % [kind, position_, size,
+				Time.get_ticks_msec() / 250])
 
 
 @rpc("authority", "call_remote", "reliable")

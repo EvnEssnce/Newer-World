@@ -398,6 +398,7 @@ func _client_ready(class_id: String) -> void:
 	player.projectile_released.connect(_knife_flurry)
 	player.dodged.connect(_parting_shot)
 	player.dodged.connect(_roll_zone)
+	player.roll_ended.connect(zones.server_roll_ended)
 	player.zone_placed.connect(func(p: Player) -> void:
 		zones.server_place_for_attack(p, p.state.current_attack(p.params)))
 	player.equip_finished.connect(loot.finish_equip)
@@ -1606,14 +1607,20 @@ func on_decoy_ended(zone: Zone) -> void:
 			_give_status(owner.peer_id, player, status, 1, -1)
 
 
-## Fire Trail: a roll while the player has a status with roll_zone places that
-## zone where the roll starts and uses up one stack.
+## Fire Trail: a roll while the player has a status with roll_zone uses up one
+## stack and places that zone: a strip kind (ZoneParams.strip) along the roll
+## once it ends (ZoneSystem.server_roll_started / server_roll_ended), any other
+## where the roll starts.
 func _roll_zone(player: Player) -> void:
 	var defs := player.params.statuses
 	for e in player.state.statuses.entries:
 		var def := defs.get_def(e.status)
 		if def and not def.roll_zone.is_empty():
-			zones.server_spawn(def.roll_zone, player.peer_id, player.global_position, player.state.yaw)
+			var kind := ZoneParams.get_kind(def.roll_zone)
+			if kind and kind.strip:
+				zones.server_roll_started(player, def.roll_zone)
+			else:
+				zones.server_spawn(def.roll_zone, player.peer_id, player.global_position, player.state.yaw)
 			player.state.use_status_stack(e.status)
 			return
 
