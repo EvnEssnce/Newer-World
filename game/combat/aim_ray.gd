@@ -39,6 +39,12 @@ class Params:
 	## Meters an aim point must lie ahead of a release point (along the aim) for
 	## a throw to head at it; closer, it flies along the aim ray instead.
 	var min_ahead := 1.0
+	## Fraction of a melee hitbox's range (from the attacker) where its centre
+	## line crosses the crosshair's line (attack_facing).
+	var melee_reach_fraction := 0.75
+	## Meters: the crossing is never closer than this (a short reach would turn
+	## the facing far to the side).
+	var melee_min_reach := 1.5
 
 
 static var _tuned: Params
@@ -53,6 +59,8 @@ static func tuned() -> Params:
 		_tuned.distance = Tuning.get_value("camera", "camera", "distance")
 		_tuned.max_distance = Tuning.get_value("camera", "aim", "max_distance")
 		_tuned.min_ahead = Tuning.get_value("camera", "aim", "min_ahead")
+		_tuned.melee_reach_fraction = Tuning.get_value("camera", "aim", "melee_reach_fraction")
+		_tuned.melee_min_reach = Tuning.get_value("camera", "aim", "melee_min_reach")
 	return _tuned
 
 
@@ -79,6 +87,27 @@ static func create(feet: Vector3, yaw: float, pitch: float, params: Params) -> A
 ## The point `meters` along the ray from its origin.
 func point_at(meters: float) -> Vector3:
 	return origin + direction * meters
+
+
+## The yaw from the player toward the point on the crosshair's line `reach` m
+## ahead (along aim_yaw). Seen from above, the line runs parallel to aim_yaw,
+## shoulder_offset m to its right, at any pitch (the camera pitches about the
+## shoulder), so that point is shoulder_offset right of the aim at that
+## distance. reach is at least melee_min_reach; reach <= 0 = aim_yaw. Pure math
+## (no ray cast), so the predicted sim uses it and stays deterministic.
+static func facing_at_reach(aim_yaw: float, reach: float, params: Params) -> float:
+	if reach <= 0.0 or params.shoulder_offset == 0.0:
+		return aim_yaw
+	return aim_yaw - atan2(params.shoulder_offset, maxf(reach, params.melee_min_reach))
+
+
+## The yaw `attack` faces (PlayerState: at its start, then turning toward it):
+## its hitbox (or dash) heads for the crosshair's line at its reach
+## (AttackParams.aim_reach), so what's under the crosshair is what it hits.
+static func attack_facing(aim_yaw: float, attack: AttackParams, params: Params) -> float:
+	if attack == null:
+		return aim_yaw
+	return facing_at_reach(aim_yaw, attack.aim_reach(params.melee_reach_fraction), params)
 
 
 ## The unit direction a throw released at `from` takes to reach `aim_point`:

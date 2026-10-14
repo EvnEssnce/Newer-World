@@ -74,6 +74,104 @@ func test_looking_down_reaches_the_ground_ahead() -> void:
 	assert_true(ray.camera.y > ray.origin.y, "the camera sits above, looking down")
 
 
+# --- Melee facing (the crosshair's line at an attack's reach) ---
+
+## The horizontal unit direction a yaw faces.
+func _flat_forward(yaw: float) -> Vector2:
+	return Vector2(-sin(yaw), -cos(yaw))
+
+
+func test_facing_points_at_the_crosshair_line_at_the_reach() -> void:
+	params.shoulder_offset = 0.7
+	params.melee_min_reach = 1.5
+	var feet := Vector3(3.0, 1.0, -2.0)
+	for aim_yaw: float in [0.0, 1.0, -2.5]:
+		for pitch_deg: float in [-40.0, 0.0, 25.0]:
+			var ray := AimRay.create(feet, aim_yaw, deg_to_rad(pitch_deg), params)
+			var facing := AimRay.facing_at_reach(aim_yaw, 3.0, params)
+			# The ray's point 3 m ahead of the feet along the aim yaw (horizontally).
+			var fwd := _flat_forward(aim_yaw)
+			var start := Vector2(ray.origin.x - feet.x, ray.origin.z - feet.z).dot(fwd)
+			var along := Vector2(ray.direction.x, ray.direction.z).dot(fwd)
+			var point := ray.point_at((3.0 - start) / along)
+			var to := Vector2(point.x - feet.x, point.z - feet.z).normalized()
+			assert_true(to.distance_to(_flat_forward(facing)) < 0.0001,
+					"yaw %s pitch %s: faces the crosshair's line 3 m ahead" % [aim_yaw, pitch_deg])
+
+
+func test_facing_turns_right_toward_the_shoulder() -> void:
+	params.shoulder_offset = 0.7
+	params.melee_min_reach = 1.5
+	var facing := AimRay.facing_at_reach(0.0, 3.0, params)
+	assert_almost(facing, -atan2(0.7, 3.0), 0.0001, "about 13 degrees right (negative yaw)")
+	assert_true(AimRay.facing_at_reach(0.0, 6.0, params) > facing, "farther reach, smaller turn")
+
+
+func test_facing_without_offset_or_reach_is_the_aim() -> void:
+	assert_almost(AimRay.facing_at_reach(0.8, 3.0, params), 0.8, 0.0001, "no shoulder offset")
+	params.shoulder_offset = 0.7
+	assert_almost(AimRay.facing_at_reach(0.8, 0.0, params), 0.8, 0.0001, "no reach (all-round)")
+
+
+func test_short_reach_is_clamped_to_the_minimum() -> void:
+	params.shoulder_offset = 0.7
+	params.melee_min_reach = 1.5
+	assert_almost(AimRay.facing_at_reach(0.0, 0.4, params), -atan2(0.7, 1.5), 0.0001,
+			"never turns more than at melee_min_reach")
+
+
+func _box(attack_range: float, width: float) -> AttackParams:
+	var a := AttackParams.new()
+	a.shape = AttackParams.SHAPE_BOX
+	a.hitbox_range = attack_range
+	a.hitbox_width = width
+	a.hitbox_height = 2.0
+	return a
+
+
+func test_attack_facing_hits_what_is_under_the_crosshair() -> void:
+	params.shoulder_offset = 0.7
+	params.melee_reach_fraction = 0.75
+	params.melee_min_reach = 1.5
+	var a := _box(3.0, 0.4)
+	var aim_yaw := 0.6
+	# A target standing on the crosshair's line 2.25 m ahead.
+	var ray := AimRay.create(Vector3.ZERO, aim_yaw, 0.0, params)
+	var target := ray.point_at(2.25)  # level aim: 2.25 m ahead, 0.7 m right
+	target.y = 0.0
+	assert_false(MeleeHitbox.hits(Vector3.ZERO, aim_yaw, a, target, 0.4, 1.8),
+			"facing the aim yaw, the narrow box passes left of it")
+	var facing := AimRay.attack_facing(aim_yaw, a, params)
+	assert_true(MeleeHitbox.hits(Vector3.ZERO, facing, a, target, 0.4, 1.8),
+			"facing the crosshair's line, it hits")
+
+
+func test_attack_reach_by_shape() -> void:
+	var box := _box(2.0, 1.0)
+	assert_almost(box.aim_reach(0.75), 1.5, 0.0001, "a box: that fraction of its range")
+	var radial := _box(3.0, 0.0)
+	radial.shape = AttackParams.SHAPE_RADIAL
+	assert_almost(radial.aim_reach(0.75), 0.0, 0.0001, "all round: faces the aim")
+	radial.hitbox_arc = deg_to_rad(90.0)
+	assert_almost(radial.aim_reach(0.75), 2.25, 0.0001, "a cone in front counts")
+	var none := _box(0.0, 0.0)
+	none.shape = AttackParams.SHAPE_NONE
+	assert_almost(none.aim_reach(0.75), 0.0, 0.0001, "no hitbox (a throw): faces the aim")
+
+
+func test_a_forward_dash_adds_its_distance() -> void:
+	var a := AbilityParams.new()
+	a.shape = AttackParams.SHAPE_RADIAL
+	a.hitbox_range = 2.3
+	a.dash_length = 6.0
+	assert_almost(a.aim_reach(0.75), 6.0, 0.0001, "lands on the crosshair's line")
+	a.dash_from_input = true
+	assert_almost(a.aim_reach(0.75), 0.0, 0.0001, "an input dash goes its own way")
+	a.dash_from_input = false
+	a.dash_backward = true
+	assert_almost(a.aim_reach(0.75), 0.0, 0.0001, "a backward dash doesn't count")
+
+
 # --- Launch direction ---
 
 func test_launch_heads_at_the_aim_point() -> void:

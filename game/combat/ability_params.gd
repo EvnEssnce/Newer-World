@@ -31,6 +31,9 @@ var dash_input_forward := false
 ## short of walls (PlayerMovement.teleport). 0 = none.
 var teleport_distance := 0.0
 var teleport_tick := 0
+## Meters the dash or teleport covers (dash_distance; 0 = none). Only aim_reach
+## reads it: the sim uses dash_speed / teleport_distance.
+var dash_length := 0.0
 ## The dash is aimed by the camera's pitch (Crashing Leap): at or below
 ## aim_full_pitch it goes the full distance, at or above aim_zero_pitch 0 m
 ## (straight up), scaled linearly in between. Radians, up = positive.
@@ -89,6 +92,16 @@ func teleports_at(tick: int) -> bool:
 	return teleport_distance > 0.0 and tick == teleport_tick
 
 
+## AttackParams.aim_reach, plus a dash or teleport that goes along the facing
+## (not backward or the input's way): it heads for the crosshair's line where
+## it lands (Pole Vault, Shield Charge).
+func aim_reach(fraction: float) -> float:
+	var reach := super.aim_reach(fraction)
+	if dash_backward or dash_from_input:
+		return reach
+	return reach + dash_length
+
+
 ## It moves its user: a dash or a teleport.
 func moves_user() -> bool:
 	return dash_speed > 0.0 or teleport_distance > 0.0
@@ -138,6 +151,7 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 	a.cooldown_ticks = roundi(Tuning.get_value(file, section, "cooldown") * tps)
 	a.turn_speed = deg_to_rad(Tuning.get_value(file, section, "turn_speed"))
 	var dash_distance: float = Tuning.get_optional(file, section, "dash_distance", 0.0)
+	a.dash_length = dash_distance
 	if dash_distance > 0.0:
 		a.dash_start_tick = roundi(Tuning.get_value(file, section, "dash_start") * tps)
 		if Tuning.get_optional(file, section, "teleport", false):

@@ -157,6 +157,15 @@ func total_ticks() -> int:
 	return recovery_start_tick() + recovery_ticks
 
 
+## Meters ahead where this attack's facing crosses the crosshair's line
+## (AimRay.attack_facing): `fraction` of a box or cone hitbox's range; 0 (face
+## the aim yaw) for an all-round hitbox or none. AbilityParams adds its dash.
+func aim_reach(fraction: float) -> float:
+	if shape == SHAPE_BOX or (shape == SHAPE_RADIAL and hitbox_arc > 0.0):
+		return hitbox_range * fraction
+	return 0.0
+
+
 ## The hit window (0-based) that tick falls in, or -1 outside them all.
 func window_at(tick: int) -> int:
 	var since := tick - windup_ticks
