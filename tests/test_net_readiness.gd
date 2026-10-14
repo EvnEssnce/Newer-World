@@ -1,5 +1,5 @@
 extends TestCase
-## Internet readiness (Step G item 19): PositionHistory (lag compensation's
+## Internet readiness (session 43): PositionHistory (lag compensation's
 ## record of where bodies stood), CorrectionSmoothing (the local player's drawn
 ## offset after a correction) and the server's tuning reaching clients
 ## (Tuning.pack / apply_packed).

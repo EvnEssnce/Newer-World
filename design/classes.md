@@ -1,8 +1,10 @@
 # Classes, Weapons, Abilities and Upgrade Trees
 
-Design draft. Nothing here is built yet. Ability names are placeholders that are original
-to this project. Numbers like "3 slots" and "20 levels" are starting points; once built,
-the real values go in `data/*.cfg`.
+The design for all six classes (written 2026-10-07; everything in it was built in
+sessions 12–37, except progression: every tree has all its points today). Ability names
+are original to this project. Numbers here are the design's starting points; the real
+values are in `data/*.cfg`. The last part, "Implementation notes", says how each class
+was actually built, including where it differs from the design.
 
 ## How the pieces fit
 
@@ -67,15 +69,14 @@ free and can be done at any time**, so trying out builds costs nothing.
 | Paladin | Melee | Tank / Healer | Dual Shortstaffs, Great Staff* | Defensive wings, cleansing |
 
 \* The Mage and Paladin both list a Great Staff, but one is a ranged caster and the other
-is a melee tank, so they play like two different weapons. This draft calls the Paladin's
-the **Longstaff** (a melee quarterstaff) to keep them apart. See the open questions.
+is a melee tank, so the Paladin's is the **Longstaff** (a melee quarterstaff).
 
 ### Ability tags
 
 Each ability below is tagged with the engine systems it needs. That shows what has to be
 built before the ability can exist:
 
-- `PROJ`: projectiles (none exist yet; every ranged weapon needs them). Most projectiles
+- `PROJ`: projectiles (every ranged weapon). Most projectiles
   (arrows, bolts, knives, Firebolts) are **feather-shaped**: that's the game's visual
   signature.
 - `STATUS`: buffs and debuffs with durations (bleed, burn, slow, root, stun, silence, damage reduction)
@@ -84,16 +85,15 @@ built before the ability can exist:
 - `AREA`: a ground effect that lasts after the cast
 - `ALLY`: targets or affects teammates (heals, shields, cleanse). Needs parties.
 - `SUMMON`: spawns an entity (decoy, trap, barrier)
-- `STEALTH`: hides the player. The server must stop sending their position, otherwise
-  players could read it from snapshots.
+- `STEALTH`: hides the player. Built as visual only (drawn faint, no nameplate); the
+  position is still in snapshots, so a modified client could read it.
 
 ---
 
 ## Fighter
 
 Melee, Tank / DPS hybrid. A flexible front-liner: the Broadsword leans defensive, the Dual
-Axes lean all-in, and the Spear sits in between with reach. The current sword is a
-Broadsword prototype.
+Axes lean all-in, and the Spear sits in between with reach.
 
 ### Broadsword (one-hand + shield)
 Balanced, can block, reliable. The baseline weapon everything else is measured against.
@@ -458,56 +458,338 @@ Reach and sweeps. Protects an area.
 
 ---
 
-## Build order
+## Implementation notes (as built)
 
-Every class depends on systems that don't exist yet. The work is split into waves. Tasks
-within a wave run in parallel on separate branches. A wave starts only once the one
-before it has been merged and tested.
+How each class beyond the Fighter was built: data files, the `World` helper blocks,
+server-side rules, counters and models. Read the class's section before changing its
+weapons or Wings. The shared systems (combat model, statuses, Ember, zones,
+projectiles) and the Fighter's mechanics are in `CLAUDE.md`. Where a design above and
+these notes disagree, these notes describe the code.
 
-**Wave 1** (milestone 4: second weapon and weapon swap)
-- **1A. Ability framework + weapon swap + the Fighter class.**
-  - Ability slots, with cooldowns in ticks inside `PlayerState`.
-  - One `data/weapon_<name>.cfg` per weapon.
-  - Mastery tree logic, with free respecs.
-  - Built with **Broadsword** (today's sword) and **Dual Axes**, using only abilities
-    that need nothing new, or only `DASH`.
-- **1B. Parties + ally rules** (`ALLY` foundation).
-  - Invite, accept and leave, decided by the server.
-  - Party members can't damage each other.
-  - Party health frames on the HUD.
-  - Doesn't touch `PlayerState`.
+### Juggernaut (Halberd, Greataxe, War Hammer)
 
-**Wave 2** (each one also adds the Fighter abilities that need it)
-- **2A. Status effects** (`STATUS`). Durations in ticks. Effects that change movement or
-  actions (slow, root, stun) live in `PlayerState`. Effects that only change damage
-  (bleed, Exposed) can stay on the server.
-- **2B. Forced movement** (`FORCE`): knockback and pull. These are server events, like
-  stagger, so they don't count as corrections.
-- **2C. Projectiles** (`PROJ`). Simulated on the server, drawn on clients, feather-shaped.
-- **2D. Ember, Wing slots and Rebirth.** Rebirth plugs into the existing death and
-  respawn flow.
+`data/class_juggernaut.cfg` (`--class=juggernaut`, `-Class juggernaut` for the run and
+smoke scripts). Heavier and slower than the Fighter's weapons (turn_speed 540, longer
+windups/recoveries, bigger numbers). Placeholder models are built in code in
+`player.gd` (`_build_halberd_greataxe`, poses in `_halberd_pose` / `_greataxe_pose`).
+Every new mechanic is server-only (no new `to_array()` fields); the `World` helpers sit
+in one block, "Juggernaut: Halberd and Greataxe mechanics", and the bot needs nothing
+special (it slots self-buffs, statuses and Hurl like any weapon).
 
-**Wave 3**
-- The Spear and the rest of the Fighter's Wing abilities.
-- Enemy threat (needed for taunt).
-- The Juggernaut.
+- **War Hammer** (Juggernaut, `data/weapon_war_hammer.cfg`, model "war_hammer"): slow
+  and heavy (light 95 dmg 0.2 s stagger; heavy 240 dmg 0.7 s stagger, 0.75 s windup,
+  `breaks_block=false`; turn speed 420°/s). Abilities: Seismic Slam (90° cone 4 m,
+  stagger 0.8 s, knockback 2 m), Clout (one target, Stun 1.5 s), Shatter (Shattered),
+  Upheaval (3 m radial launch 1.5 m), Shockwave (projectile "shockwave": a low, flat,
+  piercing wave, 14 m/s, ~10 m, stagger 0.6 s, a guard doesn't stop it), Steadfast
+  (self). Tree `mastery_war_hammer.cfg`: Earthshaker (Slam, Upheaval, Shockwave) and
+  Breaker (Clout, Shatter, Steadfast); default slots Slam, Clout, Upheaval. Capstones
+  (server, `World._with_hammer_capstones`, every live heavy tick): **Earthshaker**
+  (`heavy_shockwave`: `Player.heavy_counter` (`HeavyCounter`, by `attack_serial`) starts
+  a `ShockRing` around the user every `amount`-th heavy (`World._spawn_shock_ring`,
+  `ring_*` keys in `[ability_aftershock]`: 12 m/s to 6 m, 1 m band, feet ≤ 0.8 m up;
+  `_step_shock_rings` after projectiles; each target once via `resolve_strike` /
+  `strike_enemy` from the ring centre; clients `_receive_shock_ring`) and **Breaker**
+  (`heavy_breaks_block`: the heavy's hits use `AttackParams.copy()` with
+  `breaks_block=true`, made after `damage_multiplier`, which tells heavies apart by
+  identity). Counted on the `SUMMARY juggernaut` line (aftershocks, wall_stuns,
+  roar_guards; not checked).
+- **Halberd** (`weapon_halberd.cfg`, tree `mastery_halberd.cfg`: Warden / Headsman).
+  Light = reaching sweep (3 m × 2 m), heavy = overhead chop (3.4 m). Hooking Pull (5.5 m
+  line, `max_targets` 1, pull 4.5 m, marks **Hooked**), Wide Reap (3.6 × 6 m sweep),
+  Pole Vault (6 m dash + 1.6 m cosmetic leap, 2.3 m radial landing, knockback 2.5 m),
+  Brace (self-buff **Braced**), Cleaving Arc (overhead chop, Exposed), Crowd Sweep
+  (3 × 4.5 m box, push 4 m). Defaults: all six learned, Q/E/R = Hooking Pull, Wide Reap,
+  Crowd Sweep.
+- **Greataxe** (`weapon_greataxe.cfg`, tree `mastery_greataxe.cfg`: Maelstrom /
+  Bloodied). Light = wide diagonal cleave (2.2 × 2.8 m), heavy = big chop. Vortex (3
+  radial windows of 3.5 m, each pulling in; the body spins like Whirlwind Edge),
+  Charging Chop (6 m dash, chop at the end), Grounding Blow (3.2 m slam, Slow 3 s),
+  Executioner's Swing (attack-level execute: +150% at 0 health from 30%), Iron Hide
+  (self-buff), Hurl (`[projectile_greataxe]`, ~15 m, stops at the first target, Slow
+  5 s; the model leaves the hands in flight via `set_axe_thrown`). **Choice:** no
+  pickup: "slowed until you pick the axe up" is a fixed 5 s slow. Defaults: all six
+  learned, Q/E/R = Vortex, Charging Chop, Grounding Blow.
+- **Brace** (`charge_stagger` 1 s, `charge_window` 1 s on `status_braced`): a melee hit
+  (`_strike_player`, not projectiles) that lands on a Braced player (damaged, blocked or
+  guard broken) staggers the attacker if it's a **charge**: the attacking player was
+  mid-dash (`PlayerState.is_dashing`), or the hit landed within the first second of
+  Braced (`StatusEffects.charge_stagger_ticks`, using the entry's `elapsed`). Enemies
+  get `brain.stagger`; immunities apply. `World._brace_counter`.
+- **Iron Hide** (`status_iron_hide`: `crowd_damage_taken` −0.08 per hostile within
+  `crowd_radius` 5 m, at most `crowd_max` 5 → −40%, 6 s): `World._crowd_multiplier`
+  counts living enemies and non-allied players around the target and multiplies the
+  damage taken in `resolve_strike`, `_covered_hit` and damage over time
+  (`StatusEffects.crowd_damage_taken_multiplier`).
+- **Hyper armor** (Greataxe/War Hammer heavies and big abilities: Vortex, Charging Chop,
+  Executioner's Swing, Seismic Slam, Clout, Upheaval, Shockwave): keys `armor_start` /
+  `armor_end` (s; -1 = through the last hit window) → `PlayerState.has_hyper_armor` from
+  the timeline (predicted, nothing synced). Refuses hit and guard-break staggers
+  (`apply_stagger(..., through_armor)`) and forced movement (`is_force_immune`); stuns,
+  roots and damage still land; the Halberd's Brace counter pierces it. Server:
+  `World._hyper_armor_holds` → wire-only `HIT_UNSHAKEN` (10, "Unshaken -N"),
+  `armor_absorbed=` on `SUMMARY juggernaut`. A bronze sheen while armored. Greataxe and
+  War Hammer lights/heavies are ~25% slower (heavy windup 0.75 s, recovery 0.88 s).
+- **Crits** (`[crit] damage_multiplier` 1.5 in combat.cfg, `PlayerParams.
+  crit_damage_multiplier`): the Headsman capstone **Headsman's Verdict**
+  (`effect="crit_staggered"`, `applies_to="heavy"`): a covered attack on a target that
+  was staggered *before* the hit crits (`Player.crit_multiplier` →
+  `MasteryTree.crit_multiplier`; `World._crit_multiplier` in `resolve_strike` /
+  `strike_enemy`). Clients get `HIT_CRITICAL` (8) instead of `HIT_DAMAGED` (only on the
+  wire; server results stay `HIT_DAMAGED`) and show "Critical! -N". Gear crit chance
+  can reuse the multiplier.
+- **Caught on the Hook** (Warden capstone, `effect="hook_stagger"`, `applies_to="hooked"`,
+  `amount` 0.8 s): Hooking Pull applies **Hooked** only if the hooker has this capstone
+  (`CharacterBuild.applies_mark` via `World._mark_learned`) (2.5 s debuff, no effect of its
+  own; `Entry.source` = the hooker). With the node (Halberd out), the hooker's next
+  damaging hit on that target staggers ≥ 0.8 s and removes the mark
+  (`World._with_hook_stagger`; players via `PlayerState.remove_status`, a server event).
+- **Maelstrom** (`effect="ability_range"`, `applies_to="vortex"`, `amount` 2): the
+  server tests the ability's hitbox with `range` × amount (`AttackParams.range_copy`,
+  `World._with_range_upgrade` in `_on_attack_stepped`), so Vortex hits and pulls from
+  7 m. F3 still draws the base 3.5 m.
+- **Red Tide** (Bloodied capstone, `effect="ramp_on_hit"`, `applies_to="bloodied"`): each
+  step a melee attack/ability connects (`_on_player_attack_connected`) gives the attacker
+  a stack of **Bloodied** (+3% damage dealt per stack, max 8, 2.5 s, refreshed per hit).
+  Projectile hits don't add stacks.
+- Counters: `SUMMARY juggernaut crits= hook_staggers= brace_staggers= bloodied_stacks=`
+  (server, no smoke check).
 
-**Later**
-- Ground effects, summons and traps (`AREA`, `SUMMON`).
-- Stealth.
-- Updraft hover.
+### Assassin (Dual Talons, Throwing Knives)
 
-Class order after the Fighter: Juggernaut (melee only, mostly `FORCE`) → Assassin (Talons
-first) → Ranger → Mage → Paladin.
+`data/class_assassin.cfg` (`--class=assassin`, `-Class assassin`). Placeholder models
+built in code in `player.gd` (`_build_assassin_models`: a three-blade claw on each fist,
+or a knife in each hand), swung with the Dual Axes' poses (`_axe_pitches`). Every new
+mechanic is server-only (no new `to_array()` fields); the `World` helpers sit in two
+blocks, "Assassin: Dual Talons mechanics" and "Assassin: Throwing Knives mechanics".
+Counters: `SUMMARY assassin backstabs= primed_crits= feint_reads= marked_hits=
+flurry_fans= heal_cuts=` (no smoke check; `backstabs` counts every class's hits from
+behind, bonus or not).
 
-## Decisions (2026-10-07)
+- **Dual Talons** (`weapon_dual_talons.cfg`, tree `mastery_dual_talons.cfg`: Predator /
+  Tempest). The fastest light (38 dmg, 0.28 s), heavy 120. Pounce (5 m dash + 1 m
+  cosmetic hop, hit at the landing), Rending Talons (bleed ×2), Eviscerate
+  (attack-level execute: +100% at 0 health from 35%), Talon Spin (3 radial windows,
+  2.4 m; spins the body), Feint (a weak poke with `read_status`, below), Hook Talon
+  (3.5 m line, `max_targets` 1, pull 2 m). Defaults: all six learned, Q/E/R = Pounce,
+  Rending Talons, Feint. The heavy has a 0 m knockback the smoke test turns on.
+- **Backstabs** (`[backstab]` in combat.cfg, `World._is_backstab`): a player's hit
+  from within `rear_arc` (180°) behind the target's facing (players: `state.yaw`,
+  enemies: `brain.yaw`; a projectile's attacker position is back along its path), or
+  on an enemy whose `brain.target_id` isn't the attacker (idle, or fighting someone
+  else; `unaware_enemies`). Tree effects: `backstab_damage` (+amount on backstabs,
+  `MasteryTree.backstab_multiplier` → `World._backstab_scale`, in `resolve_strike` /
+  `strike_enemy`) and the Predator capstone **Unseen Strike** (`crit_backstab`:
+  backstabs crit, `MasteryTree.crit_multiplier`'s `backstab` argument). **Choice:** the
+  design's "hits from behind ignore block" was already true (the block arc is 120° in
+  front), so the capstone crits backstabs instead.
+- **Feint** (`read_status="primed"`, `AttackParams.read_status`): in `_hit_targets`, a
+  player result `HIT_BLOCKED` / `HIT_GUARD_BROKEN` / `HIT_EVADED`, or an enemy in
+  `EnemyBrain.Mode.ATTACK` when it lands, gives the attacker **Primed** once per step
+  (`World._feint_read`). Primed (`next_hit_crits`): `World._crit_multiplier` crits the
+  next hit that the tree doesn't already crit and removes it (`remove_status`, a
+  server event). **Choice:** enemies never block or dodge, so "mid-swing" is their read.
+- **Talon Storm** (Tempest capstone, `ramp_on_hit` with `applies_to="talon_storm"`):
+  the Greataxe's Red Tide path with a *sim* status: each connecting step adds a stack
+  of +4% attack speed (max 8, 1.5 s). Stacking attack speed: each stack adds
+  `attack_speed - 1`, capped at `StatusEffects.MAX_ATTACK_SPEED` (2). Applied by the
+  server, so it's a server event (no counted corrections). Counted in
+  `bloodied_stacks=` on the juggernaut line.
+- **Throwing Knives** (`weapon_throwing_knives.cfg`, tree `mastery_throwing_knives.cfg`:
+  Venom / Flurry). Every attack throws `[projectile_knife]` (feather, 30 m/s, ~15 m,
+  stops at the first target or a guard): light 1 knife (32), heavy 3 fanned 16° (42
+  each). Fan of Knives (5 over 50°), Pinning Knife (Slow 3 s), Marked Blade (Marked),
+  Venom Coat (self: next 5 hits poison, like Bloodlust). Defaults: all four learned,
+  Q/E/R = Fan of Knives, Pinning Knife, Venom Coat. Ricochet (`[projectile_knife_ricochet]`,
+  2 bounces within 7 m) and Recall (rips out embedded knives, see "Projectiles" in `CLAUDE.md`) are
+  Flurry tier 2. **Magazine** (`[weapon] ammo` 6, `reload_time` 1.5 s when empty,
+  `refill_delay` 2 s without throwing; per attack `ammo_cost`: light 1, heavy 3): a throw
+  without ammo can't start (buffered); synced `to_array()` 36; HUD pips left of Q.
+- **Marked** (`marked_bonus` 0.5, `StatusEffects.mark_from(defs, source)`): the
+  marker's next *melee* hit (an attack without `projectile`) on the target deals +50%
+  and removes the mark (`World._marked_scale`, players via `remove_status`).
+- **Venom capstone Festering Wounds** (`heal_cut`, `applies_to="poison"`, 0.5): healing
+  on a player carrying your poison is cut by half, whichever of your weapons is out
+  (`World._heal_cut` in `_heal_player`).
+- **Flurry capstone Endless Flurry** (`knife_flurry`, amount 5, `applies_to=
+  "fan_of_knives"`): `World._knife_flurry` on `projectile_released` counts light/heavy
+  throws (`Player.throw_counter`, a `HeavyCounter` by `attack_serial`); every 5th also
+  fires Fan of Knives via `ProjectileSystem.server_fire_attack` (no cooldown used).
+- **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
+  Trickster, 12 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
+  and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
+  dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
+  damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s, Trickster
+  tier 3, requires Ember Double: trade
+  places with your decoy; only while it's out). Defaults Z
+  Ashstep, C Plumage Flash. Capstones: **Mirror Image** (`decoy_burst`: the decoy
+  bursts as it ends, 80 damage + Dazzled within 3 m) and **Second Step**
+  (`extra_charge`, applies_to ashstep: see "Charges" under Ranger). Wing Enhancement item: Ashen Vanes.
+  Weapon items: Iron Talons, Iron Knives.
 
-- Class is fixed per character. Classes don't share weapons.
-- Firebolts are a hand-fired weapon. Bolts, arrows, knives and most other projectiles are
-  feather-shaped.
-- Mages use Ember instead of mana.
-- Rebirth is automatic: a 5 s animation, then you're back with 30% health. It needs and
-  spends 50 Ember and has a 5 minute cooldown.
-- No attributes for now. Phoenix/fire-themed ones may come later.
-- PvE is the main focus; PvP is minor.
-- Respecs are free at any time.
+### Ranger (Longbow, Crossbow, Firebolts)
+
+`data/class_ranger.cfg` (`--class=ranger`, `-Class ranger`; default loadout Longbow +
+Firebolts). Every attack fires projectiles (`[projectile_arrow]`, `arrow_piercing`,
+`arrow_rain`, `bolt`, `bolt_scatter`, `firebolt`, `flare`); the damage is the
+projectile's hit. Placeholder models in `player.gd` (`_build_ranger_models`: a bow on
+the left hand and a crossbow carried pointing down and raised level while attacking,
+glowing ember wraps on both hands). World helpers: "Ranger: Longbow, Crossbow and
+Firebolts mechanics". Counters: `SUMMARY ranger ignites= ignited_stacks= loaded_shots=
+piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
+
+- **Longbow** (Marksman / Skirmisher): light quick shot (45), heavy full draw (0.6 s,
+  140). Piercing Shot (pierce 4), Arrow Rain (a zone 12 m ahead: 35 damage every
+  0.5 s for 2.5 s), Snare Arrow (Root 1.5 s),
+  Backstep Shot (3.5 m `dash_direction="back"` + arrow), Hunter's Mark (**Hunted**:
+  `damage_taken_from_source` +15% from the marker, `World._hunted_scale`), Rapid Nock
+  (self attack speed 1.7, 4 s). Capstones: **True Flight** (`heavy_pierce`: heavy arrows
+  pierce 20, `World.release_mods`) and **Running Shot** (`free_draw`, below).
+- **Skirmisher's Running Shot is in the sim**: `CharacterBuild.free_move_mask()` (bit
+  per weapon slot whose tree has `free_draw`) → `PlayerState.set_free_move` (server
+  event) in `apply_to_state`, synced as `free_move_mask` in the packed header;
+  `PlayerMovement` skips the attack's `move_multiplier` while `moves_freely()` (light
+  or heavy with that slot out). The one tree effect that reaches the sim.
+- **Crossbow** (Siege / Trapper): light bolt (70) with a 0.55 s recovery (the reload),
+  heavy bolt (160, breaks blocks). Concussive Bolt (knockback 3 m), Bolt Barrage (4
+  bolts, 8°), Scatter Bolt (6 short bolts, 45°), Quick Reload (self: attack speed 1.5
+  and the next hit slows, `on_hit_status` + `consume_on_hit`). Siege capstone
+  **Loaded Chamber** (`loaded_chamber`: a light/heavy shot ≥ `threshold` 2 s after
+  your previous one deals ×2; `Player.last_release_tick`, `World.release_mods`, which
+  `ProjectileSystem.server_fire_attack` calls once per release to scale
+  `damage_scale` and raise `pierce_left`). Tripwire (a trap at your feet) and Smoke
+  Bolt (a cloud where the bolt stops), Trapper tier 2; the Trapper capstone **Rearm**
+  (`trap_rearm` 1: traps re-arm once).
+- **Firebolts** (Kindling / Flashfire): light firebolt (26, 0.4 s; Overheat's ×1.6 brings it to 0.27 s, +1 **Burn**),
+  heavy 3 bolts (60 each, Burn). Burn: 6 dps per stack, max 6, 4 s. Scatterflame (5
+  bolts, 40°, Burn), **Ignite** (`detonates_status="burn"`, `detonate_damage` 35: on a
+  hit, every Burn stack is removed for +35 base damage each, `World._detonate`, before
+  the damage scales), Flare (**Flared**: `blind` 0.85, 2 s), Overheat (self attack speed
+  1.6, 4 s; no lockout). Capstones: **Inferno** (`status_cap`: Burn you apply stacks to
+  max_stacks × 2, `World._stack_cap` → `StatusEffects.apply(..., max_stacks)`) and
+  **Cinder Return** (`ignite_ember`: 3 Ember per stack Ignite uses). Fire Trail
+  (Kindling tier 2: your next 3 rolls leave burning ground), Seeker Spark (Flashfire
+  tier 2: `[projectile_seeker_spark]`, 14 m/s, turns 220°/s toward the nearest hostile
+  in front within 16 m, Burn ×2).
+- **Ranger Wings** (Windrider / Parting Shot, 12 points): Gust Roll (15 Ember: rolls
+  1.8× as fast for 5 s, so 1.8× as far: `dodge_speed_multiplier`), Tailwind (20:
+  `move_multiplier` 1.3 haste + `dodge_cost_multiplier` 0.5, 6 s; `PlayerState.
+  dodge_cost`), Backdraft (20: 4 m radial knockback 3 m), Updraft (25: a real jump,
+  `launch_height` 3.5 m at `launch_time`, `PlayerMovement._self_launch_speed`, then
+  **Updraft** `max_fall_speed` 0.4 m/s for 2.5 s: a hover, sinking slowly).
+  Defaults Z Gust Roll, C Backdraft. Capstones: **Parting Gift** (`roll_empower`:
+  `Player.dodged` (server) → `World._parting_shot` gives **Parting Shot**, +30%
+  damage dealt consumed by the next hit) and **Second Wind** (`extra_charge`, applies_to
+  roll: see "Charges" under Ranger).
+- **Charges** (sim): a Wing-tree node `extra_charge` (`applies_to` "roll" or a Wing
+  ability id) → `CharacterBuild.charge_mask` → `PlayerState.set_charge_mask` (server
+  event, in `apply_to_state` like `free_draw`), synced with `spare_charges` in the packed
+  header. A spare lets a roll (bit 0) or that Wing ability (bit 1 + pool index) be used
+  again while its cooldown runs (a Wing spare doesn't restart the cooldown); it comes
+  back when the cooldown is 0 (`_refill_charges` in `step`). Items: Ashwood Longbow, Iron Crossbow, Cinder Wraps,
+  Galeborn Plumes.
+
+### Mage (Great Staff, Gauntlet)
+
+`data/class_mage.cfg` (`--class=mage`, `-Class mage`): no mana, so **weapon abilities
+cost Ember** (`ember_cost`, predicted like Wing costs), and `[class] ember_gain` 2.0
+doubles every Ember gain (`World._give_ember`, `ClassDef.ember_gain`). Placeholder
+models in `player.gd` (a staff with an orb, carried like the crossbow; a glowing
+gauntlet). World helpers: "Mage: heals, shields, channels". Counters: `SUMMARY mage
+ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
+
+- **Great Staff** (Conflagration / Focus): light fire bolt (40), heavy charged fireball
+  (120, Burn ×2). Firebrand (5 Ember: Burn ×2), Meteor Fall (30: zone `meteor` 10 m
+  ahead, one 220 blast after 1.2 s), Flame Wall (20: zone `flame_wall`, a 6 m box of fire
+  5 m ahead, not solid: 20 + Burn every 0.5 s), Searing Ray (15: a 10 m beam, 6 windows,
+  `window_ramp` 0.3: window i deals ×(1 + 0.3 i), applied to `damage_scale` in
+  `_on_attack_stepped`), Blink (10: a 7 m teleport the way you move, forward with none, i-frames),
+  Pyroclasm (20: 3.5 m radial, knockback 4 m). Capstones: **Wildfire Spread**
+  (`zone_grow`, applies_to burn: your Burn-applying pulse zones grow 15% per pulse up
+  to 2×, `World.zone_growth` → `Zone.scale`, `_receive_zone_scaled`) and **Clear Mind**
+  (`focus_refund`: an ability started within 3 s of landing a heavy refunds its Ember,
+  `Player.last_heavy_hit_tick`, `World._mage_ability_started`).
+- **Gauntlet** (Lifeweaver / Siphon): light life bolt (35), heavy 8 m drain beam (90,
+  `lifesteal` 0.3). Mending Beam (15: 10 m beam, 6 windows, `ally_heal` 30 per window,
+  `allies_only`), Renewal Pulse (25: zone `renewal_pulse`, 160 to your side in a 3 m
+  circle 6 m ahead), Siphon (10: 8 m beam, 5 windows of 30, `lifesteal` 0.5), Ward (20:
+  `ally_shield` 150 to you and allies in a 10 m beam, `allies_only`), Life Spore (15:
+  zone `life_spore`, an ally trap: heals the first ally to touch it 200), Withering
+  Touch (10: Withered, `healing_taken` −0.5). Capstones: **Overflowing Life**
+  (`overheal_shield`: healing past max becomes Ward, `World._overheal_shield` in
+  `_heal_player`) and **Shared Vitality** (`siphon_share`: lifesteal also heals allies
+  within 8 m).
+- **Heals and shields** (server): `World._ally_support` heals/shields allies the hitbox
+  touches once per window (they're never struck); `_lifesteal` after a damaging hit;
+  **Ward** = the `absorbs` status + `Player.absorb` (the pool, server only):
+  `World._absorb` takes hits from it in `resolve_strike` (after armor and block, not
+  damage over time or zones) and removes the status when it's empty; a fully absorbed
+  hit shows "Absorbed" (`HIT_ABSORBED` 9, wire only). `_heal_player` multiplies by the
+  target's `healing_taken` and the healer's `healing_dealt` statuses.
+- **Mage Wings** (Ascendant / Binder, 12 points): Phoenix Aura (25: +20% damage and
+  healing 6 s), Binding Embers (25: zone `binding_embers`, Root 2 s in a 3.5 m circle 8
+  m ahead), Searing Glare (20: 10 m line, 40 damage, **Silenced** 3 s), Wingfall (20:
+  120° 5 m cone, knockback 4 m). Defaults Z Phoenix Aura, C Binding Embers. Capstones:
+  **Rekindle** (`aura_refund`: Phoenix Aura halves what's left of your weapon ability
+  cooldowns, `PlayerState.reduce_ability_cooldowns`, a server event) and **Hushing
+  Embers** (`bind_silence`: Binding Embers also silences, `World.zone_effect`).
+- **Silence** (`silences`, sim, crowd control): `PlayerState` won't start a weapon or
+  Wing ability while silenced (presses stay buffered). No effect on Husks (no abilities).
+- Items: Emberwood Staff, Lifeweave Gauntlet, Sunfire Pinions.
+
+### Paladin (Dual Shortstaffs, Longstaff)
+
+`data/class_paladin.cfg` (`--class=paladin`, `-Class paladin`). Melee tank/healer; no
+projectiles (the smoke test skips its projectile check for a class whose weapons throw
+nothing). Placeholder models in `player.gd` (a short staff in each hand, or one long
+staff, swung like the axes). World helpers: "Paladin: healing hits, deflection,
+sharing, blessings". Counters: `SUMMARY paladin heal_pulses= cleanses= blessings=
+deflections= reflections= shared_damage= kindled= judgments=` (no checks).
+
+- **Support keys** (attack/ability, server; `World._ally_support` → `_support_one`,
+  and once for the user at the attack's first live step): `self_heal`, `ally_status`
+  (allies only, never the user), `cleanses` (`PlayerState.cleanse`), `grants_rebirth`
+  + `blessing_time` (an extra Rebirth via `grant_rebirth_charge`; `Player.
+  blessing_until_tick`, taken back unused by `remove_rebirth_charge` in the server
+  tick), `revives` (the last hit window raises fallen allies it touches:
+  `World._kindle_life` → `_rebirth`, no Ember or cooldown needed), plus the Mage's
+  `ally_heal`/`ally_shield`/`allies_only`. `heals_lowest_ally` + `heal_radius`: a
+  connecting step heals the lowest-health ally (the user included).
+- **Dual Shortstaffs** (Devotion / Discipline): light 45 (0.34 s), heavy 130 (breaks
+  blocks). Consecrating Strikes (self **Consecrating**: `hit_heal` 15 within 6 m per
+  connecting step, 6 s), Twin Guard (parry 140° + internal `twin_guard_counter`),
+  Uplifting Blow (80 to the lowest ally within 10 m), Spinning Staves (3 radial
+  windows, `deflects`), Rush to Aid (7 m dash, Ward 100 to your side at the end),
+  Rebuke (0.8 s stagger). Capstones: **Radiant Rhythm** (`hit_pulse_heal`: every
+  `count` 4th attack that connects heals 50 within 6 m; `Player.hit_counter`, a
+  `HeavyCounter`; `MasteryNode.count`) and **Guarded Grace** (`parry_heal` 120 to you
+  and your nearest ally, `World._parry_heal` from `_try_parry`).
+- **Longstaff** (Sanctuary / Judgment): light 60 sweep (2.8 m), heavy 160. Sanctified
+  Ground (zone `sanctified_ground`, `affects="both"`: allies healed 12 per 0.5 s,
+  hostiles 10 + Burn; 4 m, 8 s), Sweeping Rebuke (5 m wide, knockback 3.5 m),
+  Guardian's Leap (7 m leap, 60 damage around the landing, Ward 80 to allies there),
+  Staff Spin (5 windows while walking, `deflects`), Smite (Stun 1.2 s), Benediction
+  (200 to you and allies within 8 m, 40 s). Capstones: **Sanctuary**
+  (`zone_ally_status`: allies on your ground get **Sanctified**, −15% damage taken)
+  and **Judgment** (`judgment_mark`: an enemy whose swing reaches an ally on your
+  ground is **Judged**, +20% damage taken 5 s; `World._judgment`,
+  `ZoneSystem.zones_at`).
+- **Deflection** (`deflects`, `World.deflects` from `ProjectileSystem._hit_player`):
+  while such an ability is in its windup or hit windows, a hostile projectile reaching
+  the user stops (0-damage `HIT_BLOCKED`).
+- **Paladin Wings** (Aegis / Purifier, 12 points): Sheltering Wings (20 Ember: zone
+  `sheltering_wings`, a `solid` wall with `blocks_enemies=false`: projectiles stop,
+  people pass, 4 s), Cleansing Flame (15: cleanses you and allies within 8 m),
+  Guardian Wing (20: **Guardian Link** on allies in a 12 m line: `damage_share` 0.3 of
+  each hit's damage goes to you, `World._guardian_share` in `resolve_strike`),
+  Phoenix Blessing (40, 90 s: an extra Rebirth for you and allies within 8 m for 30 s),
+  Kindle Life (30, 60 s: a 2 s channel that raises fallen allies within 3 m). Defaults
+  Z Sheltering Wings, C Cleansing Flame. Passives `cleanse_rebirth` (30 s off each
+  cleansed ally's Rebirth cooldown) and `rebirth_discount` (allies dying within 10 m
+  need 10 less Ember: `World._rebirth_discount` → `start_rebirth(params, discount)`).
+  Capstones: **Mirror Aegis** (`wall_reflect`: a projectile stopped by your Sheltering
+  Wings flies back, now yours: `World.reflect_projectile` →
+  `ProjectileSystem.server_fire_from`) and **Everflame** (`blessing_ember`: Phoenix
+  Blessing refills Ember to ≥ 50).
+- Items: Oakheart Shortstaffs, Dawnwood Longstaff, Halo Pinions.
+
