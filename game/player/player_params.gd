@@ -59,6 +59,10 @@ var block_regen_multiplier := 0.0
 var block_turn_speed := 0.0
 var guard_break_stagger_ticks := 0
 
+## The camera's aim (data/camera.cfg): attacks face the crosshair's line
+## (AimRay.attack_facing). Tests' default has no shoulder offset (faces aim_yaw).
+var aim := AimRay.Params.new()
+
 # Statuses
 ## Every status effect (data/status_effects.cfg). PlayerState.statuses refers
 ## to them by index.
@@ -156,6 +160,7 @@ static func from_tuning() -> PlayerParams:
 	p.block_turn_speed = deg_to_rad(Tuning.get_value("combat", "block", "turn_speed"))
 	p.guard_break_stagger_ticks = roundi(
 			Tuning.get_value("combat", "block", "guard_break_stagger") * tps)
+	p.aim = AimRay.tuned()
 	p.statuses = StatusDefs.current()
 	_load_force_limits(p)
 	_load_wings_and_ember(p, tps)

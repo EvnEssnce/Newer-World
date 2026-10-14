@@ -227,7 +227,8 @@ func _init() -> void:
 
 
 ## Advances one tick. move is the world-space XZ input (length <= 1); aim_yaw is
-## the camera's facing: an attack starts facing it and keeps turning toward it.
+## the camera's facing: an attack starts facing it and keeps turning toward it
+## (toward the crosshair's line at the attack's reach: AimRay.attack_facing).
 ## aim_pitch is the camera's pitch (radians, up = positive), for dashes aimed by
 ## it (AbilityParams.dash_aim_pitch).
 func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: PlayerParams,
@@ -280,7 +281,8 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 		equip_left -= 1
 
 	if attack_tick > 0:
-		yaw = rotate_toward(yaw, aim_yaw, _attack_turn_speed(params) * delta)
+		var facing := AimRay.attack_facing(aim_yaw, attack_params(params), params.aim)
+		yaw = rotate_toward(yaw, facing, _attack_turn_speed(params) * delta)
 	elif blocking:
 		yaw = rotate_toward(yaw, aim_yaw, params.block_turn_speed * delta)
 
@@ -1155,7 +1157,7 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		attack_type = queued_attack
 		attack_tick = 0
 		attack_serial += 1
-		yaw = aim_yaw
+		yaw = AimRay.attack_facing(aim_yaw, attack_params(params), params.aim)
 		queued_attack = ATTACK_NONE
 		_apply_self_status(attack_params(params), params)
 		return
@@ -1172,8 +1174,9 @@ func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: Player
 	ability = index
 	attack_tick = 0
 	attack_serial += 1
-	yaw = aim_yaw
 	var started := attack_params(params) as AbilityParams
+	# Toward the crosshair's line at its reach (the shoulder camera's offset).
+	yaw = AimRay.attack_facing(aim_yaw, started, params.aim)
 	# A backward dash moves away from where the ability faces; an input dash
 	# (Vault) goes the way you're moving, or backward with no input (forward
 	# with dash_input_forward: Blink, Ashstep).

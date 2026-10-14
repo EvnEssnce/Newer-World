@@ -340,8 +340,9 @@ func _ground_below(from: Vector3, snap_from := SNAP_FROM) -> Vector3:
 
 # --- Client ---
 
-## Client: while the local player's aimed zone ability is in its windup (before
-## its zone_time), a faint outline of the zone's size where it will land, from
+## Client: while the local player holds an aimed zone ability's key to aim
+## (World.held_aimed_attack) or the ability is in its windup (before its
+## zone_time), a faint outline of the zone's size where it will land, from
 ## the same aim math as the server (aimed_target); it follows the crosshair. Only
 ## a preview: the server places the real one with its own aim.
 func _update_marker() -> void:
@@ -352,10 +353,16 @@ func _update_marker() -> void:
 		if p.is_local:
 			player = p
 	var attack: AttackParams = null
+	var held_aim := false
 	if player and not player.state.dead:
 		var current := player.state.current_attack(player.params)
 		if current and is_aimed(current) and player.state.attack_tick < current.zone_tick:
 			attack = current
+		else:
+			var held := world.held_aimed_attack()  # its key held to aim (AimHold)
+			if held and is_aimed(held):
+				attack = held
+				held_aim = true
 	if attack == null:
 		if _marker:
 			_marker.visible = false
@@ -372,7 +379,8 @@ func _update_marker() -> void:
 		_marker_kind = attack.zone
 	var target := aimed_target(player, attack)
 	_marker.global_position = _ground_below(target[0], target[1])
-	_marker.rotation.y = player.state.yaw
+	# Not attacking yet while held: the facing it will cast with is the aim's.
+	_marker.rotation.y = player.last_aim_yaw if held_aim else player.state.yaw
 	_marker.visible = true
 
 

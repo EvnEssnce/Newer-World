@@ -51,6 +51,12 @@ const BOT_THROW_MIN := 3.0
 const BOT_THROW_REACH := 0.75
 const ABILITY_BUTTONS := (PlayerState.BUTTON_ABILITY_1 | PlayerState.BUTTON_ABILITY_2
 		| PlayerState.BUTTON_ABILITY_3 | PlayerState.BUTTON_WING_1 | PlayerState.BUTTON_WING_2)
+## Client: each ability/Wing key's input action and button bit (Q E R, Z C).
+const ABILITY_KEYS := [
+	[&"ability_1", PlayerState.BUTTON_ABILITY_1], [&"ability_2", PlayerState.BUTTON_ABILITY_2],
+	[&"ability_3", PlayerState.BUTTON_ABILITY_3], [&"wing_1", PlayerState.BUTTON_WING_1],
+	[&"wing_2", PlayerState.BUTTON_WING_2],
+]
 
 # Server
 var _tick := 0
@@ -209,6 +215,8 @@ var _departed_seen := {}
 ## The click that captures the mouse mustn't also attack: after capturing, the
 ## attack button has to be released once before it counts.
 var _attack_blocked := true
+## Hold to aim: an aimed-zone ability's key casts on release (AimHold).
+var _aim_hold := AimHold.new()
 var _hits_landed := 0
 var _hits_taken := 0
 ## Local time (msec) when the local player respawns, or -1 when alive.
@@ -2411,8 +2419,8 @@ func _client_tick(delta: float) -> void:
 			buttons |= PlayerState.BUTTON_JUMP
 		if Input.is_action_just_pressed(&"dodge"):
 			buttons |= PlayerState.BUTTON_DODGE
-		buttons |= _ability_and_swap_buttons()
 		var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		buttons |= _ability_and_swap_buttons(captured)
 		var attack_held := Input.is_action_pressed(&"attack")
 		if not captured or not attack_held:
 			_attack_blocked = not captured
@@ -2426,18 +2434,49 @@ func _client_tick(delta: float) -> void:
 
 
 ## Keys for this tick: Q / E / R (abilities), Z / C (Wings) and X (weapon
-## swap), sent only on the tick they're pressed.
-func _ability_and_swap_buttons() -> int:
+## swap), sent only on the tick they're pressed; an aimed-zone ability's key on
+## the tick it's released instead (AimHold; right click or a freed mouse
+## cancels it).
+func _ability_and_swap_buttons(captured: bool) -> int:
 	var buttons := 0
 	if Input.is_action_just_pressed(&"swap_weapon"):
 		buttons |= PlayerState.BUTTON_SWAP
+	var pressed := 0
+	var released := 0
+	var aimed := 0
+	for i in ABILITY_KEYS.size():
+		var bit: int = ABILITY_KEYS[i][1]
+		if Input.is_action_just_pressed(ABILITY_KEYS[i][0]):
+			pressed |= bit
+		if Input.is_action_just_released(ABILITY_KEYS[i][0]):
+			released |= bit
+		var attack := _slot_attack(bit)
+		if attack and ZoneSystem.is_aimed(attack):
+			aimed |= bit
+	var cancel := not captured or Input.is_action_just_pressed(&"block")
+	return buttons | _aim_hold.step(pressed, released, aimed, cancel)
+
+
+## The local player's ability (or Wing ability) in the slot of this button
+## bit, or null.
+func _slot_attack(bit: int) -> AttackParams:
+	var state := _local_player.state
+	var params := _local_player.params
 	for slot in PlayerState.ABILITY_SLOTS:
-		if Input.is_action_just_pressed(StringName("ability_%d" % (slot + 1))):
-			buttons |= PlayerState.BUTTON_ABILITY_1 << slot
+		if bit == PlayerState.BUTTON_ABILITY_1 << slot:
+			return state.weapon(params).ability(state.slot_ability(slot))
 	for slot in PlayerState.WING_SLOTS:
-		if Input.is_action_just_pressed(StringName("wing_%d" % (slot + 1))):
-			buttons |= PlayerState.BUTTON_WING_1 << slot
-	return buttons
+		if bit == PlayerState.BUTTON_WING_1 << slot:
+			return state.wings(params).ability(state.wing_slot_ability(slot))
+	return null
+
+
+## Client: the aimed-zone ability whose key the local player holds to aim (its
+## landing marker follows the crosshair: ZoneSystem._update_marker), or null.
+func held_aimed_attack() -> AttackParams:
+	if _local_player == null or _bot or not _aim_hold.is_holding():
+		return null
+	return _slot_attack(_aim_hold.held_bit)
 
 
 ## Bot input for testing without a second person. Repeats every 8 s:
