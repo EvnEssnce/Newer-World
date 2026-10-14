@@ -2569,7 +2569,12 @@ func _bot_input() -> Array:
 		if target:
 			var to := target.global_position - _local_player.global_position
 			var flat := Vector2(to.x, to.z)
-			aim_yaw = PlayerState.yaw_for_direction(flat)
+			# Aim like a player: the crosshair's line (shoulder_offset right of the
+			# camera yaw) through the target, so attack facing (AimRay.attack_facing)
+			# points at it.
+			var aim := _local_player.params.aim
+			aim_yaw = PlayerState.yaw_for_direction(flat) + atan2(aim.shoulder_offset,
+					maxf(flat.length(), aim.melee_min_reach))
 			if flat.length() > BOT_ATTACK_DISTANCE:
 				move = flat.normalized()
 			var first_turn := other_player == null or multiplayer.get_unique_id() < other_player.peer_id

@@ -39,6 +39,7 @@ core/
   launch_args.gd     Command-line flags (after "--").
   net_codec.gd       NetCodec: compact, lossless binary encoding for snapshots. Unit tested.
   input_actions.gd   Key bindings, registered in code.
+  aim_hold.gd        AimHold: aimed-zone abilities cast on key release (hold = marker). Pure.
 game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
   world/world.gd     Server sim loop, snapshots, hit resolution; client input sending,
@@ -91,6 +92,9 @@ game/
   enemy/threat_table.gd      Threat per player, target choice, taunts. Pure logic, unit tested.
   enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
   enemy/damage_meter.gd      Damage/DPS of one fight (the training dummy's readout). Unit tested.
+  enemy/enemy_path.gd        EnemyPath: following a nav path, re-path rules. Pure, unit tested.
+  enemy/enemy_navigation.gd  World/EnemyNav (server): navmesh baked at startup from layer 1,
+                             re-baked in the background when an enemy-blocking wall goes up/down.
   items/item_database.gd     Rarity, item, affix and loot table definitions; validate().
   items/item.gd              One rolled item (plain data, to_dict/from_dict).
   items/loot_roller.gd       Rolls loot tables and items (and a kill: one roll per contributor).
@@ -143,7 +147,7 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
-                     armor, equip time), party, status_effects, projectiles, zones,
+                     armor, equip time), party, status_effects, projectiles, zones, navigation,
                      testing (test-only switches: the in-game class change) (.cfg).
 design/              Design docs. classes.md: classes, weapons, abilities, Ember, build waves.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
@@ -255,11 +259,15 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
   rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
-  charge_mask, spare_charges, Wing cooldowns by pool index without trailing zeros]`
-  (`PACKED_WING_HEADER` = 10; new small ints can go in that header too); 35 =
+  charge_mask, spare_charges, decoy_active, Wing cooldowns by pool index without
+  trailing zeros]`
+  (`PACKED_WING_HEADER` = 11; new small ints can go in that header too); 35 =
   `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects); 36 =
-  ammo, a `PackedInt32Array` `[spent slot0, spent slot1, timer slot0, timer slot1]`
-  (Throwing Knives magazine; zeros in `view_array()`).
+  ammo, a `PackedInt32Array` `[spent slot0, spent slot1, timer slot0, timer slot1,
+  attack_ammo]` (Throwing Knives magazine; `attack_ammo` = knives a partial heavy took;
+  zeros in `view_array()`). `decoy_active` (owner-only) is set by the server while the
+  player's decoy is out (`World.sync_decoy_flag`, a server event): Shadow Swap's
+  `needs_decoy`.
   Append new fields at the end. **Snapshot size** (`SUMMARY net` on the server; the
   smoke test fails a snapshot over 1360 bytes, ENet's 1392-byte MTU less the RPC
   header): own entry ~200–240 bytes, each other player ~145–175, each Husk ~50–60;
@@ -338,7 +346,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (`decoy_burst`). **Stealth** is visual only: a `veils` status draws the owner faint
   (`Player.VEILED_ALPHA`) and hides its nameplate from others; its position is still
   in snapshots.
-- **Walls** (`wall=true`): a server `StaticBody3D` on `ZoneSystem.WALL_LAYER` (16),
+- **Walls** (`wall=true`): a server `StaticBody3D` on `ZoneSystem.WALL_LAYER` (16) and cut
+  out of the enemies' navmesh while it stands (`EnemyNavigation.add_wall`/`remove_wall`),
   which enemies mask (`enemy.tscn` mask 17) and players don't; `ZoneSystem.wall_hit`
   stops projectiles not from the owner's side (`ProjectileSystem._collide`). Client
   projectile copies fly on until the server's end event.
@@ -364,10 +373,12 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 
 - Tap left click = light (fires on release), hold left click `heavy_hold_time` = heavy
   (fires while held). Hold right click = block. Attacks: windup → active (hitbox live)
-  → recovery, all in ticks from the weapon file. A dodge or weapon/Wing ability press during a light/heavy windup **cancels** it (no damage, nothing released, knife ammo refunded); during its recovery it skips the rest; during the protected part (hit windows, projectile release, zone placement) it stays buffered (`PlayerState.attack_cancel_phase` is the one rule). Abilities can only be dodged in recovery, and abilities never cancel abilities.
+  → recovery, all in ticks from the weapon file. A dodge or weapon/Wing ability press during a light/heavy windup **cancels** it (no damage, nothing released, knife ammo refunded); during its recovery it skips the rest; during the protected part (hit windows, projectile release, zone placement) it stays buffered (`PlayerState.attack_cancel_phase` is the one rule). Abilities can only be dodged in recovery (or during their windows with `channel_dodge`), and abilities never cancel abilities.
   Presses during an attack or roll are buffered. Facing starts at `aim_yaw` and tracks
-  it at `turn_speed` (weapon file) for the whole attack, so the hitbox follows the
-  camera; movement is slowed by `move_multiplier`.
+  it at `turn_speed` (weapon file) for the whole attack; the facing aims at the
+  crosshair's line at the attack's reach (`AimRay.attack_facing`, `AttackParams.aim_reach`,
+  `camera.cfg [aim] melee_reach_fraction`/`melee_min_reach`; block still faces `aim_yaw`),
+  so the hitbox sits under the crosshair. Movement is slowed by `move_multiplier`.
 - **Block** (`[block]` in combat.cfg): `PlayerState.blocking` while the button is held
   and not attacking/dodging/staggered (attack or dodge drops the guard; it comes back if
   still held). Slower movement and stamina regen; facing tracks the aim. On the server,
@@ -395,7 +406,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - **Abilities** (`[ability_<id>]` in the weapon file, pool order = `[weapon]
   abilities`): Q/E/R use the equipped weapon's slots (`ability_slots`, pool indices).
   `attack_type == ATTACK_ABILITY` and `ability` = pool index, so abilities share the
-  attack timeline (windup → hit windows → recovery; dodge cancels recovery; presses are
+  attack timeline (windup → hit windows → recovery; dodge cancels recovery, and the
+  windows too for `channel_dodge` abilities (default on when `windows` > 1: Frenzy, Talon
+  Spin, Vortex, Searing Ray...); a teleport or `needs_decoy` ability can't start while
+  rooted / without a decoy (the press stays buffered, nothing spent); presses are
   buffered by `[abilities] buffer`). Cooldown starts with the ability and counts down
   for both weapons (`cooldowns`, per weapon slot × pool index). Variants:
   `windows`/`window_interval` (Frenzy: a target can be hit once per window),
@@ -462,7 +476,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `World._shield_wall_holder` / `_covered_hit`, `shield_wall_covers=`) is still in the
   code but nothing applies that status any more.
 - **War Hammer** (Juggernaut, `data/weapon_war_hammer.cfg`, model "war_hammer"): slow
-  and heavy (light 95 dmg 0.2 s stagger; heavy 240 dmg 0.7 s stagger, 0.6 s windup,
+  and heavy (light 95 dmg 0.2 s stagger; heavy 240 dmg 0.7 s stagger, 0.75 s windup,
   `breaks_block=false`; turn speed 420°/s). Abilities: Seismic Slam (90° cone 4 m,
   stagger 0.8 s, knockback 2 m), Clout (one target, Stun 1.5 s), Shatter (Shattered),
   Upheaval (3 m radial launch 1.5 m), Shockwave (projectile "shockwave": a low, flat,
@@ -500,6 +514,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   speed, gravity, pitch, lifetime, hit_radius, pierce, walls, stopped_by_guard, release
   point, optional `returns`/`return_after`/`return_speed`/`catch_radius`, and the look:
   `visual` "feather", "axe" or "wave", length, color, spin). An attack or ability throws with
+  Every kind glows (a camera-facing halo and a short trail; optional `glow`, 0 = off;
+  `ProjectileVisual.prewarm_looks` via `ProjectileSystem._prewarm_step`).
   `projectile` (kind id), `projectile_time` (s from its start), optional
   `projectile_count`/`projectile_spread` (degrees); usually `shape="none"`. Its damage,
   stagger, block cost, statuses and `force_*` are what the projectile's hit does,
@@ -586,6 +602,15 @@ special (it slots self-buffs, statuses and Hurl like any weapon).
   counts living enemies and non-allied players around the target and multiplies the
   damage taken in `resolve_strike`, `_covered_hit` and damage over time
   (`StatusEffects.crowd_damage_taken_multiplier`).
+- **Hyper armor** (Greataxe/War Hammer heavies and big abilities: Vortex, Charging Chop,
+  Executioner's Swing, Seismic Slam, Clout, Upheaval, Shockwave): keys `armor_start` /
+  `armor_end` (s; -1 = through the last hit window) → `PlayerState.has_hyper_armor` from
+  the timeline (predicted, nothing synced). Refuses hit and guard-break staggers
+  (`apply_stagger(..., through_armor)`) and forced movement (`is_force_immune`); stuns,
+  roots and damage still land; the Halberd's Brace counter pierces it. Server:
+  `World._hyper_armor_holds` → wire-only `HIT_UNSHAKEN` (10, "Unshaken -N"),
+  `armor_absorbed=` on `SUMMARY juggernaut`. A bronze sheen while armored. Greataxe and
+  War Hammer lights/heavies are ~25% slower (heavy windup 0.75 s, recovery 0.88 s).
 - **Crits** (`[crit] damage_multiplier` 1.5 in combat.cfg, `PlayerParams.
   crit_damage_multiplier`): the Headsman capstone **Headsman's Verdict**
   (`effect="crit_staggered"`, `applies_to="heavy"`): a covered attack on a target that
@@ -677,7 +702,7 @@ behind, bonus or not).
   dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
   damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s, Trickster
   tier 3, requires Ember Double: trade
-  places with your decoy, or the nearest target you Marked within 15 m). Defaults Z
+  places with your decoy; only while it's out). Defaults Z
   Ashstep, C Plumage Flash. Capstones: **Mirror Image** (`decoy_burst`: the decoy
   bursts as it ends, 80 damage + Dazzled within 3 m) and **Second Step**
   (`extra_charge`, applies_to ashstep: see "Charges"). Wing Enhancement item: Ashen Vanes.
@@ -1017,7 +1042,10 @@ deflections= reflections= shared_damage= kindled= judgments=` (no checks).
   `EnemyBrain` (IDLE wander → CHASE its threat target → ATTACK when within
   `attack_range` and off cooldown → back to CHASE; STAGGERED when hit by a staggering
   attack; RETURN home past `leash_range` or when nobody has threat, healing on
-  arrival). Movement is direct steering, no navmesh yet. Not predicted, so no
+  arrival). Movement follows the navmesh (`EnemyPath` via `World/EnemyNav`, re-path every
+  0.5 s, when the goal moves 1 m or the map changes; `[navigation]` in the enemy file,
+  `data/navigation.cfg`); a swing only starts on a direct path (never through a wall);
+  `SUMMARY nav`. The dummy never paths. Not predicted, so no
   PlayerState-style rules.
 - **Threat** (`ThreatTable` in `EnemyBrain.threat`, pure, unit tested; tuning in
   `[threat]` of `data/enemy_<kind>.cfg`): threat per peer id from damage it takes
@@ -1062,7 +1090,9 @@ deflections= reflections= shared_damage= kindled= judgments=` (no checks).
 WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
 click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery panel (K
 or Esc closes it), T/Y/N/L/Delete party (see below), F pick up your loot in reach, I
-inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse.
+inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse. Aimed area abilities
+(their zone lands at the crosshair) cast when their key is **released**; holding shows
+the marker; right click or Esc cancels (`AimHold`).
 Panels that need the mouse join the `modal_ui` group: while one is visible, clicks and
 wheel scrolls don't recapture the mouse. I and K close each other
 (`InventoryPanel.hide_other_modals`); a closing panel recaptures the mouse only if no
@@ -1228,7 +1258,7 @@ capstones that fit, i.e. the Spear's Hold the Line and Finishing Thrust,
 `BuildService._bot_learn_capstones`) and the next cycle's weapons
 (the default loadout in the first cycle; then a different focus weapon each cycle:
 Spear, Dual Axes, Broadsword; `BuildService.bot_weapons_for_cycle`); see
-`World._bot_input`. On joining it slots its status abilities first, self-buffs before
+`World._bot_input`; it aims like a player, with the crosshair line (shoulder offset) through its target, so attack facing points at it. On joining it slots its status abilities first, self-buffs before
 `applies_status` ones, keeping one slot for a projectile ability
 (`BuildService.bot_slot_status_abilities`: Broadsword Shield Wall + Opening Strike, Dual
 Axes Bloodlust + Rampage, Spear Skewer + Perforate); it uses a self-buff (the first

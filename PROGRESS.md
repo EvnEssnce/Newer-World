@@ -152,7 +152,7 @@ built and playtested.
    panel. **Shadow Swap** moves into Trickster, below Ember Double, and requires it.
    Then audit every class for abilities that do nothing without another one and apply
    the same rule.
-7. **Husks path around obstacles** (pulls Step G's navigation forward): today they walk
+7. **Done (session 42, agent; needs a playtest).** (navmesh baked at server start, re-baked in the background when a Shield Wall goes up/down; a Husk only swings on a direct path; worst server tick unchanged) **Husks path around obstacles** (pulls Step G's navigation forward): today they walk
    into Shield Wall and stand still. Navmesh steering with summoned walls as dynamic
    obstacles (also fixes Husks stalling on crates).
 
@@ -208,7 +208,7 @@ camera sits higher and farther back (`pivot_height` 1.6 → 2.0, `distance` 4.5 
 your feet again (`zone_aimed=false`, distance 0: it "plants the staff").
 
 To do, grouped by the code they touch:
-1. **Aim and input** (client input, `AimRay`, the sim's facing):
+1. **Done (session 42, agent; needs a playtest).** (`AimRay.attack_facing`, up to ~25° for short swings; `AimHold`: release casts, right click/Esc cancels; hold-to-aim untested by bots) **Aim and input** (client input, `AimRay`, the sim's facing):
    - **Melee hitboxes line up with the crosshair:** with the 0.7 m shoulder offset the
      crosshair sits right of the hitbox's centre line. Turn an attack's facing toward
      the crosshair's line at that attack's reach (pure math from aim yaw/pitch and
@@ -216,13 +216,13 @@ To do, grouped by the code they touch:
    - **Hold to aim area abilities:** holding the key of an aimed-zone ability shows the
      landing marker; releasing casts it (client-side: the press bit is sent on release;
      maybe right click cancels). Nothing changes on the server.
-2. **Visual clarity** (client only):
+2. **Done (session 42, agent; needs a playtest).** (halo + trail on every projectile; Meteor Fall fill ring, falling meteor, flash and shock ring, zone now 1.8 s; decoy countdown; Tripwire crouch) **Visual clarity** (client only):
    - **Projectiles glow** (knives and Great Staff bolts were hard to see; all kinds).
    - **Meteor Fall:** make it clear when the blast lands (a filling/closing warning
      ring during the 1.2 s delay, then a distinct flash/burst at impact).
    - **Ember Double:** show the time left on the clone (a countdown over it).
    - **Tripwire:** a crouching pose while placing it at your feet.
-3. **Sim rules** (`PlayerState`/`PlayerMovement`, predicted):
+3. **Done (session 42, agent; needs a playtest).** (`channel_dodge`; `air_exit_speed` 4 m/s while hovering; rooted teleports don't start; `decoy_active` synced, Marked fallback removed; `ammo_partial`; Venom Coat already worked on knife abilities, only Recall was missing it: a Fan landing 3 knives uses 3 stacks) **Sim rules** (`PlayerState`/`PlayerMovement`, predicted):
    - **Channeled abilities can be dodged out of** (Frenzy, and other multi-window
      abilities: Talon Spin, Vortex, Searing Ray, Mending Beam, Perforate, Spinning
      Staves, Staff Spin, Siphon...): a dodge during the windows ends the channel (the
@@ -239,8 +239,8 @@ To do, grouped by the code they touch:
    - **Venom Coat applies to knife abilities too** (Fan of Knives, Pinning Knife,
      Marked Blade...), not only light/heavy throws: check how on-hit statuses ride on
      ability projectiles.
-4. **Juggernaut weight and hyper armor** (Step B item 3, below).
-5. **Husk navigation** (A2.7, below).
+4. **Done (session 42, agent; needs a playtest).** **Juggernaut weight and hyper armor** (see Step B item 3).
+5. **Done (session 42, agent; needs a playtest).** **Husk navigation** (see A2.7).
 
 ### Step B: Wave 3 combat feedback (decided in session 26, in this order)
 
@@ -248,7 +248,7 @@ To do, grouped by the code they touch:
    or attacks, heals after a few seconds idle; one marker on the far side of the test
    map from the Husks; a DPS readout above it. No loot table. (Helps tune everything
    after it, including gear.)
-3. **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
+3. **Done (session 42, agent; needs a playtest).** (lights/heavies ~25% slower; armor on heavies + Vortex, Charging Chop, Executioner's Swing, Seismic Slam, Clout, Upheaval, Shockwave; refuses stagger and knockback, not stuns/roots; Brace pierces it; "Unshaken" label, bronze sheen) **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
    option): longer windups/recoveries, and **hyper armor**: can't be staggered (still
    takes damage) during the windup and swing of their heavies and big abilities. Likely
    `armor_start`/`armor_end` attack keys checked where the server staggers a player
@@ -654,6 +654,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 39 | 2026-10-11 | Integration: main fast-forwarded to the class track branch (sessions 27–37); `snapshot-size` merged on top (conflicts in `world.gd`'s snapshot receive: health is `Vector2(health, max)` in both entry kinds now; `smoke_test.ps1` keeps the loot/gear and net checks; docs). `view_array()` also blanks the new owner-only fields (`equip_left`, `free_move_mask`, `charge_mask`, `spare_charges`); no remote visual reads any blanked field. 517 tests pass. Smoke (Linux, PowerShell 7): Fighter, Juggernaut, Assassin, Ranger, Mage pass (Fighter: the known force luck check), `-Party` passes apart from the known Linux quit race, Paladin passes 2 of 3 (the first missed the Husk-status and gear luck checks), `-Bots 4` passes apart from the force check, `-Bots 6` needs a later server quit on 4 cores (Known issues). Snapshots: 2 bots max 483–528 bytes for all classes (was ~1.41–1.45 KB), 4 bots 809, 6 bots ~1,100–1,130. Corrections 0–1 per client |
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
 | 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main. Then the class playtest (Ranger, Mage, Assassin leftovers; Paladin fine) → Step A3; Firebolts ×1.6 slower, Withering Touch 10 m, Gauntlet heavy 8 m; A3.1 (crosshair, `AimRay`, aimed projectiles with pitch, 0.7 m shoulder camera), A3.3 (Blink/Ashstep teleports), A3.4 (beam visuals, wall zones count overlapping bodies) by three parallel agents, merged on `feedback-a3` (no conflicts). 562 tests; smoke default, `-Party`, Mage, Ranger, Assassin pass first time, 0 corrections. After the limit reset, batch 1 of the rest (four agents): A3.2 + A3.5 (zones at the crosshair, Fire Trail strips), A2.4 + A3.6 (knife ammo, Recall rips out embedded knives), A2.6 (`requires`, Shadow Swap under Ember Double, a 44-node audit), Step B 4–5 (Earthshaker `ShockRing`, wider Shockwave, Hooked needs its capstone, Shatter 6 s, slower Meteor Drop climb, Upheaval slam pose); one keep-both conflict (the key list in `weapon_broadsword.cfg`). 607 tests; smoke default, `-Party` and all six classes pass first time, 0 corrections. Then A2.5 (animation canceling) alone, merged clean, plus a bot fix (it was canceling its own heavies): 620 tests; smoke `-Party` ×3, default, Juggernaut, Assassin pass, 0 corrections |
+| 42 | 2026-10-14 | Playtest of Step A3 and batch 1 (approved: Blink, Ashstep, beams, Flame Wall, canceling, Ranger; Recall one hit per target and teleports stopping at walls confirmed) → Step A4. Data: higher, farther camera (pivot 2.0, distance 5.5), 1 s knife reload, Sanctified Ground at your feet. `feedback-a3` merged to main and pushed. Five agents on `feedback-a4`: A4.1 (melee facing toward the crosshair line, hold-to-aim area abilities), A4.2 (projectile glow, Meteor Fall warning/burst, decoy countdown, Tripwire crouch), A4.3 (channel dodge, Updraft dodge exit, rooted teleports, Shadow Swap needs a decoy, partial knife heavy, Recall carries Venom), Step B3 (Juggernaut weight + hyper armor), A2.7 (Husk navmesh); one keep-both conflict (`attack_params.gd`). Bot fix: bots aim with the crosshair line through their target (after A4.1 their swings veered right and missed Husks: the `-Party` force check failed 3 runs in a row). 671 tests; smoke default ×3, `-Party` ×3, all classes pass (Juggernaut player knockbacks now 1–2 per run because of hyper armor: a thinner luck margin), 0–1 corrections |
 
 ---
 
