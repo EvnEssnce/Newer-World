@@ -14,6 +14,10 @@ extends RefCounted
 ##
 ## A stationary enemy (params.stationary: the training dummy) never moves,
 ## turns or swings: it only goes through staggers.
+##
+## Walking (wander, chase, return) goes through `path` (EnemyPath) when set:
+## the brain picks the goal, the path the way around crates and walls. A swing
+## starts only when the path to the target is direct.
 
 enum Mode { IDLE, CHASE, ATTACK, STAGGERED, RETURN }
 
@@ -37,6 +41,9 @@ var threat := ThreatTable.new()
 var forced_target := 0
 ## Times it changed from one target to another (counted for the server summary).
 var target_switches := 0
+## Walks around obstacles (EnemyPath) when set; null = straight at the goal
+## (tests, the training dummy, kinds with [navigation] enabled=false).
+var path: EnemyPath = null
 
 
 ## Advances one tick and returns the desired horizontal velocity (x, z).
@@ -164,14 +171,17 @@ func _wander(pos: Vector3, home: Vector3, params: EnemyParams, delta: float,
 	if wander_wait > 0:
 		wander_wait -= 1
 		return Vector2.ZERO
-	var to := _flat(wander_point - pos)
-	if to.length() < 0.3:
+	var route := _route(pos, wander_point)
+	# A path used up counts as there (the point may be inside a crate).
+	if _flat(wander_point - pos).length() < 0.3 or (path != null and path.arrived()):
 		wander_wait = rng.randi_range(0, params.wander_pause_ticks)
 		var angle := rng.randf() * TAU
 		var radius := rng.randf() * params.wander_radius
 		wander_point = home + Vector3(cos(angle), 0.0, sin(angle)) * radius
+		if path != null:
+			path.reset()
 		return Vector2.ZERO
-	return _walk(to, params.wander_speed, params, delta)
+	return _walk(route, params.wander_speed, params, delta)
 
 
 func _chase(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParams,
@@ -182,8 +192,11 @@ func _chase(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParam
 		threat.clear()
 		return _return(pos, home, params, delta)
 	var to := _flat(targets[target_id] - pos)
-	if to.length() > params.attack_range:
-		return _walk(to, params.move_speed, params, delta)
+	var route := _route(pos, targets[target_id])
+	# In reach but something in between (a wall or crate corner): keep walking
+	# around it instead of swinging through it.
+	if to.length() > params.attack_range or (path != null and not path.is_direct()):
+		return _walk(route, params.move_speed, params, delta)
 	_turn_toward(to, params, delta)
 	if cooldown_ticks == 0:
 		mode = Mode.ATTACK
@@ -218,7 +231,15 @@ func _return(pos: Vector3, home: Vector3, params: EnemyParams, delta: float) -> 
 		wander_wait = 0
 		threat.clear()
 		return Vector2.ZERO
-	return _walk(to, params.return_speed, params, delta)
+	return _walk(_route(pos, home), params.return_speed, params, delta)
+
+
+## The flat vector to walk along toward goal: around obstacles with a path,
+## else straight at it.
+func _route(pos: Vector3, goal: Vector3) -> Vector2:
+	if path != null:
+		return path.steer(pos, goal)
+	return _flat(goal - pos)
 
 
 func _walk(to: Vector2, speed: float, params: EnemyParams, delta: float) -> Vector2:

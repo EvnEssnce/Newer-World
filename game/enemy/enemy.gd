@@ -41,6 +41,9 @@ var dead := false
 
 # Server
 var brain := EnemyBrain.new()
+## The walkable area its brain paths on (World/EnemyNav); set by World before
+## it's added. null = walks straight (and kinds without [navigation]).
+var navigation: EnemyNavigation = null
 var respawn_at_tick := -1
 ## Players the current swing has already been resolved against (see Player).
 var attack_results: Dictionary[int, bool] = {}
@@ -91,6 +94,7 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		health = params.max_health
 		brain.wander_point = home
+		_give_path()
 		_rng.randomize()
 		_name_label.visible = false
 		return
@@ -115,6 +119,8 @@ func server_step(targets: Dictionary, delta: float) -> void:
 		return
 	status_damage = statuses.tick(status_defs)
 	brain.forced_target = statuses.forced_target(status_defs)
+	if brain.path != null:
+		brain.path.version = navigation.version
 	var desired := brain.step(global_position, home, targets, params, delta, _rng)
 	if brain.attack_tick == 0:
 		attack_results.clear()
@@ -200,8 +206,15 @@ func respawn() -> void:
 	brain = EnemyBrain.new()
 	brain.target_switches = switches
 	brain.wander_point = home
+	_give_path()
 	respawn_at_tick = -1
 	_ticks_since_damage = 0
+
+
+## Server: lets the brain walk around obstacles, if its kind paths.
+func _give_path() -> void:
+	if params.paths and navigation != null:
+		brain.path = navigation.new_path(params)
 
 
 ## Server: params.reset_ticks without taking damage (the training dummy):

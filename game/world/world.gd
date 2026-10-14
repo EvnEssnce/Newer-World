@@ -195,6 +195,8 @@ var loot: LootSystem
 var _projectiles: ProjectileSystem
 ## World/Zones: ground zones and summons (the AREA and SUMMON tags).
 var zones: ZoneSystem
+## World/EnemyNav (server only, else null): the walkable area enemies path on.
+var enemy_navigation: EnemyNavigation
 
 # Client
 var _hud: Hud
@@ -252,6 +254,10 @@ func _ready() -> void:
 		_max_input_buffer = Tuning.get_value("network", "server", "max_input_buffer")
 		_max_inputs_per_tick = Tuning.get_value("network", "server", "max_inputs_per_tick")
 		Net.peer_left.connect(_on_peer_left)
+		enemy_navigation = EnemyNavigation.new()
+		enemy_navigation.name = "EnemyNav"
+		add_child(enemy_navigation)
+		enemy_navigation.bake_static(self)
 		_spawn_enemies()
 	else:
 		_interpolation_delay = Tuning.get_value("network", "client", "interpolation_delay")
@@ -2010,6 +2016,7 @@ func _spawn_enemies() -> void:
 		enemy.kind = marker.get_meta("kind", "husk")
 		enemy.home = marker.position
 		enemy.position = marker.position
+		enemy.navigation = enemy_navigation
 		enemy.attack_stepped.connect(_on_enemy_attack_stepped)
 		_enemies.add_child(enemy)
 		next_id -= 1
@@ -3007,6 +3014,7 @@ func print_summary() -> void:
 		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d target_switches=%d taunts=%d heal_threat=%d" % [
 				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills, switches,
 				_taunts, _heal_threat])
+		enemy_navigation.print_summary()
 		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d shield_wall_covers=%d" % [
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored,
 				_shield_wall_covers])

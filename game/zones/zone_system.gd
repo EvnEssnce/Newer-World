@@ -267,6 +267,8 @@ func _end(zone: Zone) -> void:
 	if _walls.has(zone.id):
 		_walls[zone.id].queue_free()
 		_walls.erase(zone.id)
+		if world.enemy_navigation:
+			world.enemy_navigation.remove_wall(zone.id)
 	if zone.params.decoy:
 		world.on_decoy_ended(zone)
 	for peer_id in world._connected_player_ids():
@@ -326,6 +328,9 @@ func _add_wall_body(zone: Zone) -> void:
 	body.global_position = zone.position + Vector3.UP * zone.params.height / 2.0
 	body.rotation.y = zone.yaw
 	_walls[zone.id] = body
+	# Enemies path around it (re-baked in the background).
+	if world.enemy_navigation:
+		world.enemy_navigation.add_wall(zone.id, zone.position, zone.yaw, box.size)
 
 
 ## The ground straight below `from` (or `from` if there's none within 50 m),
