@@ -277,7 +277,7 @@ from behind.
 | Ember Double | Leaves a burning decoy where you stood and makes you hard to see for a moment. | SUMMON, STEALTH |
 | Ashstep | Short blink in your movement direction. | DASH |
 | Plumage Flash | A burst of feathers in a cone that disorients (enemy aim and turn speed reduced). | STATUS |
-| Shadow Swap | Swaps places with your decoy, or with a target hit by Marked Blade. | DASH |
+| Shadow Swap | Swaps places with your decoy (only while it's out). | DASH |
 
 > Stealth (even "hard to see") leaks if the server keeps sending the hidden player's
 > position. Start with a visual-only version (translucent, no nameplate). Make it truly

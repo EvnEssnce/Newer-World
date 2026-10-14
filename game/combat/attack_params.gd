@@ -131,6 +131,10 @@ var recall_projectile := ""
 ## Shots it takes from the weapon's magazine (WeaponParams.ammo); it can't start
 ## without them. Ignored for a weapon without a magazine.
 var ammo_cost := 0
+## With fewer than ammo_cost shots left (but at least one), it still starts:
+## takes what's left (the magazine reloads) and throws one projectile per shot
+## taken, at most projectile_count (PlayerState.attack_ammo, release_count).
+var ammo_partial := false
 
 # Projectiles (the PROJ tag; data/projectiles.cfg ids; "" = none)
 ## Thrown at projectile_tick (from the attack's start), projectile_count of
@@ -243,6 +247,7 @@ func _load_statuses(file: String, section: String, tps: float) -> void:
 	embeds = Tuning.get_optional(file, section, "embeds", "")
 	recalls = Tuning.get_optional(file, section, "recalls", "")
 	ammo_cost = Tuning.get_optional(file, section, "ammo_cost", 0)
+	ammo_partial = Tuning.get_optional(file, section, "ammo_partial", false)
 
 
 ## The statuses this gives whoever it damages, as [id, stacks, duration ticks

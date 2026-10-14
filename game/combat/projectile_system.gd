@@ -104,15 +104,17 @@ func _physics_process(delta: float) -> void:
 ## Server: `player`'s current attack just reached its release tick: throws its
 ## projectiles from its server position toward its aim point.
 func server_fire(player: Player) -> void:
-	server_fire_attack(player, player.state.current_attack(player.params))
+	server_fire_attack(player, player.state.current_attack(player.params),
+			player.state.release_count(player.params))
 
 
 ## Server: throws `attack`'s projectiles from `player`'s server position toward
 ## its aim point (server_fire, or a server-side throw outside the predicted timeline:
 ## the Earthshaker capstone's aftershock). Every client gets the spawn; the
 ## thrower's own client has no cosmetic copy waiting for a server-side throw,
-## so it draws it on the render clock like anyone else's.
-func server_fire_attack(player: Player, attack: AttackParams) -> void:
+## so it draws it on the render clock like anyone else's. `count`: how many
+## (-1 = its projectile_count; fewer for a short magazine, PlayerState.release_count).
+func server_fire_attack(player: Player, attack: AttackParams, count := -1) -> void:
 	var p := ProjectileParams.get_kind(attack.projectile) if attack else null
 	if p == null:
 		return
@@ -123,9 +125,11 @@ func server_fire_attack(player: Player, attack: AttackParams) -> void:
 	var yaw := player.state.yaw
 	var from := Projectile.release_point(p, player.global_position, yaw)
 	var aimed := aimed_direction(player, from)
-	for i in attack.projectile_count:
+	if count < 0:
+		count = attack.projectile_count
+	for i in count:
 		var proj := Projectile.new(p, from, Projectile.launch_velocity_along(p, aimed,
-				spread_offset(i, attack.projectile_count, attack.projectile_spread), yaw))
+				spread_offset(i, count, attack.projectile_spread), yaw))
 		proj.id = _next_id
 		_next_id += 1
 		proj.owner_id = player.peer_id
@@ -401,11 +405,14 @@ func server_recall(player: Player, attack: AttackParams) -> void:
 			var results: Dictionary[int, bool] = {}
 			var result := world.resolve_strike(player.peer_id, player.global_position, player.state.yaw,
 					attack, results, target, scale * count, player.execute_bonus())
+			# The thrower's on-hit statuses (Venom Coat): one charge per target struck.
 			if result == World.HIT_DAMAGED:
-				world._give_hit_statuses(player.peer_id, attack, [] as Array[Vector2i], target)
+				world._give_hit_statuses(player.peer_id, attack,
+						player.state.take_on_hit_statuses(player.params), target)
 		else:
 			world.strike_enemy(player.peer_id, player.global_position, player.state.yaw, attack,
-					target, scale * count, func() -> Array[Vector2i]: return [] as Array[Vector2i],
+					target, scale * count,
+					func() -> Array[Vector2i]: return player.state.take_on_hit_statuses(player.params),
 					player.execute_bonus())
 		if attack.recall_projectile.is_empty():
 			continue
@@ -529,9 +536,10 @@ func client_fire(player: Player) -> void:
 	var yaw := player.state.yaw
 	var from := Projectile.release_point(p, player.global_position, yaw)
 	var aimed := aimed_direction(player, from)
-	for i in attack.projectile_count:
+	var count := player.state.release_count(player.params)
+	for i in count:
 		var f := _add_flying(p, from, Projectile.launch_velocity_along(p, aimed,
-				spread_offset(i, attack.projectile_count, attack.projectile_spread), yaw), player.peer_id)
+				spread_offset(i, count, attack.projectile_spread), yaw), player.peer_id)
 		f.local_clock = true
 		f.confirmed = false
 		_cosmetic_fired += 1

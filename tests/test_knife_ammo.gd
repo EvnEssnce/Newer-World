@@ -154,6 +154,65 @@ func test_unaffordable_heavy_waits_and_shortens_the_refill_to_the_reload() -> vo
 	assert_eq(state.ammo_left(params), 6)
 
 
+func test_partial_heavy_throws_what_is_left_and_reloads() -> void:
+	knives.heavy_attack.ammo_partial = true
+	knives.heavy_attack.projectile = "knife"
+	knives.heavy_attack.projectile_count = 3
+	for i in 4:
+		_light()
+	assert_eq(state.ammo_left(params), 2)
+	_steps(knives.heavy_hold_ticks + 1, ATTACK)
+	assert_eq(state.attack_type, PlayerState.ATTACK_HEAVY, "starts with 2 of 3")
+	assert_eq(state.attack_ammo, 2)
+	assert_eq(state.release_count(params), 2, "throws the two it has")
+	assert_eq(state.ammo_left(params), 0, "the magazine is empty")
+	assert_eq(state.ammo_timer[0], RELOAD, "and reloads")
+	var data := state.to_array()
+	assert_eq((data[36] as PackedInt32Array)[4], 2, "synced")
+	assert_true(PlayerState.from_array(data).matches(state))
+	_steps(4)
+	assert_false(state.is_attacking())
+	assert_eq(state.attack_ammo, 0, "cleared when it ends")
+	_steps(RELOAD)
+	_heavy()
+	assert_eq(state.ammo_left(params), 3, "a full magazine pays in full")
+	assert_eq(state.attack_ammo, 0)
+
+
+func test_partial_heavy_with_one_left_and_none_left() -> void:
+	knives.heavy_attack.ammo_partial = true
+	knives.heavy_attack.projectile_count = 3
+	for i in 5:
+		_light()
+	_steps(knives.heavy_hold_ticks + 1, ATTACK)
+	assert_eq(state.release_count(params), 1)
+	_steps(4)
+	_steps(knives.heavy_hold_ticks + 1, ATTACK)
+	assert_false(state.is_attacking(), "none left: waits for the reload")
+
+
+func test_full_heavy_releases_its_count() -> void:
+	knives.heavy_attack.projectile_count = 3
+	_steps(knives.heavy_hold_ticks + 1, ATTACK)
+	assert_eq(state.release_count(params), 3)
+
+
+func test_canceled_partial_heavy_refunds_what_it_took() -> void:
+	knives.heavy_attack.ammo_partial = true
+	knives.heavy_attack.windup_ticks = 5
+	knives.refill_ticks = 100
+	params.dodge_ticks = 10
+	params.dodge_stamina_cost = 10.0
+	for i in 4:
+		_light()
+	_steps(knives.heavy_hold_ticks + 1, ATTACK)
+	assert_eq(state.ammo_left(params), 0)
+	_step(PlayerState.BUTTON_DODGE)  # windup: canceled, nothing thrown
+	assert_true(state.is_dodging())
+	assert_eq(state.ammo_left(params), 2, "the two knives come back")
+	assert_eq(state.attack_ammo, 0)
+
+
 func test_holstered_magazine_keeps_its_count_and_refills() -> void:
 	_light()
 	_step(SWAP)
@@ -188,9 +247,9 @@ func test_respawn_and_class_change_fill_it() -> void:
 func test_synced_and_compared_but_not_shown_to_others() -> void:
 	_light()
 	var data := state.to_array()
-	assert_eq(data[36], PackedInt32Array([1, 0, REFILL - 4, 0]))
+	assert_eq(data[36], PackedInt32Array([1, 0, REFILL - 4, 0, 0]), "spent, timers, attack_ammo")
 	var copy := PlayerState.from_array(data)
 	assert_true(copy.matches(state))
 	copy.ammo_spent[0] = 2
 	assert_false(copy.matches(state), "ammo is compared")
-	assert_eq(state.view_array()[36], PackedInt32Array([0, 0, 0, 0]), "owner only")
+	assert_eq(state.view_array()[36], PackedInt32Array([0, 0, 0, 0, 0]), "owner only")

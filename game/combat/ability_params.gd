@@ -49,10 +49,14 @@ var leap_peak := 0.5
 ## is thrown upward fast enough to rise launch_height meters (Updraft). 0 = none.
 var launch_height := 0.0
 var launch_tick := 0
-## Shadow Swap (server): as it starts, trade places with your decoy, or else
-## with the nearest target you Marked within swap_range m.
+## Shadow Swap (server): as it starts, trade places with your decoy.
 var swap_places := false
-var swap_range := 0.0
+## Can only start while the user's decoy (Ember Double) is out
+## (PlayerState.decoy_active, set by the server). Shadow Swap.
+var needs_decoy := false
+## A dodge can end it once its hit windows have started (the windows left are
+## lost), not only in its recovery. Default: on for multi-window channels.
+var channel_dodge := false
 ## While it's active (windup to the end of its last hit window), hostile
 ## projectiles that reach the user are deflected: stopped, no damage (Spinning
 ## Staves, Staff Spin). Server.
@@ -161,7 +165,8 @@ static func ability_from_tuning(file: String, ability_id: String, tps: float) ->
 	a.launch_height = Tuning.get_optional(file, section, "launch_height", 0.0)
 	a.launch_tick = roundi(float(Tuning.get_optional(file, section, "launch_time", 0.0)) * tps)
 	a.swap_places = Tuning.get_optional(file, section, "swap_places", false)
-	a.swap_range = Tuning.get_optional(file, section, "swap_range", 0.0)
+	a.needs_decoy = Tuning.get_optional(file, section, "needs_decoy", false)
+	a.channel_dodge = Tuning.get_optional(file, section, "channel_dodge", a.windows > 1)
 	a.deflects = Tuning.get_optional(file, section, "deflects", false)
 	a.iframe_start_tick = roundi(float(Tuning.get_optional(file, section, "iframe_start", 0.0)) * tps)
 	a.iframe_end_tick = roundi(float(Tuning.get_optional(file, section, "iframe_end", 0.0)) * tps)
