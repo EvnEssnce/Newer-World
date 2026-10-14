@@ -320,9 +320,12 @@ func status_move_multiplier(params: PlayerParams) -> float:
 
 ## Interrupts the current attack, ability, dodge or swap and stops the player
 ## acting for ticks. (An interrupted swap keeps the new weapon out.) Refused
-## while dead or stagger immune (a stagger_immune status: Steadfast, Unbowed).
-func apply_stagger(ticks: int, params: PlayerParams) -> void:
+## while dead or stagger immune (a stagger_immune status: Steadfast, Unbowed),
+## and in hyper armor unless `through_armor` (a stun, Brace's counter).
+func apply_stagger(ticks: int, params: PlayerParams, through_armor: bool = false) -> void:
 	if ticks <= 0 or dead or statuses.stagger_immune(params.statuses):
+		return
+	if not through_armor and has_hyper_armor(params):
 		return
 	_end_attack()
 	queued_attack = ATTACK_NONE
@@ -422,7 +425,7 @@ func apply_status(params: PlayerParams, index: int, stacks: int = 1, duration_ti
 	server_events += 1
 	var def := params.statuses.get_def(index)
 	if def.stuns:
-		apply_stagger(statuses.ticks_left(index), params)
+		apply_stagger(statuses.ticks_left(index), params, true)  # hyper armor doesn't stop stuns
 	return true
 
 
@@ -487,10 +490,21 @@ func is_forced() -> bool:
 
 ## Can't be pushed, pulled or launched. The one place forced movement asks, so
 ## other sources only change this. Today: a force_immune status (the
-## Juggernaut's Braced, Steadfast, Unbowed). Statuses are synced, but only the
-## server applies force, so a refusal never needs predicting.
+## Juggernaut's Braced, Steadfast, Unbowed) or hyper armor. Statuses are
+## synced, but only the server applies force, so a refusal never needs predicting.
 func is_force_immune(params: PlayerParams) -> bool:
-	return statuses.force_immune(params.statuses)
+	return statuses.force_immune(params.statuses) or has_hyper_armor(params)
+
+
+## Hyper armor (AttackParams armor_start / armor_end: Greataxe and War Hammer
+## heavies and big abilities): hit staggers and forced movement are refused;
+## stuns, roots and damage still land. From the attack timeline, so it's
+## deterministic and needs no synced field of its own.
+func has_hyper_armor(params: PlayerParams) -> bool:
+	if dead or attack_tick < 0:
+		return false
+	var a := attack_params(params)
+	return a != null and a.has_hyper_armor(attack_tick)
 
 
 ## Server: moves this player `displacement` meters (world XZ) over `ticks`
