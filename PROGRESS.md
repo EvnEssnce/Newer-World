@@ -152,7 +152,7 @@ built and playtested.
    panel. **Shadow Swap** moves into Trickster, below Ember Double, and requires it.
    Then audit every class for abilities that do nothing without another one and apply
    the same rule.
-7. **Done (session 42, agent; needs a playtest).** (navmesh baked at server start, re-baked in the background when a Shield Wall goes up/down; a Husk only swings on a direct path; worst server tick unchanged) **Husks path around obstacles** (pulls Step G's navigation forward): today they walk
+7. **Done and playtested (session 42).** (navmesh baked at server start, re-baked in the background when a Shield Wall goes up/down; a Husk only swings on a direct path; worst server tick unchanged) **Husks path around obstacles** (pulls Step G's navigation forward): today they walk
    into Shield Wall and stand still. Navmesh steering with summoned walls as dynamic
    obstacles (also fixes Husks stalling on crates).
 
@@ -208,7 +208,7 @@ camera sits higher and farther back (`pivot_height` 1.6 → 2.0, `distance` 4.5 
 your feet again (`zone_aimed=false`, distance 0: it "plants the staff").
 
 To do, grouped by the code they touch:
-1. **Done (session 42, agent; needs a playtest).** (`AimRay.attack_facing`, up to ~25° for short swings; `AimHold`: release casts, right click/Esc cancels; hold-to-aim untested by bots) **Aim and input** (client input, `AimRay`, the sim's facing):
+1. **Done and playtested (session 42).** (`AimRay.attack_facing`, up to ~25° for short swings; `AimHold`: release casts, right click/Esc cancels; hold-to-aim untested by bots) **Aim and input** (client input, `AimRay`, the sim's facing):
    - **Melee hitboxes line up with the crosshair:** with the 0.7 m shoulder offset the
      crosshair sits right of the hitbox's centre line. Turn an attack's facing toward
      the crosshair's line at that attack's reach (pure math from aim yaw/pitch and
@@ -216,13 +216,13 @@ To do, grouped by the code they touch:
    - **Hold to aim area abilities:** holding the key of an aimed-zone ability shows the
      landing marker; releasing casts it (client-side: the press bit is sent on release;
      maybe right click cancels). Nothing changes on the server.
-2. **Done (session 42, agent; needs a playtest).** (halo + trail on every projectile; Meteor Fall fill ring, falling meteor, flash and shock ring, zone now 1.8 s; decoy countdown; Tripwire crouch) **Visual clarity** (client only):
+2. **Done and playtested (session 42).** (halo + trail on every projectile; Meteor Fall fill ring, falling meteor, flash and shock ring, zone now 1.8 s; decoy countdown; Tripwire crouch) **Visual clarity** (client only):
    - **Projectiles glow** (knives and Great Staff bolts were hard to see; all kinds).
    - **Meteor Fall:** make it clear when the blast lands (a filling/closing warning
      ring during the 1.2 s delay, then a distinct flash/burst at impact).
    - **Ember Double:** show the time left on the clone (a countdown over it).
    - **Tripwire:** a crouching pose while placing it at your feet.
-3. **Done (session 42, agent; needs a playtest).** (`channel_dodge`; `air_exit_speed` 4 m/s while hovering; rooted teleports don't start; `decoy_active` synced, Marked fallback removed; `ammo_partial`; Venom Coat already worked on knife abilities, only Recall was missing it: a Fan landing 3 knives uses 3 stacks) **Sim rules** (`PlayerState`/`PlayerMovement`, predicted):
+3. **Done and playtested (session 42).** (`channel_dodge`; `air_exit_speed` 4 m/s while hovering; rooted teleports don't start; `decoy_active` synced, Marked fallback removed; `ammo_partial`; Venom Coat already worked on knife abilities, only Recall was missing it: a Fan landing 3 knives uses 3 stacks) **Sim rules** (`PlayerState`/`PlayerMovement`, predicted):
    - **Channeled abilities can be dodged out of** (Frenzy, and other multi-window
      abilities: Talon Spin, Vortex, Searing Ray, Mending Beam, Perforate, Spinning
      Staves, Staff Spin, Siphon...): a dodge during the windows ends the channel (the
@@ -239,8 +239,9 @@ To do, grouped by the code they touch:
    - **Venom Coat applies to knife abilities too** (Fan of Knives, Pinning Knife,
      Marked Blade...), not only light/heavy throws: check how on-hit statuses ride on
      ability projectiles.
-4. **Done (session 42, agent; needs a playtest).** **Juggernaut weight and hyper armor** (see Step B item 3).
-5. **Done (session 42, agent; needs a playtest).** **Husk navigation** (see A2.7).
+4. **Done and playtested (session 42).** **Juggernaut weight and hyper armor** (see Step B item 3).
+5. **Done and playtested (session 42).** **Husk navigation** (see A2.7).
+6. **Beams aim like projectiles** (playtest of A4: "the aim for the light attack projectile and heavy attack beam should be the same angle / alignment. Right now the beam is lower and further right"): every `beam_color` attack hits and draws from the hands toward the aim point, pitch included, instead of a level box along the melee facing (which crosses the crosshair line at 75% of the range, then drifts right). In progress (agent).
 
 ### Step B: Wave 3 combat feedback (decided in session 26, in this order)
 
@@ -248,7 +249,7 @@ To do, grouped by the code they touch:
    or attacks, heals after a few seconds idle; one marker on the far side of the test
    map from the Husks; a DPS readout above it. No loot table. (Helps tune everything
    after it, including gear.)
-3. **Done (session 42, agent; needs a playtest).** (lights/heavies ~25% slower; armor on heavies + Vortex, Charging Chop, Executioner's Swing, Seismic Slam, Clout, Upheaval, Shockwave; refuses stagger and knockback, not stuns/roots; Brace pierces it; "Unshaken" label, bronze sheen) **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
+3. **Done and playtested (session 42).** (lights/heavies ~25% slower; armor on heavies + Vortex, Charging Chop, Executioner's Swing, Seismic Slam, Clout, Upheaval, Shockwave; refuses stagger and knockback, not stuns/roots; Brace pierces it; "Unshaken" label, bronze sheen) **Juggernaut weight** (Greataxe and War Hammer only; the Halberd stays the light
    option): longer windups/recoveries, and **hyper armor**: can't be staggered (still
    takes damage) during the windup and swing of their heavies and big abilities. Likely
    `armor_start`/`armor_end` attack keys checked where the server staggers a player
