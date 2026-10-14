@@ -51,7 +51,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (15 weapons) |
 | Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | All six classes built (stealth is visual only) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
-| Inventory | Equipment slots, item weight, durability | Slots built; weight and durability not decided |
+| Inventory | Equipment slots, item weight, durability | Slots built; durability skipped, weight later (session 45) |
 | Networking | Prediction, snapshots, lag compensation, server tuning on connect | Built; not yet tested over the internet |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
@@ -94,12 +94,12 @@ tested and playtested). Each sub-item is roughly one session with one testable g
      friend on older code gets odd failures, not a message), projectile lag
      compensation if leading shots feels bad.
 2. **Milestone 3: gathering and crafting.** Brief: two or three node types, one
-   refining step, one crafting station, tradeskill XP. **Decide first** (§4): the
-   gathering key, durability, item weight.
-   1. **Resources and nodes:** stackable resources in the inventory (ore, wood, fiber,
-      hide; max stack size); server-side nodes with a hit count, a tool requirement
-      (tool items or a simple "has the tool" rule), a gather time (walk-only lock like
-      equipping) and respawn timers, all in `data/`.
+   refining step, one crafting station, tradeskill XP. Decided (§4): F gathers, no
+   durability, no item weight yet, no tool items. Branch `milestone-3`.
+   1. **Resources and nodes:** stackable resources in the inventory (ore, wood, fiber;
+      hide waits for animals; max stack size); server-side nodes with a hit count, no
+      tool requirement, a gather time (walk-only lock like equipping) and respawn
+      timers, all in `data/`.
    2. **Tradeskills:** XP curves per skill (`data/tradeskills.cfg`), XP from gathering,
       higher skill = faster gathering or more yield. Pure logic + tests.
    3. **Refining and a station:** ore → ingots, recipes in `data/recipes.cfg`, a station
@@ -204,11 +204,14 @@ Say "keep" or what to change.
 - **Charges and knives:** a spare charge lets you reuse something while its cooldown
   runs (a Wing spare doesn't restart it). Embedded knives have no visual.
 
-**Open questions for build order item 2:**
-- **Item weight / encumbrance:** in the original brief. Build it (a carry limit that
-  slows you?) or drop it?
-- **Durability:** gear wears down on death/use and is repaired with materials? Or skip?
-- **Gathering key:** F for nodes too (F is loot pickup), or a separate key?
+**Decided for build order item 2 (session 45):**
+- **Gathering key: F**, the same as loot pickup (one interact key; the prompt says
+  which it will do).
+- **Durability: skipped** for now (can come later as its own step if the economy
+  needs a material sink).
+- **Item weight: later**, once a town with storage exists (item 5), not in Milestone 3.
+- **No tool items:** everyone can gather every node type; tradeskill level decides
+  speed and yield (and later which tiers you can gather).
 
 ### Known issues
 
