@@ -767,6 +767,8 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 			_roll_pivot.rotation.x = STAGGER_TILT
 		else:
 			_roll_pivot.rotation.x = 0.0
+	_show_crouch(_tripwire_crouch(attack, ability_id, attack_tick)
+			if not view.dead and dodge_progress < 0.0 else 0.0)
 
 	var model := view.weapon(params).model
 	var axes := model == "dual_axes"
@@ -1120,7 +1122,8 @@ func _show_ranger(model: String, attack: AttackParams, attack_tick: float, lower
 	_wrap_left.visible = model == "firebolts"
 	_staff.visible = model == "great_staff"
 	_gauntlet.visible = model == "gauntlet"
-	var aiming := 0.0 if attack != null and attack_tick >= 0.0 else RANGED_CARRY_PITCH
+	var placing := attack is AbilityParams and (attack as AbilityParams).id == "tripwire"
+	var aiming := 0.0 if attack != null and attack_tick >= 0.0 and not placing else RANGED_CARRY_PITCH
 	_bow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
 	_crossbow.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
 	_staff.rotation.x = lerpf(aiming, WEAPON_LOWERED, lowered)
@@ -1131,6 +1134,58 @@ func _show_ranger(model: String, attack: AttackParams, attack_tick: float, lower
 		var pitches := _axe_pitches(attack, PlayerState.ATTACK_LIGHT, "", attack_tick)
 		_wrap_right.rotation.x = lerpf(pitches.x, WEAPON_LOWERED, lowered)
 		_wrap_left.rotation.x = lerpf(pitches.y, WEAPON_LOWERED, lowered)
+
+
+# Tripwire (Crossbow): a crouch while setting the trap at your feet. The body
+# squashes down to CROUCH_SQUASH of its height (feet stay on the ground) and
+# leans forward, and a left arm reaches down to the ground ahead, fully down at
+# the placement tick (`zone_tick`), back up over the recovery. Drawn from the
+# attack timeline like the other poses, so remote players crouch too.
+const CROUCH_SQUASH := 0.72
+## Radians the body leans forward at the bottom of the crouch.
+const CROUCH_LEAN := 0.5
+## The reaching arm: shoulder (on the roll pivot), length (m), and how far it
+## swings forward from hanging straight down (radians, on top of the lean).
+const REACH_SHOULDER := Vector3(-0.36, 0.42, -0.05)
+const REACH_ARM_LENGTH := 1.0
+const REACH_PITCH := 1.1
+
+var _reach_arm: Node3D
+var _body_mesh: Node3D
+
+
+## 0 (standing) .. 1 (crouched, hand on the ground) while placing a Tripwire:
+## down over the windup to the placement tick, held through the active ticks,
+## up again over the rest.
+static func _tripwire_crouch(attack: AttackParams, ability_id: String, tick: float) -> float:
+	if ability_id != "tripwire" or attack == null or tick < 0.0:
+		return 0.0
+	var down := float(maxi(attack.zone_tick, 1))
+	var hold_end := down + attack.active_ticks
+	var end := float(attack.recovery_start_tick() + attack.recovery_ticks)
+	var amount := 0.0
+	if tick < down:
+		amount = tick / down
+	elif tick < hold_end:
+		amount = 1.0
+	else:
+		amount = 1.0 - (tick - hold_end) / maxf(end - hold_end, 1.0)
+	return smoothstep(0.0, 1.0, clampf(amount, 0.0, 1.0))
+
+
+func _show_crouch(crouch: float) -> void:
+	if _body_mesh == null:
+		_body_mesh = $Model/RollPivot/Body
+		_reach_arm = _weapon_pivot(REACH_SHOULDER, [[Vector3(0.12, REACH_ARM_LENGTH, 0.12),
+				Vector3(0.0, -REACH_ARM_LENGTH / 2.0, 0.0), _material]])
+	var squash := lerpf(1.0, CROUCH_SQUASH, crouch)
+	_body_mesh.scale = Vector3(1.0, squash, 1.0)
+	_reach_arm.visible = crouch > 0.02
+	if crouch <= 0.0:
+		return
+	_roll_pivot.position.y -= BODY_HEIGHT / 2.0 * (1.0 - squash)
+	_roll_pivot.rotation.x = -CROUCH_LEAN * crouch
+	_reach_arm.rotation.x = REACH_PITCH * crouch
 
 
 # --- Juggernaut: Halberd and Greataxe models (placeholder, client) ---
