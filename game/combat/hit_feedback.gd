@@ -45,6 +45,10 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 			label.text = "Critical! -%d" % damage
 			label.font_size = 68
 			label.modulate = Color(1.0, 0.55, 0.1)
+		World.HIT_UNSHAKEN:
+			# Hyper armor refused the stagger or knockback (Juggernaut heavies).
+			label.text = "Unshaken -%d" % damage
+			label.modulate = Color(0.95, 0.75, 0.45)
 		_:
 			label.text = "-%d" % damage
 			label.modulate = Color(1.0, 0.85, 0.3)
@@ -58,5 +62,5 @@ static func spawn_label(parent: Node3D, height: float, damage: float, result: in
 
 ## Whether a result should flash the target red.
 static func flashes(result: int) -> bool:
-	return result in [World.HIT_DAMAGED, World.HIT_CRITICAL, World.HIT_DEFEATED,
+	return result in [World.HIT_DAMAGED, World.HIT_CRITICAL, World.HIT_UNSHAKEN, World.HIT_DEFEATED,
 			World.HIT_GUARD_BROKEN]

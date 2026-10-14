@@ -52,6 +52,12 @@ var force: ForceParams = null
 ## MasteryTree.execute_multiplier on the target's health. Server only; zero =
 ## none. Multiplies with the attacker's tree bonus (Finishing Thrust).
 var execute := Vector2.ZERO
+## Hyper armor (Juggernaut heavies and big abilities; armor_start / armor_end
+## keys): the user can't be staggered by hits or moved (knocked back, pulled,
+## launched) in ticks [armor_start_tick, armor_end_tick) from the start. Stuns,
+## roots and damage still land. armor_end_tick 0 = no armor.
+var armor_start_tick := 0
+var armor_end_tick := 0
 
 # Statuses (data/status_effects.cfg ids; "" = none)
 ## Applied to whoever this damages (server), with status_stacks stacks, for
@@ -166,6 +172,19 @@ func aim_reach(fraction: float) -> float:
 	return 0.0
 
 
+## True if `tick` (from the attack's start) is inside its hyper armor.
+func has_hyper_armor(tick: int) -> bool:
+	return tick >= armor_start_tick and tick < armor_end_tick
+
+
+## Sets the hyper armor from armor_start / armor_end seconds; armor_end < 0 =
+## through the last hit window (the start of recovery). No armor_end = none.
+func set_hyper_armor(start_seconds: float, end_seconds: float, tps: float) -> void:
+	armor_start_tick = roundi(start_seconds * tps)
+	armor_end_tick = (recovery_start_tick() if end_seconds < 0.0
+			else roundi(end_seconds * tps))
+
+
 ## The hit window (0-based) that tick falls in, or -1 outside them all.
 func window_at(tick: int) -> int:
 	var since := tick - windup_ticks
@@ -206,6 +225,8 @@ func load_from(file: String, section: String, tps: float) -> void:
 	beam_color = Tuning.get_optional(file, section, "beam_color", Color(0.0, 0.0, 0.0, 0.0))
 	execute = Vector2(Tuning.get_optional(file, section, "execute_damage", 0.0),
 			Tuning.get_optional(file, section, "execute_threshold", 0.0))
+	set_hyper_armor(Tuning.get_optional(file, section, "armor_start", 0.0),
+			Tuning.get_optional(file, section, "armor_end", 0.0), tps)
 	_load_statuses(file, section, tps)
 	force = ForceParams.from_tuning(file, section, tps)
 	projectile = Tuning.get_optional(file, section, "projectile", "")

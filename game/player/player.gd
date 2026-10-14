@@ -87,6 +87,12 @@ const AXE_STRUCK := -1.1
 const WEAPON_LOWERED := -1.7
 ## Body color during a parry window.
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)
+## Hyper armor (Juggernaut heavies): the body is tinted this much toward a
+## bronze color and turns metallic (uniforms only, so no shader recompile).
+const ARMOR_COLOR := Color(0.95, 0.65, 0.3)
+const ARMOR_TINT := 0.5
+const ARMOR_METALLIC := 0.35
+const ARMOR_ROUGHNESS := 0.35
 ## Whirlwind Edge: radians the body winds back before spinning one full turn.
 const SPIN_WINDBACK := 0.6
 ## Rising Cut: sword low at the side, then swept up high.
@@ -806,6 +812,9 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_beam.update(attack, attack_tick)
 	_show_phoenix(view, attack, attack_tick)
 
+	# Hyper armor, from the drawn attack timeline (predicted or interpolated).
+	var armored := (not view.dead and attack != null
+			and attack.has_hyper_armor(floori(attack_tick)))
 	if view.dead:
 		var progress := view.rebirth_progress(params)
 		_material.albedo_color = (DEAD_COLOR.lerp(REBIRTH_GLOW_COLOR, progress) if progress >= 0.0
@@ -816,8 +825,12 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		_material.albedo_color = INVULNERABLE_COLOR
 	elif view.is_parrying(params):
 		_material.albedo_color = PARRY_COLOR
+	elif armored:
+		_material.albedo_color = _base_color.lerp(ARMOR_COLOR, ARMOR_TINT)
 	else:
 		_material.albedo_color = _base_color
+	_material.metallic = ARMOR_METALLIC if armored else 0.0
+	_material.roughness = ARMOR_ROUGHNESS if armored else 1.0
 	# Stealth (Veiled): faint to everyone, its own player included; others
 	# also lose its nameplate. Visual only: its position is still sent.
 	var veiled := view.statuses.veiled(params.statuses) and not view.dead

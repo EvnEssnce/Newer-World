@@ -28,8 +28,11 @@ const HIT_HEALED := 7
 const HIT_CRITICAL := 8
 ## A hit a Ward shield took all of (only on the wire, like HIT_CRITICAL).
 const HIT_ABSORBED := 9
+## A damaging hit whose stagger or knockback the target's hyper armor refused
+## (Juggernaut heavies; only on the wire, like HIT_CRITICAL).
+const HIT_UNSHAKEN := 10
 const HIT_NAMES := ["hit", "evaded", "defeated", "blocked", "guard broken", "parried",
-		"status damage", "healed", "critical", "absorbed"]
+		"status damage", "healed", "critical", "absorbed", "unshaken"]
 
 const PLAYER_SCENE := preload("res://game/player/player.tscn")
 const ENEMY_SCENE := preload("res://game/enemy/enemy.tscn")
@@ -146,6 +149,8 @@ var _ramp_stacks := 0
 var _aftershocks := 0
 var _wall_stuns := 0
 var _roar_guards := 0
+## Hits whose stagger or forced movement hyper armor refused.
+var _armor_absorbed := 0
 ## Earthshaker rings rolling outward (server), and the targets they hit.
 var _shock_rings: Array[ShockRing] = []
 var _aftershock_hits := 0
@@ -700,16 +705,19 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 	if target.health <= 0.0:
 		result = HIT_DEFEATED
 		_kill_player(target)
-	elif result == HIT_DAMAGED:
-		target.state.apply_stagger(_with_hook_stagger(attacker_id, target,
-				_with_surge_stagger(attacker_id, attack.stagger_ticks)), target.params)
+	var unshaken := false
+	if result == HIT_DAMAGED:
+		var stagger := _with_hook_stagger(attacker_id, target,
+				_with_surge_stagger(attacker_id, attack.stagger_ticks))
+		unshaken = _hyper_armor_holds(target, stagger, attack, was_staggered)
+		target.state.apply_stagger(stagger, target.params)
 	if result == HIT_DAMAGED or result == HIT_GUARD_BROKEN:
 		_force_player(attacker_id, attacker_pos, attacker_yaw, attack, target, was_staggered)
 	_hits += 1
 	var shown := result
 	if result == HIT_DAMAGED:
 		shown = HIT_ABSORBED if damage <= 0.0 and absorbed > 0.0 else (
-				HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED)
+				HIT_UNSHAKEN if unshaken else HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED)
 	_send_hit(attacker_id, target.peer_id, damage, shown)
 	if result != HIT_DEFEATED:
 		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
@@ -969,7 +977,9 @@ func _brace_counter(attacker_id: int, target: Player) -> void:
 	if attacker:
 		if attacker.state.dead or attacker.state.statuses.stagger_immune(attacker.params.statuses):
 			return
-		attacker.state.apply_stagger(ticks, attacker.params)
+		# Brace is the counter to charges: it staggers through hyper armor
+		# (Charging Chop).
+		attacker.state.apply_stagger(ticks, attacker.params, true)
 	else:
 		var enemy := _enemies.get_node_or_null(str(attacker_id)) as Enemy
 		if enemy == null or enemy.dead or enemy.statuses.stagger_immune(enemy.status_defs):
@@ -1882,10 +1892,32 @@ func _roar_guard(source_id: int) -> void:
 		_roar_guards += 1
 
 
+## Hyper armor (Juggernaut heavies and big abilities): true (and counted) if
+## the target is in hyper armor and this damaging hit would otherwise have
+## staggered it (`stagger_ticks`) or moved it (the attack's force), so the hit
+## shows "Unshaken". PlayerState.apply_stagger / start_force do the refusing.
+func _hyper_armor_holds(target: Player, stagger_ticks: int, attack: AttackParams,
+		was_staggered: bool) -> bool:
+	var state := target.state
+	if not state.has_hyper_armor(target.params):
+		return false
+	var defs := target.params.statuses
+	var staggers := stagger_ticks > 0 and not state.statuses.stagger_immune(defs)
+	var force := attack.force
+	var moves := (force != null and not (force.needs_stagger and not was_staggered)
+			and not state.statuses.force_immune(defs))
+	if not staggers and not moves:
+		return false
+	_armor_absorbed += 1
+	if _verbose:
+		print("[server] %s's hyper armor holds" % target.name)
+	return true
+
+
 func _print_juggernaut_summary() -> void:
-	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d aftershock_hits=%d wall_stuns=%d roar_guards=%d hooks_unmarked=%d" % [
+	print("SUMMARY juggernaut crits=%d hook_staggers=%d brace_staggers=%d bloodied_stacks=%d aftershocks=%d aftershock_hits=%d wall_stuns=%d roar_guards=%d hooks_unmarked=%d armor_absorbed=%d" % [
 			_crits, _hook_staggers, _brace_staggers, _ramp_stacks, _aftershocks, _aftershock_hits,
-			_wall_stuns, _roar_guards, _hooks_unmarked])
+			_wall_stuns, _roar_guards, _hooks_unmarked, _armor_absorbed])
 	print("SUMMARY summons decoy_bursts=%d shadow_swaps=%d" % [_decoy_bursts, _shadow_swaps])
 	print("SUMMARY paladin heal_pulses=%d cleanses=%d blessings=%d deflections=%d reflections=%d shared_damage=%d kindled=%d judgments=%d" % [
 			_heal_pulses, _cleanses, _blessings, _deflections, _reflections, roundi(_shared_damage),
@@ -2876,7 +2908,7 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) -> void:
 	var my_id := multiplayer.get_unique_id()
-	if result in [HIT_DAMAGED, HIT_CRITICAL, HIT_DEFEATED, HIT_GUARD_BROKEN]:
+	if result in [HIT_DAMAGED, HIT_CRITICAL, HIT_UNSHAKEN, HIT_DEFEATED, HIT_GUARD_BROKEN]:
 		if attacker_id == my_id:
 			_hits_landed += 1
 		if target_id == my_id:
