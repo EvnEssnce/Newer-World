@@ -214,6 +214,8 @@ var _judgments := 0
 var party: PartySystem
 ## World/Loot: drops, pickup, inventories (both sides).
 var loot: LootSystem
+## World/Tradeskills: tradeskill levels and XP (both sides).
+var tradeskills: TradeskillSystem
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
 ## World/Zones: ground zones and summons (the AREA and SUMMON tags).
@@ -273,6 +275,10 @@ func _ready() -> void:
 	_builds.name = "Builds"
 	add_child(_builds)
 	_add_loot_system()
+	# World/Tradeskills must exist on the server and every client (RPCs by path).
+	tradeskills = TradeskillSystem.new()
+	tradeskills.name = "Tradeskills"
+	add_child(tradeskills)
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -496,6 +502,7 @@ func _client_ready(class_id: String) -> void:
 	_players.add_child(player)
 	_builds.send_build(player)
 	loot.add_player(peer_id)
+	tradeskills.add_player(peer_id)
 	print("[server] peer %d joined as %s (%d players)" % [
 			peer_id, player.build.class_def.id, _players.get_child_count()])
 
@@ -3192,6 +3199,7 @@ func print_summary() -> void:
 		zones.print_summary()
 		_projectiles.print_summary()
 		loot.print_summary()
+		tradeskills.print_summary()
 		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [
 				_gear_crits, _armored_hits, roundi(_armor_stopped)])
 		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [
@@ -3203,6 +3211,7 @@ func print_summary() -> void:
 		return
 	_projectiles.print_client_summary()
 	loot.print_client_summary()
+	tradeskills.print_client_summary()
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,
