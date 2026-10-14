@@ -13,6 +13,7 @@ const TELEPORT_MAX_SLIDES := 4
 static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, buttons: int,
 		aim_yaw: float, params: PlayerParams, delta: float, aim_pitch := 0.0) -> void:
 	var on_floor := state.on_floor
+	var was_dodging := state.is_dodging()
 	state.step(move, buttons, aim_yaw, on_floor, params, delta, aim_pitch)
 	if not state.can_act():
 		move = Vector2.ZERO  # staggered, stunned or dead: slide to a stop, can't jump
@@ -28,6 +29,10 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		teleport(body, state.ability_dir * ability.teleport_distance, on_floor)
 
 	var horizontal := Vector3(body.velocity.x, 0.0, body.velocity.z)
+	if was_dodging and not state.is_dodging() and not on_floor:
+		# An air dodge just ended: don't keep sailing at roll speed (Updraft).
+		horizontal = after_air_dodge(horizontal,
+				state.statuses.max_fall_speed(params.statuses) > 0.0, params)
 	# Forced movement (knockback, pull) overrides everything horizontal; a
 	# launch sets the vertical speed once, below. Starting it interrupts dodges
 	# and dashes, so it never competes with them.
@@ -82,6 +87,15 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 	body.velocity = Vector3(horizontal.x, vertical, horizontal.z)
 	body.move_and_slide()
 	state.on_floor = body.is_on_floor()
+
+
+## The horizontal velocity left when an air dodge ends: at most
+## [dodge] air_exit_speed m/s, while hovering (an Updraft-like max_fall_speed
+## status) or, with air_exit_hover_only false, any time in the air. Pure.
+static func after_air_dodge(horizontal: Vector3, hovering: bool, params: PlayerParams) -> Vector3:
+	if params.dodge_air_exit_speed <= 0.0 or (params.dodge_air_exit_hover_only and not hovering):
+		return horizontal
+	return horizontal.limit_length(params.dodge_air_exit_speed)
 
 
 ## Moves the body `offset` (world XZ, meters) at once: across the ground,

@@ -563,7 +563,7 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 func _on_ability_started(player: Player) -> void:
 	var started := player.state.current_ability(player.params)
 	if started and started.swap_places:
-		_shadow_swap(player, started)
+		_shadow_swap(player)
 	if started:
 		_mage_ability_started(player, started)
 	if started and not started.recalls.is_empty():
@@ -1614,6 +1614,7 @@ func trap_rearms(owner_id: int, p: ZoneParams) -> int:
 ## it bursts, dealing the node's amount to every hostile within its threshold
 ## (m) and giving them its status.
 func on_decoy_ended(zone: Zone) -> void:
+	sync_decoy_flag(zone.owner_id)
 	var owner := _player_by_id(zone.owner_id)
 	var node := owner.build.wing_effect("decoy_burst") if owner and owner.build else null
 	if node == null:
@@ -1658,39 +1659,26 @@ func _roll_zone(player: Player) -> void:
 			return
 
 
-## Shadow Swap ("swap_places"): the player trades places with its newest decoy,
-## or else with the nearest living target it Marked (StatusEffects.mark_from)
-## within swap_range. Teleports are server events (PlayerState.note_teleport).
-func _shadow_swap(player: Player, ability: AbilityParams) -> void:
+## Shadow Swap ("swap_places"): the player trades places with its newest decoy.
+## It can only start while one is out (needs_decoy, PlayerState.decoy_active);
+## a decoy that ended the same tick leaves nothing to swap with. Teleports are
+## server events (PlayerState.note_teleport).
+func _shadow_swap(player: Player) -> void:
 	var from := player.global_position
 	var decoy := zones.decoy_for(player.peer_id)
 	if decoy:
 		_teleport(player, decoy.position)
 		zones.server_move(decoy, from)
 		_shadow_swaps += 1
-		return
-	var best: Node3D = null
-	var best_distance := ability.swap_range
-	for enemy: Enemy in _enemies.get_children():
-		var d := enemy.global_position.distance_to(from)
-		if not enemy.dead and d <= best_distance and enemy.statuses.mark_from(enemy.status_defs, player.peer_id) >= 0:
-			best = enemy
-			best_distance = d
-	for other: Player in _players.get_children():
-		var d := other.global_position.distance_to(from)
-		if (other != player and not other.state.dead and d <= best_distance
-				and other.state.statuses.mark_from(other.params.statuses, player.peer_id) >= 0):
-			best = other
-			best_distance = d
-	if best == null:
-		return
-	var to := best.global_position
-	_teleport(player, to)
-	if best is Player:
-		_teleport(best as Player, from)
-	else:
-		best.global_position = from
-	_shadow_swaps += 1
+
+
+## Server: a decoy of `owner_id` was placed or ended: tells its sim whether one
+## is out now (PlayerState.set_decoy_active, a server event), so a predicted
+## Shadow Swap press can tell.
+func sync_decoy_flag(owner_id: int) -> void:
+	var owner := _player_by_id(owner_id)
+	if owner:
+		owner.state.set_decoy_active(zones.decoy_for(owner_id) != null)
 
 
 func _teleport(player: Player, to: Vector3) -> void:
@@ -2761,7 +2749,8 @@ func _bot_wing_role(wing: AbilityParams) -> String:
 	return "guard"
 
 
-## The Wing slot holding a ready, affordable Wing ability, or -1. While a
+## The Wing slot holding a ready, affordable Wing ability (one whose own
+## condition holds: PlayerState.ability_ready_for), or -1. While a
 ## Rebirth is ready, affordable means Ember stays at the Rebirth threshold.
 func _bot_wing_slot(ability_id: String) -> int:
 	var state := _local_player.state
@@ -2770,8 +2759,9 @@ func _bot_wing_slot(ability_id: String) -> int:
 	for slot in PlayerState.WING_SLOTS:
 		var index := state.wing_slot_ability(slot)
 		var wing := pool.ability(index)
-		if wing == null or wing.id != ability_id or state.wing_cooldown_left(index) > 0:
-			continue
+		if (wing == null or wing.id != ability_id or state.wing_cooldown_left(index) > 0
+				or not state.ability_ready_for(wing, params)):
+			continue  # (ability_ready_for: Shadow Swap waits for its decoy)
 		var keep := state.rebirth_ember_needed(params) if state.can_rebirth(params) else 0.0
 		if state.ember - wing.ember_cost >= keep:
 			return slot

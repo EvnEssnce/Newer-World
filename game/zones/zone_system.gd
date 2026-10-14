@@ -109,6 +109,7 @@ func server_spawn(kind: String, owner_id: int, at: Vector3, yaw: float,
 	_spawned += 1
 	if p.decoy:
 		_decoys += 1
+		world.sync_decoy_flag(owner_id)
 	if p.wall and p.solid:
 		if p.blocks_enemies:
 			_add_wall_body(zone)

@@ -32,6 +32,10 @@ var iframe_end_tick := 0
 var dodge_buffer_ticks := 0
 ## Dodges allowed per time in the air. 0 = ground only.
 var max_air_dodges := 0
+## Most horizontal speed (m/s) left when an air dodge ends (0 = no limit); only
+## while hovering (Updraft) if dodge_air_exit_hover_only. PlayerMovement.after_air_dodge.
+var dodge_air_exit_speed := 0.0
+var dodge_air_exit_hover_only := true
 
 # Health
 var max_health := 0.0
@@ -140,6 +144,8 @@ static func from_tuning() -> PlayerParams:
 	p.iframe_end_tick = roundi(Tuning.get_value("combat", "dodge", "iframe_end") * tps)
 	p.dodge_buffer_ticks = roundi(Tuning.get_value("combat", "dodge", "buffer") * tps)
 	p.max_air_dodges = Tuning.get_value("combat", "dodge", "air_dodges")
+	p.dodge_air_exit_speed = Tuning.get_value("combat", "dodge", "air_exit_speed")
+	p.dodge_air_exit_hover_only = Tuning.get_value("combat", "dodge", "air_exit_hover_only")
 
 	p.max_health = Tuning.get_value("combat", "health", "max")
 	p.respawn_ticks = roundi(Tuning.get_value("combat", "death", "respawn_time") * tps)

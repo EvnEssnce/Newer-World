@@ -206,8 +206,19 @@ func test_rooted_player_does_not_teleport() -> void:
 	params.statuses = defs
 	state.statuses.apply(defs, defs.index_of("root"), 1)
 	PlayerMovement.step(body, state, Vector2.ZERO, Q, 0.0, params, DELTA)
-	assert_true(state.is_using_ability(), "the ability still starts")
-	assert_true(body.global_position.distance_to(start) < 0.1, "but doesn't move")
+	assert_false(state.is_using_ability(), "a rooted teleport doesn't start")
+	assert_eq(state.cooldown_left(0), 0, "nothing spent")
+	assert_true(body.global_position.distance_to(start) < 0.1, "and doesn't move")
+	# Rooted after it started (before its teleport tick): it doesn't move either.
+	state.statuses.remove(defs.index_of("root"))
+	state.queued_attack = PlayerState.ATTACK_NONE
+	blink.teleport_tick = 1
+	PlayerMovement.step(body, state, Vector2.ZERO, Q, 0.0, params, DELTA)
+	assert_true(state.is_using_ability())
+	state.statuses.apply(defs, defs.index_of("root"), 1)
+	PlayerMovement.step(body, state, Vector2.ZERO, 0, 0.0, params, DELTA)
+	assert_eq(state.attack_tick, 1, "its teleport tick")
+	assert_true(body.global_position.distance_to(start) < 0.1, "root stops it")
 	_cleanup()
 
 

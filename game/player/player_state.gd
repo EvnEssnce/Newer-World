@@ -135,6 +135,10 @@ var ammo_spent := PackedInt32Array()
 ## it's empty, refill_ticks after a throw that leaves some (restarted by every
 ## throw); a press it can't pay for shortens a refill to the reload time.
 var ammo_timer := PackedInt32Array()
+## Shots the current attack took when the magazine ran short of its ammo_cost
+## (AttackParams.ammo_partial: a heavy with 1-2 knives left); 0 = paid in full.
+## It throws that many (release_count). Synced with the ammo (to_array 36).
+var attack_ammo := 0
 
 # Weapon swap
 ## Ticks since the current swap started, or -1 when not swapping.
@@ -157,6 +161,10 @@ var charge_mask := 0
 ## Which of those spare charges are ready now (same bits). A spare lets the thing
 ## be used again while its cooldown runs; it comes back when the cooldown is 0.
 var spare_charges := 0
+## The player's decoy (Ember Double) is out: set by the server as it's placed
+## and ends (set_decoy_active, a server event). Abilities with needs_decoy
+## (Shadow Swap) can only start while it's true.
+var decoy_active := false
 
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
@@ -842,10 +850,16 @@ func can_dodge(on_floor: bool, params: PlayerParams) -> bool:
 
 
 ## A dodge can cut short a light/heavy attack's windup or recovery
-## (attack_cancel_phase) and any ability's recovery.
+## (attack_cancel_phase), any ability's recovery, and a channel_dodge
+## ability (a multi-window channel: Frenzy, Searing Ray) once its first hit
+## window has had a tick: the windows left are lost. The tick a window is
+## already live on before the press still resolved (hits come after the step).
 func _dodge_can_cancel(params: PlayerParams) -> bool:
 	if attack_type == ATTACK_LIGHT or attack_type == ATTACK_HEAVY:
 		return attack_cancel_phase(params) != CANCEL_NONE
+	var a := current_ability(params)
+	if a != null and a.channel_dodge and attack_tick > a.windup_ticks:
+		return true
 	return is_attack_recovering(params)
 
 
@@ -898,6 +912,15 @@ func reduce_ability_cooldowns(fraction: float) -> void:
 			changed = true
 	if changed:
 		server_events += 1
+
+
+## Server: whether the player's decoy is out (decoy_active); a server event
+## when it changes.
+func set_decoy_active(active: bool) -> void:
+	if active == decoy_active:
+		return
+	decoy_active = active
+	server_events += 1
 
 
 ## Server: the player was moved somewhere else (Shadow Swap): a server event,
@@ -1064,7 +1087,7 @@ func attack_cancel_phase(params: PlayerParams) -> int:
 ## in the magazine.
 func _cancel_attack(params: PlayerParams) -> void:
 	if attack_cancel_phase(params) == CANCEL_WINDUP:
-		var cost := attack_params(params).ammo_cost
+		var cost := attack_ammo if attack_ammo > 0 else attack_params(params).ammo_cost
 		if cost > 0 and weapon(params).ammo > 0:
 			ammo_spent[equipped] = maxi(0, ammo_spent[equipped] - cost)
 			if ammo_spent[equipped] == 0:
@@ -1143,7 +1166,7 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 			queued_attack = ATTACK_NONE  # empty slot
 			return
 		if ((can_attack() or cancel) and cooldown_left(index) == 0 and can_afford(w.ability(index))
-				and not statuses.silenced(params.statuses)):
+				and not statuses.silenced(params.statuses) and not _held_back(w.ability(index), params)):
 			if cancel:
 				_cancel_attack(params)
 			if _pay_ammo(w.ability(index), params):
@@ -1160,7 +1183,8 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 			return
 		if ((can_attack() or cancel)
 				and (wing_cooldowns[wing_index] == 0 or has_spare_charge(1 + wing_index))
-				and can_afford(wing) and not statuses.silenced(params.statuses)):
+				and can_afford(wing) and not statuses.silenced(params.statuses)
+				and not _held_back(wing, params)):
 			if cancel:
 				_cancel_attack(params)
 			_start_ability(wing_index, aim_yaw, aim_pitch, params, move, true)
@@ -1177,6 +1201,20 @@ func _handle_attack_input(move: Vector2, buttons: int, aim_yaw: float, aim_pitch
 		return
 	if queued_attack_ticks <= 0:
 		queued_attack = ATTACK_NONE
+
+
+## True if ability `a` can't start now for a reason of its own, like an
+## unaffordable one (the press stays buffered; no cooldown or Ember spent): a
+## teleport while rooted (Blink, Ashstep), or needs_decoy without the decoy out
+## (Shadow Swap).
+func _held_back(a: AbilityParams, params: PlayerParams) -> bool:
+	return (a.is_teleport() and not can_move(params)) or (a.needs_decoy and not decoy_active)
+
+
+## True if ability `a` could start now as far as _held_back goes (for the HUD
+## and the bot).
+func ability_ready_for(a: AbilityParams, params: PlayerParams) -> bool:
+	return a != null and not _held_back(a, params)
 
 
 ## move: this step's movement input (world XZ), for dashes that follow it.
@@ -1231,11 +1269,19 @@ func ammo_left(params: PlayerParams, slot := -1) -> int:
 ## now empty, else the refill. Returns false (nothing spent) if there aren't
 ## enough shots; then a refill still to come is shortened to the reload time.
 ## Always true for a weapon without a magazine or an attack that costs nothing.
+## An ammo_partial attack with fewer shots left (at least one) takes them all
+## (attack_ammo = how many) and starts the reload.
 func _pay_ammo(attack: AttackParams, params: PlayerParams) -> bool:
 	var w := weapon(params)
 	if attack == null or w.ammo <= 0 or attack.ammo_cost <= 0:
 		return true
-	if ammo_left(params) < attack.ammo_cost:
+	var left := ammo_left(params)
+	if left < attack.ammo_cost and left > 0 and attack.ammo_partial:
+		attack_ammo = left
+		ammo_spent[equipped] = w.ammo
+		ammo_timer[equipped] = w.reload_ticks
+		return true
+	if left < attack.ammo_cost:
 		if ammo_timer[equipped] == 0 or ammo_timer[equipped] > w.reload_ticks:
 			ammo_timer[equipped] = w.reload_ticks
 		return false
@@ -1269,6 +1315,17 @@ func _end_attack() -> void:
 	attack_type = ATTACK_NONE
 	ability = -1
 	attack_speed_carry = 0.0
+	attack_ammo = 0
+
+
+## How many projectiles the current attack releases: its projectile_count, or
+## one per shot it took when the magazine ran short (attack_ammo). The server's
+## throw and the local cosmetic copy both use it, so they match.
+func release_count(params: PlayerParams) -> int:
+	var attack := current_attack(params)
+	if attack == null:
+		return 0
+	return mini(attack.projectile_count, attack_ammo) if attack_ammo > 0 else attack.projectile_count
 
 
 ## Attack speed buffs (Rampage): a light or heavy attack (not abilities) gains
@@ -1339,7 +1396,7 @@ func to_array() -> Array:
 			swap_tick, swap_buffer, ability, ability_dir, queued_ability_slot, attack_serial,
 			statuses.to_packed(), force.velocity, force.ticks, force.launch, dodge_cooldown,
 			ember, wing_set, _pack_ember_wings(), attack_speed_carry,
-			ammo_spent + ammo_timer]
+			ammo_spent + ammo_timer + PackedInt32Array([attack_ammo])]
 
 
 static func from_array(data: Array) -> PlayerState:
@@ -1380,23 +1437,26 @@ static func from_array(data: Array) -> PlayerState:
 	s.wing_set = data[33]
 	s._unpack_ember_wings(data[34])
 	s.attack_speed_carry = data[35]
-	# 36: ammo, [spent per weapon slot..., timer per weapon slot...].
+	# 36: ammo, [spent per weapon slot..., timer per weapon slot..., attack_ammo].
 	var ammo: PackedInt32Array = data[36]
 	s.ammo_spent = ammo.slice(0, WEAPON_SLOTS)
 	s.ammo_timer = ammo.slice(WEAPON_SLOTS, WEAPON_SLOTS * 2)
+	s.attack_ammo = ammo[WEAPON_SLOTS * 2]
 	return s
 
 
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
-## C slot, equip_left, free_move_mask, charge_mask, spare_charges, then Wing
-## cooldowns by pool index, without trailing zeros].
-const PACKED_WING_HEADER := 10
+## C slot, equip_left, free_move_mask, charge_mask, spare_charges,
+## decoy_active (0/1), then Wing cooldowns by pool index, without trailing
+## zeros].
+const PACKED_WING_HEADER := 11
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
-			wing_slots[0], wing_slots[1], equip_left, free_move_mask, charge_mask, spare_charges])
+			wing_slots[0], wing_slots[1], equip_left, free_move_mask, charge_mask, spare_charges,
+			1 if decoy_active else 0])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1415,6 +1475,7 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	free_move_mask = packed[7]
 	charge_mask = packed[8]
 	spare_charges = packed[9]
+	decoy_active = packed[10] != 0
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
@@ -1424,7 +1485,8 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 ## but what only the owner needs (to predict and for its HUD: stamina, buffers,
 ## held presses, ability slots and cooldowns, Ember, Rebirth cooldown and
 ## charges, attack speed carry, the push's velocity, gear equip time, build
-## flags (free movement, roll/Wing charges)) is left at its default,
+## flags (free movement, roll/Wing charges), the decoy flag, the magazine and a
+## short throw's count) is left at its default,
 ## which costs a byte or two in NetCodec, and keeps them private. Everything
 ## drawing reads stays: attack and ability timeline, dodge, block, swap,
 ## stagger, death and Rebirth progress, forced-movement ticks, statuses, weapons
@@ -1457,7 +1519,9 @@ func view_array() -> Array:
 	view.free_move_mask = 0
 	view.charge_mask = 0
 	view.spare_charges = 0
+	view.decoy_active = false
 	view._fill_ammo()
+	view.attack_ammo = 0
 	return view.to_array()
 
 
@@ -1489,6 +1553,7 @@ func matches(other: PlayerState) -> bool:
 			and ability_slots == other.ability_slots
 			and cooldowns == other.cooldowns
 			and ammo_spent == other.ammo_spent and ammo_timer == other.ammo_timer
+			and attack_ammo == other.attack_ammo and decoy_active == other.decoy_active
 			and swap_tick == other.swap_tick
 			and equip_left == other.equip_left
 			and free_move_mask == other.free_move_mask
