@@ -198,6 +198,50 @@ Sessions (A3.1 before A3.2; the others are independent):
    just drop. Recall rips them out: each embedded knife damages its target again, then
    flies back to you (cosmetic). Recall no longer rewards missing.
 
+### Step A4: Session 42 playtest feedback (Step A3, batch 1, animation canceling)
+
+Approved: Blink, Ashstep, the beams, Flame Wall, animation canceling (still testing),
+the Ranger, and everything not listed below. Decisions confirmed: Recall is one hit
+per target; a teleport into a wall stops at the wall. **Already applied** (data): the
+camera sits higher and farther back (`pivot_height` 1.6 → 2.0, `distance` 4.5 → 5.5;
+"hard to see in front of the player"), knife reload 1.5 → 1.0 s, Sanctified Ground at
+your feet again (`zone_aimed=false`, distance 0: it "plants the staff").
+
+To do, grouped by the code they touch:
+1. **Aim and input** (client input, `AimRay`, the sim's facing):
+   - **Melee hitboxes line up with the crosshair:** with the 0.7 m shoulder offset the
+     crosshair sits right of the hitbox's centre line. Turn an attack's facing toward
+     the crosshair's line at that attack's reach (pure math from aim yaw/pitch and
+     `camera.cfg`, no raycast, so it stays deterministic in the predicted sim).
+   - **Hold to aim area abilities:** holding the key of an aimed-zone ability shows the
+     landing marker; releasing casts it (client-side: the press bit is sent on release;
+     maybe right click cancels). Nothing changes on the server.
+2. **Visual clarity** (client only):
+   - **Projectiles glow** (knives and Great Staff bolts were hard to see; all kinds).
+   - **Meteor Fall:** make it clear when the blast lands (a filling/closing warning
+     ring during the 1.2 s delay, then a distinct flash/burst at impact).
+   - **Ember Double:** show the time left on the clone (a countdown over it).
+   - **Tripwire:** a crouching pose while placing it at your feet.
+3. **Sim rules** (`PlayerState`/`PlayerMovement`, predicted):
+   - **Channeled abilities can be dodged out of** (Frenzy, and other multi-window
+     abilities: Talon Spin, Vortex, Searing Ray, Mending Beam, Perforate, Spinning
+     Staves, Staff Spin, Siphon...): a dodge during the windows ends the channel (the
+     rest is lost).
+   - **Air dodge out of an Updraft hover keeps too much momentum** (you float too far):
+     cut the horizontal speed when an air dodge ends while hovering (or always in air).
+   - **Root blocks teleports from starting** (the press stays buffered or is refused;
+     no cooldown or Ember spent), instead of starting and doing nothing.
+   - **Shadow Swap only with an active Ember Double:** the server sets a synced
+     "decoy active" flag (packed header, a server event) so the predicted sim can refuse
+     the press; drop the "nearest Marked target" fallback.
+   - **Knives: a heavy works with 1–2 knives left** (throws the knives you have, up to
+     3, and empties the magazine).
+   - **Venom Coat applies to knife abilities too** (Fan of Knives, Pinning Knife,
+     Marked Blade...), not only light/heavy throws: check how on-hit statuses ride on
+     ability projectiles.
+4. **Juggernaut weight and hyper armor** (Step B item 3, below).
+5. **Husk navigation** (A2.7, below).
+
 ### Step B: Wave 3 combat feedback (decided in session 26, in this order)
 
 2. **Done (session 30).** **Training dummy:** a new enemy kind (`data/enemy_dummy.cfg`), 6,000 HP, never moves
