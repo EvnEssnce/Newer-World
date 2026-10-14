@@ -68,7 +68,7 @@ game/
   combat/aim_ray.gd          AimRay: the crosshair's line from position, aim yaw/pitch and
                              camera.cfg (shoulder offset); `cast` finds the aim point. Pure math,
                              unit tested. `World.aim_point(player)` (server, during the physics step).
-  combat/beam_visual.gd      Client look of a beam attack (`beam_color`): core, sheath, hand orb,
+  combat/beam_visual.gd      Client look of a beam attack (`beam_color`), drawn along the aim line: core, sheath, orb,
                              tip glow; from the predicted/interpolated PlayerState (`Player._show`).
   combat/shock_ring.gd       ShockRing: an expanding ground ring (Earthshaker): growth, swept band,
                              hit once. Pure logic, unit tested. shock_ring_visual.gd: its look
@@ -259,9 +259,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
   rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
-  charge_mask, spare_charges, decoy_active, Wing cooldowns by pool index without
+  charge_mask, spare_charges, decoy_active, beam_pitch, Wing cooldowns by pool index without
   trailing zeros]`
-  (`PACKED_WING_HEADER` = 11; new small ints can go in that header too); 35 =
+  (`PACKED_WING_HEADER` = 12; new small ints can go in that header too; `beam_pitch` = the aim pitch in whole degrees while a beam runs, drawing-only: kept in `view_array()`, not compared in `matches()`); 35 =
   `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects); 36 =
   ammo, a `PackedInt32Array` `[spent slot0, spent slot1, timer slot0, timer slot1,
   attack_ammo]` (Throwing Knives magazine; `attack_ammo` = knives a partial heavy took;
@@ -378,7 +378,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   it at `turn_speed` (weapon file) for the whole attack; the facing aims at the
   crosshair's line at the attack's reach (`AimRay.attack_facing`, `AttackParams.aim_reach`,
   `camera.cfg [aim] melee_reach_fraction`/`melee_min_reach`; block still faces `aim_yaw`),
-  so the hitbox sits under the crosshair. Movement is slowed by `move_multiplier`.
+  so the hitbox sits under the crosshair. **Beams** (`aimed_beam`, default on for a box
+  with `beam_color`) aim like projectiles: each live tick `World._beam_of` runs a capsule
+  from `[beam] origin_height`/`origin_forward` (the projectile release point) toward
+  `World.aim_point` (pitch included; `for_allies` lands on the ally under the crosshair
+  for Mending Beam/Ward), `range` long, `width/2` thick (`MeleeHitbox.touches`); their
+  facing heads for the crosshair line at the full range. Movement is slowed by
+  `move_multiplier`.
 - **Block** (`[block]` in combat.cfg): `PlayerState.blocking` while the button is held
   and not attacking/dodging/staggered (attack or dodge drops the guard; it comes back if
   still held). Slower movement and stamina regen; facing tracks the aim. On the server,
