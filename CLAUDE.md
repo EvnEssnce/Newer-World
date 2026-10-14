@@ -34,10 +34,12 @@ codebase.** Update `PROGRESS.md` at the end of every session.
 ```
 project.godot        Autoloads: Tuning, Net. Main scene: game/main.tscn. 60 physics ticks/s.
 core/
-  tuning.gd          Autoload. Loads every res://data/*.cfg.
+  tuning.gd          Autoload. Loads every res://data/*.cfg; the server sends its values to clients.
   net.gd             Autoload. ENet server/client setup, connection signals, ping.
   launch_args.gd     Command-line flags (after "--").
   net_codec.gd       NetCodec: compact, lossless binary encoding for snapshots. Unit tested.
+  position_history.gd  PositionHistory: a body's recent positions per tick (lag compensation). Pure.
+  correction_smoothing.gd  CorrectionSmoothing: the local player's drawn offset after a correction. Pure.
   input_actions.gd   Key bindings, registered in code.
   aim_hold.gd        AimHold: aimed-zone abilities cast on key release (hold = marker). Pure.
 game/
@@ -162,7 +164,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
 - `server_relay` is off: clients never hear from each other directly, only via snapshots.
 - **Client → server**, every physics tick, `World._submit_inputs` (unreliable ordered,
   channel 1): the last `input_redundancy` inputs, each
-  `[seq, move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float]`. `move` is a world-space XZ
+  `[seq, move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, view_tick: int]`
+  (`view_tick`: the server tick the client was drawing others at, `World.render_tick()`
+  rounded; lag compensation only, not sim state). `move` is a world-space XZ
   direction (camera rotation already applied), length ≤ 1. `buttons` holds
   `PlayerState.BUTTON_*` bits: jump (1), attack (4) and block (8) are sent while held;
   dodge (2), swap (16), abilities 1–3 (32/64/128, Q/E/R) and Wings 1–2 (256/512, Z/C)
@@ -199,7 +203,29 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   parry counter, ability stopped on hit, loadout or Wing slot change, a status
   applied/used up/cleansed by the server, forced movement, Ember gained, Rebirth
   started/finished, equip time started) isn't counted. `--verbose` logs
-  each unexpected one, and server-side input drops.
+  each unexpected one, and server-side input drops. After any correction the model
+  and camera glide from where they were drawn (`CorrectionSmoothing`,
+  `Player._draw_offset`; `[client] correction_smoothing` s, jumps over
+  `correction_snap_distance` snap): drawing only, the body moves at once.
+- **The server's tuning wins** (`Tuning.send_to_peer` on `Net.peer_joined`): every
+  `data/*.cfg` value (with the server's `--tune` overrides) goes to a client as it
+  connects (`var_to_bytes` + zstd, ~35 KB, reliable RPC on `/root/Tuning`); the client
+  replaces its own (`Tuning.apply_packed`, its `--tune` ignored) and `Main` only makes
+  the World after both the connection and the tuning (`_enter_world`). `Tuning.version`
+  moves on every load; every class that caches tuning (`PlayerParams.current()`,
+  `ItemDatabase`, `StatusDefs`, `GearScore`, `ClassDef`, `MasteryTree`, `EnemyParams`,
+  `ProjectileParams`/`ProjectileVisual`, `ZoneParams`, `AimRay.tuned()`) rebuilds when it
+  does: **a new cache must do the same**. Friends' builds only need the same code.
+- **Lag compensation** (`[lag_compensation]` in network.cfg): the server records every
+  player's and enemy's position each tick (`PositionHistory`, `World._record_positions`,
+  after the sim, before the snapshot) and tests a player's melee/beam/ally-support
+  hitbox against where targets stood on that input's `view_tick`
+  (`World._lag_position`, clamped to `max_rewind`; never back past a one-tick jump over
+  `teleport_distance`: respawn, Blink). Only the touch test is rewound: blocks,
+  parries, facing, i-frames, backstab arcs, knockback and the aim raycast use current
+  state. Projectiles, zones, shock rings and enemy swings aren't rewound.
+  `SUMMARY lag_comp rewound_tests= rewind_ticks_avg= saved_hits=` (~8 ticks on
+  localhost: 0.1 s delay + snapshot spacing).
 - **Loot** (`World/Loot`, `LootSystem`; see "Loot"): reliable RPCs. Client → server
   `_request_pickup()` (no arguments: the server picks up the sender's own drops in
   reach of its server position), `_request_discard(uid)`, `_request_equip(uid,
@@ -568,8 +594,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `_respawn`s them at a random point on the spawn circle with full health and stamina
   (`revive()`, Ember back to resting). The client shows a countdown banner from the
   `HIT_DEFEATED` event.
-- No lag compensation yet: hits use targets' current server positions, while the
-  attacker sees them `interpolation_delay` in the past.
+- **Lag compensation** (see "Networking model"): a player's melee and beam hits test
+  targets where its screen showed them; projectiles and enemy swings use current
+  server positions.
 
 ## Juggernaut (Halberd, Greataxe)
 
@@ -1222,6 +1249,8 @@ powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1          # ser
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -NoBot   # server + 2 player windows
 powershell -ExecutionPolicy Bypass -File tools\run_local_test.ps1 -Party   # the bot parties with you
 powershell -ExecutionPolicy Bypass -File tools\run_server.ps1            # headless server only
+powershell -ExecutionPolicy Bypass -File tools\host_playtest.ps1         # server + your window for friends over Tailscale (HOSTING.md)
+powershell -ExecutionPolicy Bypass -File tools\export_client.ps1         # build\export\NewerWorld.zip for friends (needs export templates)
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, snapshots under one packet
@@ -1337,9 +1366,16 @@ parse ("Could not find type ..."). Run it by hand only when launching Godot anot
 `--check-only --script` gives false "Tuning not found" errors because it skips autoloads;
 use the smoke test instead.
 
-## Export notes (for later)
+## Export and hosting
 
-- `data/*.cfg` aren't Godot resources: add `data/*` to the export preset's
-  "include non-resource files" filter, or exported builds won't find tuning files.
-- The dedicated server export should use the "Dedicated Server" preset; `main.gd`
+- `export_presets.cfg` has a "Windows Desktop" preset (one exe with the pack embedded,
+  `include_filter="data/*"`: `data/*.cfg` aren't Godot resources; tests/tools/design
+  excluded). `tools\export_client.ps1` exports it to `build\export\` and zips it; it
+  needs Godot's export templates (installed from the editor; not installed as of
+  session 43, so the preset is untested).
+- Playtests with friends: `HOSTING.md` (Tailscale node sharing, firewall rule,
+  `tools\host_playtest.ps1`: a visible server console + the developer's window, prints
+  the Tailscale address; `-NoClassChange`). The developer's script: never run it from
+  an agent.
+- A dedicated server export should use the "Dedicated Server" preset; `main.gd`
   treats the `dedicated_server` feature tag like `--server`.

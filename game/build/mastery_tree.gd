@@ -82,10 +82,13 @@ var default_nodes := PackedStringArray()
 var default_slots := PackedStringArray()
 
 static var _cache: Dictionary[String, MasteryTree] = {}
+static var _cache_version := -1
 
 
-## The tree for a weapon, loaded once; null if it has no mastery file.
+## The tree for a weapon, loaded once (again when Tuning.version moves); null if
+## it has no mastery file.
 static func for_weapon(weapon: String) -> MasteryTree:
+	_check_cache()
 	if not _cache.has(weapon):
 		if not Tuning.has_file("mastery_" + weapon):
 			return null
@@ -96,6 +99,7 @@ static func for_weapon(weapon: String) -> MasteryTree:
 ## A class's Wing tree (data/mastery_wings_<class>.cfg, 2 slots), loaded once;
 ## null if it has none.
 static func for_wings(class_id: String) -> MasteryTree:
+	_check_cache()
 	var key := "wings_" + class_id
 	if not _cache.has(key):
 		if not Tuning.has_file("mastery_" + key):
@@ -104,6 +108,12 @@ static func for_wings(class_id: String) -> MasteryTree:
 		t.slot_count = PlayerState.WING_SLOTS
 		_cache[key] = t
 	return _cache[key]
+
+
+static func _check_cache() -> void:
+	if _cache_version != Tuning.version:
+		_cache_version = Tuning.version
+		_cache.clear()
 
 
 ## A tree file may set its own [tree] points (the Wing tree does); otherwise

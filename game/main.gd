@@ -12,6 +12,9 @@ const PERF_SPIKE_MS := 50.0
 
 var _world: World
 var _menu: ConnectMenu
+## Client: connected to the server, and its tuning arrived (_enter_world needs both).
+var _connected := false
+var _server_tuning := false
 var _perf_log := false
 var _perf_spikes := 0
 var _perf_worst_ms := 0.0
@@ -46,6 +49,8 @@ func _start_server() -> void:
 	# Nothing to render, so don't spin the CPU between physics ticks.
 	Engine.max_fps = Engine.physics_ticks_per_second
 	print("[server] listening on UDP port %d (max %d players)" % [port, max_players])
+	# Every client plays with the server's tuning (Tuning.send_to_peer).
+	Net.peer_joined.connect(Tuning.send_to_peer)
 	_spawn_world()
 
 
@@ -53,6 +58,7 @@ func _start_server() -> void:
 
 func _start_client() -> void:
 	Net.connected_to_server.connect(_on_connected)
+	Tuning.server_tuning_applied.connect(_on_server_tuning)
 	Net.connection_failed.connect(_on_connection_failed)
 	Net.server_disconnected.connect(_on_server_disconnected)
 	_show_menu("")
@@ -81,6 +87,8 @@ func _connect(address: String) -> void:
 	if host.is_empty() or port <= 0:
 		_menu.set_status("Enter an address like 127.0.0.1 or 127.0.0.1:%d" % default_port)
 		return
+	_connected = false
+	_server_tuning = false
 	var err := Net.connect_to_server(host, port)
 	if err != OK:
 		_menu.set_status("Could not start connecting: %s" % error_string(err))
@@ -91,6 +99,25 @@ func _connect(address: String) -> void:
 
 func _on_connected() -> void:
 	print("[client] connected as peer %d" % multiplayer.get_unique_id())
+	_connected = true
+	if _server_tuning:
+		_enter_world()
+	else:
+		_menu.set_status("Loading the server's settings...", true)
+
+
+## The server's tuning arrives right after connecting (usually just after
+## _on_connected); the World is only made once both have happened, so every
+## params cache is built from the server's values.
+func _on_server_tuning() -> void:
+	_server_tuning = true
+	if _connected:
+		_enter_world()
+
+
+func _enter_world() -> void:
+	if _world or _menu == null:
+		return
 	_menu.queue_free()
 	_menu = null
 	_spawn_world()
@@ -103,6 +130,11 @@ func _on_connection_failed(reason: String) -> void:
 
 func _on_server_disconnected() -> void:
 	print("[client] disconnected from server")
+	_connected = false
+	_server_tuning = false
+	if _menu:  # dropped while loading the server's settings
+		_menu.queue_free()
+		_menu = null
 	if _world:
 		# Remove now, not at end of frame, so a reconnect can reuse the name "World".
 		remove_child(_world)

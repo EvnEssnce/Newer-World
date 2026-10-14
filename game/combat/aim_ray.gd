@@ -52,11 +52,14 @@ class Params:
 
 
 static var _tuned: Params
+static var _tuned_version := -1
 
 
-## The real tuning from data/camera.cfg (read once).
+## The real tuning from data/camera.cfg (read once, again when Tuning.version
+## moves).
 static func tuned() -> Params:
-	if _tuned == null:
+	if _tuned == null or _tuned_version != Tuning.version:
+		_tuned_version = Tuning.version
 		_tuned = Params.new()
 		_tuned.pivot_height = Tuning.get_value("camera", "camera", "pivot_height")
 		_tuned.shoulder_offset = Tuning.get_value("camera", "camera", "shoulder_offset")

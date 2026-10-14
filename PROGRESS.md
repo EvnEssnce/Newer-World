@@ -326,13 +326,19 @@ Brief: two or three node types, one refining step, one crafting station, tradesk
     score ranges (today everything drops GS 100–140), placed as camps.
 18. **The zone:** a small map built from CC0 packs: mob camps, gathering node spawns, a
     town with crafting stations, spawn points.
-19. **Internet readiness:** lag compensation for hits (rewind targets by the attacker's
-    interpolation delay), render smoothing after corrections, the server sending its
-    tuning on connect.
+19. **Built (session 43), needs the item 21 playtest:** internet readiness. The server
+    sends its tuning on connect (clients' own `data/*.cfg` don't matter); lag
+    compensation for melee, beam and ally-support hits (`PositionHistory`, each input
+    carries the client's view tick; projectiles not rewound); the local player's model
+    and camera glide after a correction. All tunable in `data/network.cfg`.
 20. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations
     in place of the capsule (download the packs yourself; Mixamo needs an Adobe login).
 21. **Playtest with real people:** host on the developer's PC over Tailscale (free), or a
-    Hetzner CX23 billed by the hour (§7).
+    Hetzner CX23 billed by the hour (§7). **Set up in session 43**: `HOSTING.md`
+    (Tailscale node sharing, firewall rule), `tools\host_playtest.ps1`,
+    `tools\export_client.ps1` + the "Windows Desktop" export preset. **Developer to do:**
+    install Tailscale, install Godot's export templates (editor), export, share the
+    PC with a friend, play. Test the export first (session 43 couldn't: no templates).
 
 ### Class track (fits after Step E, or between steps when the developer wants)
 
@@ -365,6 +371,12 @@ trees, Wings, models), plus the systems it needs:
 ## 4. Outstanding work
 
 ### Needs a hand playtest (`run_local_test.ps1`)
+
+**Session 43, with a friend over Tailscale (`HOSTING.md`):** the export runs on their
+PC and connects; hits land on what you see at their ping (try `[lag_compensation]
+enabled=false` for comparison); no visible jerks after corrections; the HUD's
+correction count stays low; a tuning edit on your side reaches them after a server
+restart.
 
 **Done in session 41:** class picker, loot, gear, training dummy (feedback in Step A2).
 Recheck after A2: the I/K panels, gear comparisons, Kindle, 0.75 s equip.
@@ -557,10 +569,15 @@ Gameplay:
 Networking:
 - Snapshots fit one packet up to about 7 players in view (6 bots: max ~1,130 of 1,360
   bytes); more needs interest management (step 7).
-- No lag compensation; hit events arrive before the attacker's swing is drawn on other
-  clients; no render smoothing after a correction (step 19).
-- Server and client read tuning separately: different `data/*.cfg` files mean constant
-  corrections (step 19: send tuning on connect).
+- Hit events arrive before the attacker's swing is drawn on other clients (they see
+  the damage number a little early).
+- Lag compensation (session 43) covers melee, beams and ally support only:
+  projectiles, zones, shock rings and the beam's aim raycast use current positions.
+  It favours the attacker: at high ping a target can be hit after reaching cover
+  (capped at `max_rewind` 0.35 s). Not yet tested with real latency (localhost
+  rewinds ~8 ticks).
+- No build check: a friend running older code than the server gets odd failures, not
+  a clear message (re-export after code changes; HOSTING.md).
 - About 1 smoke run in 15–20 shows a few (≤4) small unexpected corrections on flat ground.
   **To chase (sessions 34–36):** in long back-to-back matrices about 1 run in 4 showed
   one correction, mostly at seq 7–8 right after spawning (server y 0.0008 on the
@@ -656,6 +673,7 @@ Full entries for sessions 1–28 are in git history: `git show 5cc5148:PROGRESS.
 | 40 | 2026-10-11 | In-game class change (test tool, `data/testing.cfg [class_change] enabled`): a Class picker at the top of the K panel → `BuildService._request_class`; refused in combat or mid-action (`PlayerState.class_change_error`) or without bag room; a clean start (`reset_for_class_change`, `Player.reset_class_state`, the class's default build, other classes' gear back to the bag, full health). 525 tests (8 new). A bot patched (locally, not committed) to switch every 2.5 s went through all six classes twice, refusals in combat and mid-action as expected, 0 corrections; screenshots of the panel before and after a switch. Smoke Fighter: 4 runs, each failed one known luck check (force ×2, gear, guard); `-Party` passed apart from the Linux quit race |
 | 41 | 2026-10-13 | Back on Windows: pulled sessions 27–40 (a new checkout/pull needs `--headless --import` once, or `world.gd` fails on unknown classes like `NetCodec`). Smoke on Windows PowerShell 5.1: default, `-Party`, `-Class juggernaut` all pass, 0 corrections. Playtest of loot, gear, dummy, class picker, most of the Assassin: feedback planned as Step A2; drops GS 101–140, equip 0.75 s. Then Step A2.1–A2.3 by three parallel agents, merged on `feedback-a2` (no conflicts): denser I panel with filters/sort/affix comparisons and tooltips, bigger K panel, I/K close each other; HUD health number and equipment summary; dummy `always_aware`, Kindle `min_rarity` Epic+, zone-look shader prewarm. New `toolsscreenshot_run.ps1` (hidden server, unfocusable client window); every tools script now runs `--import` first. 536 tests; smoke default, `-Party`, Juggernaut, Assassin pass (0–1 corrections) After its playtest (I/K, HUD, filters, 40 slots, dummy and Shield Wall fixes all approved): bag cards show ▲/▼ (both for a trade-off) instead of the clipped stat line (details on hover); empty slots count GS 100 in the average. Tool scripts start console Godot hidden and run in-process (a console window had minimized the developer's fullscreen game). Merged to main. Then the class playtest (Ranger, Mage, Assassin leftovers; Paladin fine) → Step A3; Firebolts ×1.6 slower, Withering Touch 10 m, Gauntlet heavy 8 m; A3.1 (crosshair, `AimRay`, aimed projectiles with pitch, 0.7 m shoulder camera), A3.3 (Blink/Ashstep teleports), A3.4 (beam visuals, wall zones count overlapping bodies) by three parallel agents, merged on `feedback-a3` (no conflicts). 562 tests; smoke default, `-Party`, Mage, Ranger, Assassin pass first time, 0 corrections. After the limit reset, batch 1 of the rest (four agents): A3.2 + A3.5 (zones at the crosshair, Fire Trail strips), A2.4 + A3.6 (knife ammo, Recall rips out embedded knives), A2.6 (`requires`, Shadow Swap under Ember Double, a 44-node audit), Step B 4–5 (Earthshaker `ShockRing`, wider Shockwave, Hooked needs its capstone, Shatter 6 s, slower Meteor Drop climb, Upheaval slam pose); one keep-both conflict (the key list in `weapon_broadsword.cfg`). 607 tests; smoke default, `-Party` and all six classes pass first time, 0 corrections. Then A2.5 (animation canceling) alone, merged clean, plus a bot fix (it was canceling its own heavies): 620 tests; smoke `-Party` ×3, default, Juggernaut, Assassin pass, 0 corrections |
 | 42 | 2026-10-14 | Playtest of Step A3 and batch 1 (approved: Blink, Ashstep, beams, Flame Wall, canceling, Ranger; Recall one hit per target and teleports stopping at walls confirmed) → Step A4. Data: higher, farther camera (pivot 2.0, distance 5.5), 1 s knife reload, Sanctified Ground at your feet. `feedback-a3` merged to main and pushed. Five agents on `feedback-a4`: A4.1 (melee facing toward the crosshair line, hold-to-aim area abilities), A4.2 (projectile glow, Meteor Fall warning/burst, decoy countdown, Tripwire crouch), A4.3 (channel dodge, Updraft dodge exit, rooted teleports, Shadow Swap needs a decoy, partial knife heavy, Recall carries Venom), Step B3 (Juggernaut weight + hyper armor), A2.7 (Husk navmesh); one keep-both conflict (`attack_params.gd`). Bot fix: bots aim with the crosshair line through their target (after A4.1 their swings veered right and missed Husks: the `-Party` force check failed 3 runs in a row). 671 tests; smoke default ×3, `-Party` ×3, all classes pass (Juggernaut player knockbacks now 1–2 per run because of hyper armor: a thinner luck margin), 0–1 corrections. Then the playtest approved all of it; one fix: beams aim like projectiles (agent; 682 tests, all smoke runs pass first time, 0 corrections); `feedback-a4` merged to main and pushed |
+| 43 | 2026-10-14 | Step G item 19 (internet readiness) + item 21 setup. **Server tuning on connect**: `Tuning.pack`/`apply_packed` (var_to_bytes + zstd, ~35 KB), sent on `peer_joined`; the client makes the World only after it arrives; `Tuning.version` makes every tuning cache rebuild. Checked: a server at move speed 9 with a client's files at 6 → 0 corrections. **Lag compensation**: `PositionHistory` per player/enemy, inputs carry `view_tick`, melee/beam/ally-support touch tests rewound (`[lag_compensation]`, max 0.35 s, never past a teleport); `SUMMARY lag_comp`. **Correction smoothing**: `CorrectionSmoothing` offsets the local model and camera (0.12 s, snaps over 1 m). Hosting: `HOSTING.md`, `tools\host_playtest.ps1`, `tools\export_client.ps1`, `export_presets.cfg` (untested: no export templates installed). 698 tests (16 new); smoke default, `-Party`, Mage pass, 0 corrections. Needs: the developer's setup and a playtest with a friend |
 
 ---
 

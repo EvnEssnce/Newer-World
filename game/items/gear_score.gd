@@ -20,10 +20,12 @@ var equip_ticks := 60
 var average_weights: Dictionary = {}
 
 static var _current: GearScore
+static var _current_version := -1
 
 
 static func current() -> GearScore:
-	if _current == null:
+	if _current == null or _current_version != Tuning.version:
+		_current_version = Tuning.version
 		_current = from_tuning()
 	return _current
 

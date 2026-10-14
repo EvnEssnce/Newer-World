@@ -57,10 +57,15 @@ var attack: AttackParams
 var loot_table := ""
 
 static var _cache: Dictionary[String, EnemyParams] = {}
+static var _cache_version := -1
 
 
-## The tuning for an enemy kind (e.g. "husk"), loaded once.
+## The tuning for an enemy kind (e.g. "husk"), loaded once (again when
+## Tuning.version moves).
 static func for_kind(kind: String) -> EnemyParams:
+	if _cache_version != Tuning.version:
+		_cache_version = Tuning.version
+		_cache.clear()
 	if not _cache.has(kind):
 		_cache[kind] = from_tuning("enemy_" + kind)
 	return _cache[kind]

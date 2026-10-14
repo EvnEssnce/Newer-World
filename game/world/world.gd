@@ -64,6 +64,18 @@ const ABILITY_KEYS := [
 # Server
 var _tick := 0
 var _snapshot_interval := 3
+## Lag compensation ([lag_compensation] in data/network.cfg): where every player
+## and enemy stood on recent ticks (by peer id / enemy id), so a player's melee
+## and beam hits are tested where its client drew the targets (_lag_position).
+var _lag_comp := true
+var _lag_max_rewind := 21
+var _lag_break_distance := 1.5
+var _histories: Dictionary[int, PositionHistory] = {}
+var _lag_rewound_tests := 0
+var _lag_rewind_ticks := 0
+var _lag_rewind_ticks_max := 0
+## Hits that landed only because of the rewind (the target's current position missed).
+var _lag_saved_hits := 0
 ## Snapshot sizes (encoded bytes, per recipient), for "SUMMARY net".
 var _snapshots_sent := 0
 var _snapshot_bytes := 0
@@ -266,6 +278,10 @@ func _ready() -> void:
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
 		_max_input_buffer = Tuning.get_value("network", "server", "max_input_buffer")
 		_max_inputs_per_tick = Tuning.get_value("network", "server", "max_inputs_per_tick")
+		_lag_comp = Tuning.get_value("network", "lag_compensation", "enabled")
+		_lag_max_rewind = roundi(float(Tuning.get_value("network", "lag_compensation", "max_rewind"))
+				* Engine.physics_ticks_per_second)
+		_lag_break_distance = Tuning.get_value("network", "lag_compensation", "teleport_distance")
 		Net.peer_left.connect(_on_peer_left)
 		enemy_navigation = EnemyNavigation.new()
 		enemy_navigation.name = "EnemyNav"
@@ -354,8 +370,54 @@ func _server_tick(delta: float) -> void:
 	_projectiles.server_step(delta)
 	_step_shock_rings(delta)
 	zones.server_step()
+	_record_positions()
 	if _tick % _snapshot_interval == 0:
 		_broadcast_snapshot()
+
+
+## Lag compensation: every player's and enemy's position at the end of this tick
+## (what a snapshot sent now shows).
+func _record_positions() -> void:
+	if not _lag_comp:
+		return
+	for player: Player in _players.get_children():
+		_history_of(player.peer_id).record(_tick, player.global_position)
+	for enemy: Enemy in _enemies.get_children():
+		_history_of(enemy.enemy_id).record(_tick, enemy.global_position)
+
+
+func _history_of(id: int) -> PositionHistory:
+	var history: PositionHistory = _histories.get(id)
+	if history == null:
+		# A few ticks more than the longest rewind, so an old view still finds one.
+		history = PositionHistory.new(_lag_max_rewind + 3, _lag_break_distance)
+		_histories[id] = history
+	return history
+
+
+## Server: where a target (peer id, or enemy id < 0) is tested for one of
+## `attacker`'s hits: where it stood on the tick the attacker's client was
+## drawing it (Player.last_view_tick, at most [lag_compensation] max_rewind
+## back), not where it is now. Only the touch test moves back: blocks, parries,
+## facing and i-frames stay the target's own, current ones.
+func _lag_position(attacker: Player, target_id: int, current: Vector3) -> Vector3:
+	if not _lag_comp or attacker.last_view_tick < 0 or not _histories.has(target_id):
+		return current
+	var view := clampi(attacker.last_view_tick, _tick - _lag_max_rewind, _tick)
+	var rewound := _histories[target_id].at(view, current)
+	if rewound != current:
+		_lag_rewound_tests += 1
+		_lag_rewind_ticks += _tick - view
+		_lag_rewind_ticks_max = maxi(_lag_rewind_ticks_max, _tick - view)
+	return rewound
+
+
+## Counts a hit that the target's current position would have missed.
+func _note_lag_hit(attacker: Player, attack: AttackParams, beam: PackedVector3Array,
+		tested: Vector3, current: Vector3, radius: float, height: float) -> void:
+	if tested != current and not MeleeHitbox.touches(attacker.global_position,
+			attacker.state.yaw, attack, beam, current, radius, height):
+		_lag_saved_hits += 1
 
 
 ## Each recipient gets its own player's full entry (Player.get_snapshot: what
@@ -452,6 +514,7 @@ func _on_peer_left(peer_id: int) -> void:
 	if player:
 		_players.remove_child(player)
 		player.queue_free()
+	_histories.erase(peer_id)
 	print("[server] peer %d left (%d players)" % [peer_id, _players.get_child_count()])
 
 
@@ -499,11 +562,15 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	for target: Player in _players.get_children():
 		if target == attacker:
 			continue
-		if _ally_support(attacker, attack, target, beam) or attack.allies_only:
+		var target_pos := _lag_position(attacker, target.peer_id, target.global_position)
+		if _ally_support(attacker, attack, target, beam, target_pos) or attack.allies_only:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
-				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute,
-				beam)
+				attacker.state.yaw, attack, attacker.attack_results, target, target_pos,
+				damage_scale, execute, beam)
+		if result >= 0:
+			_note_lag_hit(attacker, attack, beam, target_pos, target.global_position,
+					Player.BODY_RADIUS, Player.BODY_HEIGHT)
 		if result in [HIT_BLOCKED, HIT_GUARD_BROKEN, HIT_EVADED]:
 			read = true
 		if result >= 0:
@@ -516,9 +583,12 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id) or attack.allies_only:
 			continue
+		var enemy_pos := _lag_position(attacker, enemy.enemy_id, enemy.global_position)
 		if not MeleeHitbox.touches(attacker.global_position, attacker.state.yaw, attack, beam,
-				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
+				enemy_pos, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
+		_note_lag_hit(attacker, attack, beam, enemy_pos, enemy.global_position,
+				Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT)
 		attacker.attack_results[enemy.enemy_id] = true
 		connected += 1
 		if enemy.brain.mode == EnemyBrain.Mode.ATTACK:
@@ -626,7 +696,8 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 	var damage_scale := enemy.statuses.damage_dealt_multiplier(enemy.status_defs)
 	for target: Player in _players.get_children():
 		var result := _strike_player(enemy.enemy_id, enemy.global_position, enemy.brain.yaw,
-				enemy.params.attack, enemy.attack_results, target, damage_scale)
+				enemy.params.attack, enemy.attack_results, target, target.global_position,
+				damage_scale)
 		if result >= 0 and result != HIT_EVADED:
 			_enemy_hits += 1
 			_judgment(enemy, target)
@@ -647,11 +718,13 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 ## already did).
 func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, results: Dictionary[int, bool], target: Player,
-		damage_scale: float = 1.0, execute := Vector2.ZERO,
+		target_pos: Vector3, damage_scale: float = 1.0, execute := Vector2.ZERO,
 		beam := PackedVector3Array()) -> int:
 	if target.state.dead or results.get(target.peer_id, false):
 		return -1
-	if not MeleeHitbox.touches(attacker_pos, attacker_yaw, attack, beam, target.global_position,
+	# target_pos: where the hitbox tests the target (World._lag_position for a
+	# player's attack; its current position for an enemy's).
+	if not MeleeHitbox.touches(attacker_pos, attacker_yaw, attack, beam, target_pos,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
 		return -1
 	var result := resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
@@ -1245,14 +1318,14 @@ func _parting_shot(player: Player) -> void:
 ## itself) that the hitbox touches is healed or shielded once per hit window
 ## instead of struck. Returns true if `target` is such an ally (handled or not).
 func _ally_support(attacker: Player, attack: AttackParams, target: Player,
-		beam: PackedVector3Array) -> bool:
+		beam: PackedVector3Array, target_pos: Vector3) -> bool:
 	if not _supports_allies(attack):
 		return false
 	if not are_allies(attacker.peer_id, target.peer_id):
 		return false
 	if (attacker.attack_results.has(target.peer_id)
 			or not MeleeHitbox.touches(attacker.global_position, attacker.state.yaw, attack, beam,
-				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT)):
+				target_pos, Player.BODY_RADIUS, Player.BODY_HEIGHT)):
 		return true
 	if target.state.dead:
 		# Kindle Life: its last hit window raises a fallen ally it touches.
@@ -2475,8 +2548,11 @@ func _client_tick(delta: float) -> void:
 			buttons |= PlayerState.BUTTON_ATTACK
 		if captured and Input.is_action_pressed(&"block"):
 			buttons |= PlayerState.BUTTON_BLOCK
+	# The tick everyone else is drawn at: the server tests this input's hits there
+	# (lag compensation).
+	var view_tick := roundi(render_tick())
 	var inputs := _local_player.client_predict(move, buttons, aim_yaw, aim_pitch, delta,
-			_input_redundancy)
+			_input_redundancy, view_tick)
 	_submit_inputs.rpc_id(1, inputs)
 
 
@@ -3121,6 +3197,9 @@ func print_summary() -> void:
 		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [
 				_snapshots_sent, _snapshot_bytes / maxi(1, _snapshots_sent), _snapshot_bytes_max,
 				_entry_bytes_max[0], _entry_bytes_max[1], _entry_bytes_max[2]])
+		print("SUMMARY lag_comp enabled=%s rewound_tests=%d rewind_ticks_avg=%.1f rewind_ticks_max=%d saved_hits=%d" % [
+				_lag_comp, _lag_rewound_tests, _lag_rewind_ticks / maxf(1.0, _lag_rewound_tests),
+				_lag_rewind_ticks_max, _lag_saved_hits])
 		return
 	_projectiles.print_client_summary()
 	loot.print_client_summary()

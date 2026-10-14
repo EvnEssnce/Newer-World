@@ -111,11 +111,14 @@ var rebirth_health_fraction := 0.0
 var rebirth_cooldown_ticks := 0
 
 static var _current: PlayerParams
+static var _current_version := -1
 
 
-## The game's tuning, loaded once. Tuning edits need a restart.
+## The game's tuning, loaded once (again when Tuning.version moves: the
+## server's tuning). Tuning edits need a restart.
 static func current() -> PlayerParams:
-	if _current == null:
+	if _current == null or _current_version != Tuning.version:
+		_current_version = Tuning.version
 		_current = from_tuning()
 	return _current
 

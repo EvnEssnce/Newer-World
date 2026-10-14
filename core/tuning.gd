@@ -8,8 +8,20 @@ extends Node
 ## A launch option can override a value for one run (tests use this), e.g.
 ## --tune=combat/health/max=300. Pass the same overrides to the server and every
 ## client, or prediction will disagree with the server.
+##
+## Online, the server's tuning wins: it sends every file (with its overrides) to
+## each client as it connects (send_to_peer), and the client replaces its own
+## before the World is made (server_tuning_applied), so a client with older or
+## edited data/*.cfg files still predicts exactly what the server simulates.
+
+## Client: the server's tuning arrived and replaced this client's.
+signal server_tuning_applied
 
 const DATA_DIR := "res://data/"
+
+## Bumped whenever the values change (reload, the server's tuning). Classes that
+## cache what they read (PlayerParams, ItemDatabase, ...) rebuild when it moves.
+var version := 0
 
 var _files: Dictionary[String, ConfigFile] = {}
 
@@ -18,7 +30,75 @@ func _init() -> void:
 	reload()
 
 
+## Server: sends this process's tuning (overrides included) to a peer that just
+## connected.
+func send_to_peer(peer_id: int) -> void:
+	var packed := pack()
+	_receive_server_tuning.rpc_id(peer_id, packed.size(),
+			packed.compress(FileAccess.COMPRESSION_ZSTD))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_server_tuning(size: int, compressed: PackedByteArray) -> void:
+	# Bounded, so a broken packet can't ask for a huge buffer.
+	if size <= 0 or size > 16 * 1024 * 1024:
+		push_error("Tuning: the server's tuning has a bad size (%d)" % size)
+		return
+	var packed := compressed.decompress(size, FileAccess.COMPRESSION_ZSTD)
+	if not apply_packed(packed):
+		push_error("Tuning: couldn't read the server's tuning (%d bytes)" % compressed.size())
+		return
+	if not LaunchArgs.get_values("tune").is_empty():
+		print("Tuning: the server's tuning replaces this client's --tune overrides")
+	print("Tuning: using the server's tuning (%d files, %d bytes compressed)" % [
+			_files.size(), compressed.size()])
+	server_tuning_applied.emit()
+
+
+## Every file's values as bytes: {file: {section: {key: value}}} through
+## var_to_bytes, so every value comes back with the same type and bits.
+func pack() -> PackedByteArray:
+	var all := {}
+	for file: String in _files:
+		var cfg := _files[file]
+		var sections := {}
+		for section in cfg.get_sections():
+			var keys := {}
+			for key in cfg.get_section_keys(section):
+				keys[key] = cfg.get_value(section, key)
+			sections[section] = keys
+		all[file] = sections
+	return var_to_bytes(all)
+
+
+## Replaces every file with what pack() made (section and key order kept).
+## False, changing nothing, if the bytes aren't a pack.
+func apply_packed(packed: PackedByteArray) -> bool:
+	var all: Variant = bytes_to_var(packed) if not packed.is_empty() else null
+	if not all is Dictionary:
+		return false
+	var files: Dictionary[String, ConfigFile] = {}
+	for file: Variant in all:
+		var sections: Variant = all[file]
+		if not (file is String and sections is Dictionary):
+			return false
+		var cfg := ConfigFile.new()
+		for section: Variant in sections:
+			var keys: Variant = sections[section]
+			if not (section is String and keys is Dictionary):
+				return false
+			for key: Variant in keys:
+				if not key is String:
+					return false
+				cfg.set_value(section, key, keys[key])
+		files[file] = cfg
+	_files = files
+	version += 1
+	return true
+
+
 func reload() -> void:
+	version += 1
 	_files.clear()
 	for file_name in DirAccess.get_files_at(DATA_DIR):
 		if file_name.get_extension() != "cfg":

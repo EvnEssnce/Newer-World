@@ -17,10 +17,15 @@ var default_loadout := PackedStringArray()
 var ember_gain := 1.0
 
 static var _cache: Dictionary[String, ClassDef] = {}
+static var _cache_version := -1
 
 
-## The class with this id, loaded once; null if there's no data file for it.
+## The class with this id, loaded once (again when Tuning.version moves); null
+## if there's no data file for it.
 static func for_id(class_id: String) -> ClassDef:
+	if _cache_version != Tuning.version:
+		_cache_version = Tuning.version
+		_cache.clear()
 	if not _cache.has(class_id):
 		if not class_id.is_valid_identifier() or not Tuning.has_file("class_" + class_id):
 			return null

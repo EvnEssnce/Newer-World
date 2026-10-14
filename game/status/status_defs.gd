@@ -9,11 +9,14 @@ const FILE := "status_effects"
 var defs: Array[StatusDef] = []
 
 static var _current: StatusDefs
+static var _current_version := -1
 
 
-## The game's statuses, loaded once. Tuning edits need a restart.
+## The game's statuses, loaded once (again when Tuning.version moves). Tuning
+## edits need a restart.
 static func current() -> StatusDefs:
-	if _current == null:
+	if _current == null or _current_version != Tuning.version:
+		_current_version = Tuning.version
 		_current = from_tuning()
 	return _current
 

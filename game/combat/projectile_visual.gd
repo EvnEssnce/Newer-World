@@ -49,6 +49,8 @@ static var _halo_materials: Dictionary[String, StandardMaterial3D] = {}
 static var _trail_meshes: Dictionary[String, Mesh] = {}
 static var _trail_material: StandardMaterial3D
 static var _quad: QuadMesh
+## Tuning.version the per-kind looks above were built from.
+static var _looks_version := -1
 
 var _params: ProjectileParams
 var _spin := 0.0
@@ -149,6 +151,7 @@ func _make_invisible() -> void:
 
 
 static func _mesh_for(p: ProjectileParams) -> Mesh:
+	_check_looks_version()
 	if not _meshes.has(p.id):
 		match p.visual:
 			ProjectileParams.VISUAL_AXE:
@@ -285,6 +288,7 @@ static func _quad_mesh() -> QuadMesh:
 ## fading out at the edge. Unshaded so the light doesn't dim it; drawn before
 ## the body (render_priority) so the body shows on top of it.
 static func _halo_material(p: ProjectileParams) -> StandardMaterial3D:
+	_check_looks_version()
 	if not _halo_materials.has(p.id):
 		var gradient := Gradient.new()
 		gradient.offsets = PackedFloat32Array([0.0, 0.16, 0.55, 1.0])
@@ -313,6 +317,7 @@ static func _halo_material(p: ProjectileParams) -> StandardMaterial3D:
 ## tapering, bright at the head and fading to clear; two crossed strips (one
 ## flat on the ground for a wave) so it shows from any side. Scaled per frame.
 static func _trail_mesh(p: ProjectileParams) -> Mesh:
+	_check_looks_version()
 	if not _trail_meshes.has(p.id):
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -338,3 +343,13 @@ static func _trail_mat() -> StandardMaterial3D:
 		_trail_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_trail_material.render_priority = -1
 	return _trail_material
+
+
+## Rebuilds every kind's look once Tuning.version moves (the server's tuning
+## can change a kind's length or color).
+static func _check_looks_version() -> void:
+	if _looks_version != Tuning.version:
+		_looks_version = Tuning.version
+		_meshes.clear()
+		_halo_materials.clear()
+		_trail_meshes.clear()

@@ -14,6 +14,7 @@ const TRIGGER_TRAP := "trap"
 const TRIGGER_NONE := "none"
 
 static var _kinds: Dictionary[String, ZoneParams] = {}
+static var _kinds_version := -1
 
 var id := ""
 ## Circle radius (m), and how far above or below its center a target's feet may
@@ -65,7 +66,11 @@ var visual := "disc"
 var color := Color.WHITE
 
 
+## Loaded once, again when Tuning.version moves.
 static func get_kind(kind: String) -> ZoneParams:
+	if _kinds_version != Tuning.version:
+		_kinds_version = Tuning.version
+		_kinds.clear()
 	if _kinds.is_empty() and Tuning.has_file("zones"):
 		var tps := float(Engine.physics_ticks_per_second)
 		for section in Tuning.get_sections("zones"):

@@ -62,13 +62,16 @@ var homing_range := 0.0
 var hits := true
 
 static var _kinds: Dictionary[String, ProjectileParams] = {}
-static var _loaded := false
+## Tuning.version the kinds were loaded from (-1 = not yet).
+static var _loaded_version := -1
 
 
-## The kind with this id from data/projectiles.cfg (loaded once), or null.
+## The kind with this id from data/projectiles.cfg (loaded once, again when
+## Tuning.version moves), or null.
 static func get_kind(kind_id: String) -> ProjectileParams:
-	if not _loaded:
-		_loaded = true
+	if _loaded_version != Tuning.version:
+		_loaded_version = Tuning.version
+		_kinds.clear()
 		var tps := float(Engine.physics_ticks_per_second)
 		for section in Tuning.get_sections(FILE):
 			if section.begins_with("projectile_"):

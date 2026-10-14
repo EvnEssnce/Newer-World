@@ -68,11 +68,14 @@ var tables: Dictionary[String, LootTable] = {}
 var gear := GearScore.new()
 
 static var _current: ItemDatabase
+static var _current_version := -1
 
 
-## The game's definitions, loaded once. Edits need a server restart.
+## The game's definitions, loaded once (again when Tuning.version moves: the
+## server's tuning). Edits need a server restart.
 static func current() -> ItemDatabase:
-	if _current == null:
+	if _current == null or _current_version != Tuning.version:
+		_current_version = Tuning.version
 		_current = from_tuning()
 		for problem in _current.validate():
 			push_error("Item data: " + problem)

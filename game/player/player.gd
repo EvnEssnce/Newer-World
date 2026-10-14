@@ -11,9 +11,11 @@ extends CharacterBody3D
 ##   server snapshots.
 ##
 ## Inputs are [seq: int, move: Vector2, buttons: int, aim_yaw: float,
-## aim_pitch: float]. "move" is a world-space XZ direction with length <= 1,
-## already rotated by the client's camera; "buttons" holds PlayerState.BUTTON_*
-## bits; "aim_yaw" and "aim_pitch" are the camera's yaw and pitch (up = positive).
+## aim_pitch: float, view_tick: int]. "move" is a world-space XZ direction with
+## length <= 1, already rotated by the client's camera; "buttons" holds
+## PlayerState.BUTTON_* bits; "aim_yaw" and "aim_pitch" are the camera's yaw and
+## pitch (up = positive); "view_tick" is the server tick the client was drawing
+## everyone else at (lag compensation; -1 = none yet). It isn't sim state.
 
 ## Server only: emitted after each sim step in which an attack's hitbox is live.
 signal attack_stepped(player: Player)
@@ -200,6 +202,10 @@ var wall_stun_source := 0
 ## (aim_ray; not sim state: only projectiles, server state, use it).
 var last_aim_yaw := 0.0
 var last_aim_pitch := 0.0
+## Server: the server tick this player's client was drawing everyone else at
+## when it sent the input being simulated (-1 = unknown); World._lag_position
+## tests its hits there. Unchecked here: World clamps it.
+var last_view_tick := -1
 ## Server: where the current (or last) roll started, and whether the last step
 ## ended rolling (for roll_ended).
 var roll_start := Vector3.ZERO
@@ -217,7 +223,12 @@ var _latest_ack: Array = []  # [pos, vel, seq, state array] from the newest snap
 var _last_ack_seq := 0
 var _reconciled_seq := 0
 var _camera_pivot: Node3D
+var _camera_pivot_height := 0.0
 var _spring_arm: SpringArm3D
+## Glides the drawn model and camera after a correction (null until the camera exists).
+var _smoothing: CorrectionSmoothing
+## Where the model is drawn relative to the body (the smoothing; zero for others).
+var _draw_offset := Vector3.ZERO
 
 # Remote client
 var _snapshots: Array[Array] = []  # [server_time, pos, PlayerState]
@@ -287,8 +298,11 @@ func _ready() -> void:
 		_setup_camera()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if is_local:
+		if _smoothing:
+			_draw_offset = _smoothing.step(delta)
+			_camera_pivot.position = Vector3(0.0, _camera_pivot_height, 0.0) + _draw_offset
 		_show(state, state.yaw, state.dodge_progress(params), state.attack_tick)
 
 
@@ -356,9 +370,9 @@ func on_hit_statuses_for_window() -> Array[Vector2i]:
 
 func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 	for input: Variant in inputs:
-		if not (input is Array and input.size() == 5 and input[0] is int
+		if not (input is Array and input.size() == 6 and input[0] is int
 				and input[1] is Vector2 and input[2] is int and input[3] is float
-				and input[4] is float):
+				and input[4] is float and input[5] is int):
 			continue
 		var seq: int = input[0]
 		var move: Vector2 = input[1]
@@ -370,7 +384,7 @@ func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 		if verbose and seq != _last_queued_seq + 1 and _last_queued_seq > 0:
 			print("[server] peer %d inputs %d-%d never arrived" % [peer_id, _last_queued_seq + 1, seq - 1])
 		_input_queue.append([seq, move.limit_length(1.0), input[2] & PlayerState.ALL_BUTTONS,
-				aim_yaw, clampf(aim_pitch, -PI / 2.0, PI / 2.0)])
+				aim_yaw, clampf(aim_pitch, -PI / 2.0, PI / 2.0), input[5]])
 		_last_queued_seq = seq
 	while _input_queue.size() > max_buffer:
 		if verbose:
@@ -383,6 +397,7 @@ func server_queue_inputs(inputs: Array, max_buffer: int) -> void:
 func server_process_inputs(max_per_tick: int, delta: float) -> void:
 	for i in mini(max_per_tick, _input_queue.size()):
 		var input: Array = _input_queue.pop_front()
+		last_view_tick = input[5]
 		_simulate(input[1], input[2], input[3], input[4], delta)
 		last_processed_seq = input[0]
 
@@ -509,11 +524,11 @@ func damage_taken_multiplier() -> float:
 ## Predicts one step from this tick's input and returns the inputs to send.
 ## move_input is camera-relative (x right, y back).
 func client_predict(move_input: Vector2, buttons: int, aim_yaw: float, aim_pitch: float,
-		delta: float, redundancy: int) -> Array:
+		delta: float, redundancy: int, view_tick: int = -1) -> Array:
 	_reconcile(delta)
 	var world := Vector3(move_input.x, 0.0, move_input.y).rotated(Vector3.UP, get_camera_yaw())
 	var move := Vector2(world.x, world.z).limit_length(1.0)
-	var input := [_next_seq, move, buttons, aim_yaw, aim_pitch]
+	var input := [_next_seq, move, buttons, aim_yaw, aim_pitch, view_tick]
 	_next_seq += 1
 	_pending_inputs.append(input)
 	if _pending_inputs.size() > MAX_PENDING_INPUTS:
@@ -569,6 +584,7 @@ func _reconcile(delta: float) -> void:
 			print("[client] unexpected correction at seq %d: server %s, predicted %s\n  server state %s\n  predicted state %s" % [
 					ack_seq, server_pos, predicted[0] if predicted != null else "none",
 					server_state.to_array(), predicted[1].to_array() if predicted != null else "none"])
+	var drawn_at := global_position
 	global_position = server_pos
 	velocity = server_vel
 	state = server_state
@@ -579,6 +595,9 @@ func _reconcile(delta: float) -> void:
 	for input in _pending_inputs:
 		PlayerMovement.step(self, state, input[1], input[2], input[3], params, delta, input[4])
 		_predictions[input[0]] = [global_position, state.copy()]
+	# The model and camera glide from where they were drawn (CorrectionSmoothing).
+	if _smoothing:
+		_smoothing.add_jump(global_position - drawn_at)
 
 
 func get_camera_yaw() -> float:
@@ -612,8 +631,12 @@ func aim_ray() -> AimRay:
 func _setup_camera() -> void:
 	_camera_pivot = Node3D.new()
 	_camera_pivot.name = "CameraPivot"
-	_camera_pivot.position.y = Tuning.get_value("camera", "camera", "pivot_height")
+	_camera_pivot_height = Tuning.get_value("camera", "camera", "pivot_height")
+	_camera_pivot.position.y = _camera_pivot_height
 	add_child(_camera_pivot)
+	_smoothing = CorrectionSmoothing.new(
+			Tuning.get_value("network", "client", "correction_smoothing"),
+			Tuning.get_value("network", "client", "correction_snap_distance"))
 	_spring_arm = SpringArm3D.new()
 	# Over the shoulder: the arm's origin is AimRay.shoulder (right of the yaw).
 	_spring_arm.position.x = Tuning.get_value("camera", "camera", "shoulder_offset")
@@ -759,7 +782,7 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 		spin = _spin_offset(ability, attack_tick)
 	var lift := ability.leap_lift(attack_tick) if ability else 0.0
 	_model.rotation.y = yaw + spin
-	_model.position.y = lift
+	_model.position = _draw_offset + Vector3.UP * lift
 	if view.dead:
 		# Face down on the ground; a Rebirth stands the body back up at the end.
 		var rise := _rebirth_rise(view)
