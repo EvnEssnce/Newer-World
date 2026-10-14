@@ -45,6 +45,14 @@ var impact_radius := 0.0
 ## Cosmetic (clients only): a box attack drawn as a conjured beam of this color
 ## along its hitbox (BeamVisual). Alpha 0 (the default) = no beam.
 var beam_color := Color(0.0, 0.0, 0.0, 0.0)
+## An aimed beam (aimed_beam key; on by default for a box with beam_color): its
+## hitbox isn't the level box along the facing but a line from the beam origin
+## (AimRay.beam_origin: where a projectile is released) toward the crosshair's
+## aim point, pitch included, hitbox_range long and hitbox_width thick
+## (MeleeHitbox.beam_hits; hitbox_height is unused). Re-aimed every tick, so a
+## channel follows the crosshair. Its facing heads for the crosshair's line at
+## its full range (aim_reach), like a throw's heading.
+var aimed_beam := false
 ## Knockback / pull / launch on hit (force_* keys), or null for none.
 var force: ForceParams = null
 ## This attack's own execute bonus (Executioner's Swing; execute_damage /
@@ -169,8 +177,11 @@ func total_ticks() -> int:
 
 ## Meters ahead where this attack's facing crosses the crosshair's line
 ## (AimRay.attack_facing): `fraction` of a box or cone hitbox's range; 0 (face
-## the aim yaw) for an all-round hitbox or none. AbilityParams adds its dash.
+## the aim yaw) for an all-round hitbox or none; an aimed beam's whole range
+## (it heads for the aim point like a throw). AbilityParams adds its dash.
 func aim_reach(fraction: float) -> float:
+	if aimed_beam:
+		return hitbox_range
 	if shape == SHAPE_BOX or (shape == SHAPE_RADIAL and hitbox_arc > 0.0):
 		return hitbox_range * fraction
 	return 0.0
@@ -227,6 +238,8 @@ func load_from(file: String, section: String, tps: float) -> void:
 	max_targets = Tuning.get_optional(file, section, "max_targets", 0)
 	impact_radius = Tuning.get_optional(file, section, "impact_radius", 0.0)
 	beam_color = Tuning.get_optional(file, section, "beam_color", Color(0.0, 0.0, 0.0, 0.0))
+	aimed_beam = shape == SHAPE_BOX and Tuning.get_optional(file, section, "aimed_beam",
+			beam_color.a > 0.0)
 	execute = Vector2(Tuning.get_optional(file, section, "execute_damage", 0.0),
 			Tuning.get_optional(file, section, "execute_threshold", 0.0))
 	set_hyper_armor(Tuning.get_optional(file, section, "armor_start", 0.0),
@@ -310,6 +323,7 @@ func radial_copy(radius: float) -> AttackParams:
 	result.shape = SHAPE_RADIAL
 	result.hitbox_range = radius
 	result.hitbox_arc = 0.0
+	result.aimed_beam = false
 	return result
 
 

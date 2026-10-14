@@ -9,10 +9,13 @@ extends Node3D
 ## Windup: a faint beam reaching out from the hands while an orb gathers there.
 ## Hit windows: bright, flaring at the start of each window (a channel pulses).
 ## Recovery: fades out. Drawn as a bright core inside a soft sheath as wide as
-## the hitbox, from the hands to the hitbox's far end.
+## the hitbox, along the line Player._beam_line gives it: an aimed beam
+## (AttackParams.aimed_beam) from its origin toward the crosshair, pitch
+## included, the way the server tests its hits; any other beam level from the
+## hands (START) to the hitbox's far end.
 
-## Where the beam starts, in model space: the hands (the staff's orb and the
-## gauntlet both sit on this line), chest high.
+## Where an unaimed beam starts, in model space: the hands (the staff's orb and
+## the gauntlet both sit on this line), chest high.
 const START := Vector3(0.35, 1.15, -0.45)
 ## Radius of the bright core (m).
 const CORE_RADIUS := 0.08
@@ -33,6 +36,10 @@ var _tip := MeshInstance3D.new()
 var _core_material := _beam_material()
 var _sheath_material := _beam_material()
 var _orb_material := _beam_material()
+## The line drawn, in model space: start, unit direction, full length (m).
+var _start := START
+var _basis := Basis.IDENTITY
+var _length := 1.0
 
 
 func _init() -> void:
@@ -58,11 +65,16 @@ func _init() -> void:
 
 
 ## Shows `attack` at `tick` (from its start; fractional while interpolated),
-## or hides when it's null, not started or has no beam.
-func update(attack: AttackParams, tick: float) -> void:
+## or hides when it's null, not started or has no beam. `start` and the unit
+## `direction` are in model space, `length` in meters.
+func update(attack: AttackParams, tick: float, start: Vector3, direction: Vector3,
+		length: float) -> void:
 	if attack == null or tick < 0.0 or attack.beam_color.a <= 0.0:
 		visible = false
 		return
+	_start = start
+	_basis = line_basis(direction)
+	_length = length
 	var windup := float(attack.windup_ticks)
 	var recovery_start := float(attack.recovery_start_tick())
 	var reach := 1.0  # fraction of the length drawn
@@ -104,34 +116,47 @@ func show_invisible() -> void:
 	a.hitbox_width = 1.0
 	a.beam_color = Color.WHITE
 	visible = true
+	_start = START
+	_basis = Basis.IDENTITY
+	_length = 3.0
 	_draw(a, 1.0, 0.0, 1.0, 1.0, 1.0)
+
+
+## A basis whose -Z is the unit `direction` (its X stays level unless the line
+## is vertical): the frame the beam's parts are laid out in.
+static func line_basis(direction: Vector3) -> Basis:
+	if direction.is_zero_approx():
+		return Basis.IDENTITY
+	var up := Vector3.UP if absf(direction.normalized().y) < 0.999 else Vector3.BACK
+	return Basis.looking_at(direction, up)
 
 
 func _draw(attack: AttackParams, reach: float, glow: float, thickness: float, charge: float,
 		tip: float) -> void:
 	var color := attack.beam_color
-	var length := maxf(0.3, (attack.hitbox_range + START.z) * reach)
+	var length := maxf(0.3, _length * reach)
 	var half_width := maxf(CORE_RADIUS * 2.0, attack.hitbox_width / 2.0)
 	_place_along(_core, length, CORE_RADIUS * thickness, CORE_RADIUS * thickness)
 	_place_along(_sheath, length, half_width * thickness,
 			minf(half_width, SHEATH_MAX_HEIGHT) * thickness)
 	var orb := ORB_RADIUS * (0.3 + 0.7 * charge) * (0.85 + 0.3 * glow)
-	_orb.transform = Transform3D(Basis.from_scale(Vector3.ONE * orb), START)
+	_orb.transform = Transform3D(Basis.from_scale(Vector3.ONE * orb), _start)
 	_tip.visible = tip > 0.0
 	_tip.transform = Transform3D(Basis.from_scale(Vector3.ONE * maxf(0.01, TIP_RADIUS * tip)),
-			START + Vector3(0.0, 0.0, -length))
+			_start + _basis * Vector3(0.0, 0.0, -length))
 	_core_material.albedo_color = Color(color.lerp(Color.WHITE, 0.55), glow * color.a)
 	_sheath_material.albedo_color = Color(color, glow * 0.35 * color.a)
 	_orb_material.albedo_color = Color(color.lerp(Color.WHITE, 0.3), glow * 0.8 * color.a)
 
 
-## A unit cylinder lying from START toward -Z for `length`, with these radii
-## across (x) and up (y).
+## A unit cylinder lying from the start along the line (the line basis's -Z)
+## for `length`, with these radii across (x) and up (y).
 func _place_along(instance: MeshInstance3D, length: float, across: float, up: float) -> void:
 	# The cylinder's axis is its Y: turned a quarter about X it points along Z,
 	# and its own Z (scaled by `up`) then points down.
 	var turned := Basis(Vector3.RIGHT, PI / 2.0) * Basis.from_scale(Vector3(across, length, up))
-	instance.transform = Transform3D(turned, START + Vector3(0.0, 0.0, -length / 2.0))
+	instance.transform = Transform3D(_basis * turned,
+			_start + _basis * Vector3(0.0, 0.0, -length / 2.0))
 
 
 ## Unshaded, see-through and two-sided: one shader for every part, so one

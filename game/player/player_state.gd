@@ -165,6 +165,11 @@ var spare_charges := 0
 ## and ends (set_decoy_active, a server event). Abilities with needs_decoy
 ## (Shadow Swap) can only start while it's true.
 var decoy_active := false
+## Drawing only: the aim pitch (whole degrees, up = positive) of the input
+## just simulated while an aimed beam (AttackParams.aimed_beam) runs, else 0,
+## so others draw the beam tilted where its user aims (Player._beam_line). Set
+## the same way on both sides, but not compared in matches().
+var beam_pitch := 0
 
 # Abilities (attack_type == ATTACK_ABILITY)
 ## Index into the equipped weapon's ability pool, or -1.
@@ -288,6 +293,9 @@ func step(move: Vector2, buttons: int, aim_yaw: float, on_floor: bool, params: P
 	if equip_left > 0:
 		equip_left -= 1
 
+	beam_pitch = 0
+	if attack_tick >= 0 and attack_params(params).aimed_beam:
+		beam_pitch = roundi(rad_to_deg(aim_pitch))
 	if attack_tick > 0:
 		var facing := AimRay.attack_facing(aim_yaw, attack_params(params), params.aim)
 		yaw = rotate_toward(yaw, facing, _attack_turn_speed(params) * delta)
@@ -1448,15 +1456,15 @@ static func from_array(data: Array) -> PlayerState:
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
 ## C slot, equip_left, free_move_mask, charge_mask, spare_charges,
-## decoy_active (0/1), then Wing cooldowns by pool index, without trailing
-## zeros].
-const PACKED_WING_HEADER := 11
+## decoy_active (0/1), beam_pitch, then Wing cooldowns by pool index, without
+## trailing zeros].
+const PACKED_WING_HEADER := 12
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
 			wing_slots[0], wing_slots[1], equip_left, free_move_mask, charge_mask, spare_charges,
-			1 if decoy_active else 0])
+			1 if decoy_active else 0, beam_pitch])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1476,6 +1484,7 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	charge_mask = packed[8]
 	spare_charges = packed[9]
 	decoy_active = packed[10] != 0
+	beam_pitch = packed[11]
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]

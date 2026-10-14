@@ -45,6 +45,10 @@ class Params:
 	## Meters: the crossing is never closer than this (a short reach would turn
 	## the facing far to the side).
 	var melee_min_reach := 1.5
+	## Where an aimed beam starts (beam_origin): meters above the feet, and
+	## meters ahead along the facing (data/combat.cfg [beam]).
+	var beam_height := 1.4
+	var beam_forward := 0.5
 
 
 static var _tuned: Params
@@ -61,6 +65,8 @@ static func tuned() -> Params:
 		_tuned.min_ahead = Tuning.get_value("camera", "aim", "min_ahead")
 		_tuned.melee_reach_fraction = Tuning.get_value("camera", "aim", "melee_reach_fraction")
 		_tuned.melee_min_reach = Tuning.get_value("camera", "aim", "melee_min_reach")
+		_tuned.beam_height = Tuning.get_value("combat", "beam", "origin_height")
+		_tuned.beam_forward = Tuning.get_value("combat", "beam", "origin_forward")
 	return _tuned
 
 
@@ -120,6 +126,27 @@ static func launch_direction(from: Vector3, aim_point: Vector3, aim_direction: V
 	if to.dot(aim_direction) < min_ahead or to.is_zero_approx():
 		return aim_direction
 	return to.normalized()
+
+
+## Where an aimed beam (AttackParams.aimed_beam) starts for a player standing at
+## `feet` facing `yaw`: beam_forward ahead, beam_height up (the hands, where a
+## projectile is released).
+static func beam_origin(feet: Vector3, yaw: float, params: Params) -> Vector3:
+	return feet + Vector3(-sin(yaw), 0.0, -cos(yaw)) * params.beam_forward + Vector3.UP * params.beam_height
+
+
+## The unit direction of an aimed beam from `origin` toward `aim_point` (the
+## crosshair's: World.aim_point), the same rule as a throw's launch_direction.
+static func beam_direction(origin: Vector3, aim_point: Vector3, ray: AimRay, params: Params) -> Vector3:
+	return launch_direction(origin, aim_point, ray.direction, params.min_ahead)
+
+
+## The aim yaw that makes facing_at_reach(aim_yaw, reach) = `facing` (its
+## inverse): a remote player's aim yaw from its drawn facing during a beam.
+static func aim_yaw_for_facing(facing: float, reach: float, params: Params) -> float:
+	if reach <= 0.0 or params.shoulder_offset == 0.0:
+		return facing
+	return facing + atan2(params.shoulder_offset, maxf(reach, params.melee_min_reach))
 
 
 ## The aim point: the first thing along `ray` within `max_distance` that
