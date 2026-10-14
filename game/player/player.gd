@@ -808,8 +808,9 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_show_assassin(model, attack, view.attack_type, ability_id, attack_tick, lowered)
 	_show_ranger(model, attack, attack_tick, lowered)
 
-	_show_hitbox(attack, attack_tick)
-	_beam.update(attack, attack_tick)
+	var line := _beam_line(view, attack, yaw)
+	_show_hitbox(attack, attack_tick, line)
+	_beam.update(attack, attack_tick, line[0], line[1], line[2])
 	_show_phoenix(view, attack, attack_tick)
 
 	# Hyper armor, from the drawn attack timeline (predicted or interpolated).
@@ -840,12 +841,47 @@ func _show(view: PlayerState, yaw: float, dodge_progress: float, attack_tick: fl
 	_name_label.visible = not is_local and not veiled
 
 
-func _show_hitbox(attack: AttackParams, attack_tick: float) -> void:
+## Where a beam attack is drawn, in model space: [start, unit direction, length
+## (m)]. An aimed beam (AttackParams.aimed_beam) runs from AimRay.beam_origin
+## toward the aim point, as the server tests it (World._beam_of): the local
+## player casts its own crosshair (World.aim_point, like its cosmetic throws);
+## for others it heads for their crosshair's line at the beam's range, rebuilt
+## from the drawn facing and the synced PlayerState.beam_pitch. Anything else:
+## level from the hands (BeamVisual.START) to the hitbox's far end.
+func _beam_line(view: PlayerState, attack: AttackParams, yaw: float) -> Array:
+	if attack == null or not attack.aimed_beam:
+		var reach := attack.hitbox_range + BeamVisual.START.z if attack else 1.0
+		return [BeamVisual.START, Vector3.FORWARD, reach]
+	var tuning := AimRay.tuned()
+	var origin := AimRay.beam_origin(global_position, yaw, tuning)
+	var direction: Vector3
+	var world := get_node_or_null("/root/Main/World") as World
+	if is_local and world:
+		direction = AimRay.beam_direction(origin, world.aim_point(self, attack.allies_only),
+				aim_ray(), tuning)
+	else:
+		var reach := attack.aim_reach(tuning.melee_reach_fraction)
+		var ray := AimRay.create(global_position, AimRay.aim_yaw_for_facing(yaw, reach, tuning),
+				deg_to_rad(view.beam_pitch), tuning)
+		direction = AimRay.beam_direction(origin, ray.point_at(attack.hitbox_range), ray, tuning)
+	var to_model := _model.global_transform.affine_inverse()
+	return [to_model * origin, (to_model.basis * direction).normalized(), attack.hitbox_range]
+
+
+func _show_hitbox(attack: AttackParams, attack_tick: float, beam_line: Array) -> void:
 	_hitbox_debug.visible = (show_hitboxes and attack != null
 			and attack.shape != AttackParams.SHAPE_NONE)
 	if not _hitbox_debug.visible:
 		return
-	if attack.shape == AttackParams.SHAPE_RADIAL:
+	_hitbox_debug.basis = Basis.IDENTITY
+	if attack.aimed_beam:
+		# The beam's capsule, drawn as a box along its line.
+		var length: float = beam_line[2]
+		_hitbox_debug.mesh = _box_mesh
+		_box_mesh.size = Vector3(attack.hitbox_width, attack.hitbox_width, length)
+		_hitbox_debug.basis = BeamVisual.line_basis(beam_line[1])
+		_hitbox_debug.position = beam_line[0] + (beam_line[1] as Vector3) * length / 2.0
+	elif attack.shape == AttackParams.SHAPE_RADIAL:
 		_hitbox_debug.mesh = _radial_mesh
 		_radial_mesh.top_radius = attack.hitbox_range
 		_radial_mesh.bottom_radius = attack.hitbox_range

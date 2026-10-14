@@ -487,6 +487,7 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	var connected := 0
 	var read := false
 	var execute := attacker.execute_bonus()
+	var beam := _beam_of(attacker, attack)
 	if not attacker.attack_results.has(attacker.peer_id) and (_supports_allies(attack)
 			or attack.self_heal > 0.0):
 		# Ward, Cleansing Flame, Phoenix Blessing, Benediction: the user too.
@@ -498,10 +499,11 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	for target: Player in _players.get_children():
 		if target == attacker:
 			continue
-		if _ally_support(attacker, attack, target) or attack.allies_only:
+		if _ally_support(attacker, attack, target, beam) or attack.allies_only:
 			continue
 		var result := _strike_player(attacker.peer_id, attacker.global_position,
-				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute)
+				attacker.state.yaw, attack, attacker.attack_results, target, damage_scale, execute,
+				beam)
 		if result in [HIT_BLOCKED, HIT_GUARD_BROKEN, HIT_EVADED]:
 			read = true
 		if result >= 0:
@@ -514,7 +516,7 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead or attacker.attack_results.has(enemy.enemy_id) or attack.allies_only:
 			continue
-		if not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
+		if not MeleeHitbox.touches(attacker.global_position, attacker.state.yaw, attack, beam,
 				enemy.global_position, Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT):
 			continue
 		attacker.attack_results[enemy.enemy_id] = true
@@ -526,6 +528,19 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	if read:
 		_feint_read(attacker, attack)
 	return connected
+
+
+## Server: an aimed beam's line this step (AttackParams.aimed_beam), as
+## [origin, unit direction]: from the attacker's beam origin toward its aim
+## point (World.aim_point: the crosshair of the input just simulated, so a
+## channel follows it), pitch included. Empty for any other attack.
+func _beam_of(attacker: Player, attack: AttackParams) -> PackedVector3Array:
+	if not attack.aimed_beam:
+		return PackedVector3Array()
+	var tuning := AimRay.tuned()
+	var origin := AimRay.beam_origin(attacker.global_position, attacker.state.yaw, tuning)
+	return PackedVector3Array([origin, AimRay.beam_direction(origin,
+			aim_point(attacker, attack.allies_only), attacker.aim_ray(), tuning)])
 
 
 ## Server: a player's attack (or projectile) connected with a living enemy:
@@ -627,14 +642,16 @@ func _on_enemy_attack_stepped(enemy: Enemy) -> void:
 ## blocking player facing the attacker takes stamina damage instead. Allies
 ## (are_allies) are ignored entirely: no damage, stagger, block cost or label.
 ## damage_scale: the attacker's damage modifiers; execute: its execute bonus
-## (Finishing Thrust, scaled by the target's health). Returns the HIT_* result,
-## or -1 if the attack didn't connect (or already did).
+## (Finishing Thrust, scaled by the target's health); beam: an aimed beam's line
+## (_beam_of). Returns the HIT_* result, or -1 if the attack didn't connect (or
+## already did).
 func _strike_player(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 		attack: AttackParams, results: Dictionary[int, bool], target: Player,
-		damage_scale: float = 1.0, execute := Vector2.ZERO) -> int:
+		damage_scale: float = 1.0, execute := Vector2.ZERO,
+		beam := PackedVector3Array()) -> int:
 	if target.state.dead or results.get(target.peer_id, false):
 		return -1
-	if not MeleeHitbox.hits(attacker_pos, attacker_yaw, attack, target.global_position,
+	if not MeleeHitbox.touches(attacker_pos, attacker_yaw, attack, beam, target.global_position,
 			Player.BODY_RADIUS, Player.BODY_HEIGHT):
 		return -1
 	var result := resolve_strike(attacker_id, attacker_pos, attacker_yaw, attack, results, target,
@@ -1227,13 +1244,14 @@ func _parting_shot(player: Player) -> void:
 ## Mending Beam / Ward ("ally_heal", "ally_shield"): an ally of the attacker (not
 ## itself) that the hitbox touches is healed or shielded once per hit window
 ## instead of struck. Returns true if `target` is such an ally (handled or not).
-func _ally_support(attacker: Player, attack: AttackParams, target: Player) -> bool:
+func _ally_support(attacker: Player, attack: AttackParams, target: Player,
+		beam: PackedVector3Array) -> bool:
 	if not _supports_allies(attack):
 		return false
 	if not are_allies(attacker.peer_id, target.peer_id):
 		return false
 	if (attacker.attack_results.has(target.peer_id)
-			or not MeleeHitbox.hits(attacker.global_position, attacker.state.yaw, attack,
+			or not MeleeHitbox.touches(attacker.global_position, attacker.state.yaw, attack, beam,
 				target.global_position, Player.BODY_RADIUS, Player.BODY_HEIGHT)):
 		return true
 	if target.state.dead:
@@ -2367,16 +2385,18 @@ func _add_projectile_system() -> void:
 ## authoritative (projectiles, and later AoE placement); the local client
 ## computes the same for its cosmetic throws (other players' bodies are drawn
 ## in the past there, so a point on one can differ slightly). Physics step only.
-func aim_point(player: Player) -> Vector3:
+## for_allies (an allies_only beam: Mending Beam, Ward): skips hostiles and
+## enemies instead, so it lands on the ally under the crosshair.
+func aim_point(player: Player, for_allies := false) -> Vector3:
 	var tuning := AimRay.tuned()
 	var exclude: Array[RID] = [player.get_rid()]
 	var skip := func(collider: Object) -> bool:
 		if collider is Player:
 			var other := collider as Player
 			var dead := other.view_state.dead if (not multiplayer.is_server() and not other.is_local) else other.state.dead
-			return dead or are_allies(player.peer_id, other.peer_id)
+			return dead or are_allies(player.peer_id, other.peer_id) != for_allies
 		if collider is Enemy:
-			return (collider as Enemy).dead
+			return for_allies or (collider as Enemy).dead
 		return false
 	return AimRay.cast(get_world_3d().direct_space_state, player.aim_ray(), tuning.max_distance,
 			1 | 2 | 4, exclude, skip)

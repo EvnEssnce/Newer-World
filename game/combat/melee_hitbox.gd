@@ -39,6 +39,28 @@ static func hits(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 	return Vector2(local_x, local_z).distance_to(closest) <= target_radius
 
 
+## An aimed beam (AttackParams.aimed_beam): a line from `origin` along the unit
+## `direction` for `length` m, `radius` m thick (a capsule), against a target's
+## upright capsule standing at `target_pos`. Any pitch.
+static func beam_hits(origin: Vector3, direction: Vector3, length: float, radius: float,
+		target_pos: Vector3, target_radius: float, target_height: float) -> bool:
+	return Projectile.sweep_capsule(origin, origin + direction * length, radius, target_pos,
+			target_radius, target_height) >= 0.0
+
+
+## The one "does this attack touch the target" test for a player's attack: an
+## aimed beam with `beam` = [origin, unit direction] (World._beam_of) tests the
+## beam (hitbox_range long, hitbox_width / 2 thick); anything else (or an empty
+## `beam`) is `hits`.
+static func touches(attacker_pos: Vector3, yaw: float, attack: AttackParams,
+		beam: PackedVector3Array, target_pos: Vector3, target_radius: float,
+		target_height: float) -> bool:
+	if attack.aimed_beam and beam.size() == 2:
+		return beam_hits(beam[0], beam[1], attack.hitbox_range, attack.hitbox_width / 2.0,
+				target_pos, target_radius, target_height)
+	return hits(attacker_pos, yaw, attack, target_pos, target_radius, target_height)
+
+
 ## Shield Wall: true if `other_pos` stands inside the box straight behind a
 ## player at `pos` facing `yaw`: from their center back `depth` meters,
 ## `width` meters wide (centered), ignoring height. Pure XZ math.
