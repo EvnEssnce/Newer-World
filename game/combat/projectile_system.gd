@@ -76,6 +76,11 @@ var _flying: Array[Flying] = []
 var _by_id: Dictionary[int, Flying] = {}
 var _spawns_seen := 0
 var _cosmetic_fired := 0
+# Client: invisible warm-up looks (ProjectileVisual.prewarm_looks) and frames
+# left before they go (-1 = not placed yet, 0 = done).
+var _prewarm_node: Node3D
+var _prewarm_frames := -1
+const PREWARM_FRAMES := 3
 
 
 ## A client's copy of one projectile.
@@ -648,6 +653,8 @@ func _remove(f: Flying) -> void:
 func _process(_delta: float) -> void:
 	if multiplayer.is_server():
 		return
+	if _prewarm_frames != 0:
+		_prewarm_step()
 	var render_tick := world.render_tick()
 	var axe_throwers := {}  # owner peer id -> true
 	for f in _flying:
@@ -666,6 +673,29 @@ func _process(_delta: float) -> void:
 	# A thrown axe leaves its thrower's hand until it's caught or ends.
 	for player: Player in players.get_children():
 		player.set_axe_thrown(axe_throwers.has(player.peer_id))
+
+
+## Client: draws an invisible copy of every projectile look just in front of the
+## camera for PREWARM_FRAMES frames once a camera exists, then removes them, so
+## the first throw doesn't compile their shaders mid-fight (as
+## ZoneSystem._prewarm_step does for zones).
+func _prewarm_step() -> void:
+	if _prewarm_frames > 0:
+		_prewarm_frames -= 1
+		if _prewarm_frames == 0 and is_instance_valid(_prewarm_node):
+			_prewarm_node.queue_free()
+		return
+	if DisplayServer.get_name() == "headless":
+		_prewarm_frames = 0
+		return
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	_prewarm_node = ProjectileVisual.prewarm_looks()
+	_prewarm_node.position = Vector3(0.0, 0.0, -4.0)
+	_prewarm_node.scale = Vector3.ONE * 0.2
+	camera.add_child(_prewarm_node)
+	_prewarm_frames = PREWARM_FRAMES
 
 
 func print_client_summary() -> void:
