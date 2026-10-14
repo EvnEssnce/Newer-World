@@ -22,6 +22,8 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	# Loot (LootSystem): pick up your drops in reach, open the inventory.
 	&"pickup": [KEY_F],
 	&"toggle_inventory": [KEY_I],
+	# Tradeskills panel (TradeskillSystem).
+	&"toggle_tradeskills": [KEY_P],
 	&"toggle_hitboxes": [KEY_F3],
 	# Party (PartySystem). Invite/kick target the player nearest the crosshair.
 	&"party_invite": [KEY_T],
