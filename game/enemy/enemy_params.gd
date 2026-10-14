@@ -30,6 +30,16 @@ var stationary := false
 ## never the "unaware enemy" rule (training dummy, which never targets anyone).
 var always_aware := false
 
+# Navigation ([navigation]; see EnemyPath). Kinds without the section walk straight.
+## Walks around obstacles on the navigation mesh (EnemyNavigation).
+var paths := false
+## Asks for a new path at least this often (ticks)...
+var repath_ticks := 30
+## ...or when its goal moved this far (m) from the goal of its current path.
+var repath_distance := 1.0
+## A path corner counts as reached within this distance (m).
+var waypoint_reach := 0.3
+
 # Threat ([threat]; see ThreatTable)
 ## Per point of damage it takes from a player (hits, projectiles, damage over time).
 var threat_per_damage := 0.0
@@ -77,6 +87,11 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.wander_pause_ticks = roundi(Tuning.get_value(file, "ai", "wander_pause") * tps)
 	p.stationary = Tuning.get_value(file, "ai", "stationary")
 	p.always_aware = Tuning.get_optional(file, "ai", "always_aware", false)
+	p.paths = Tuning.get_optional(file, "navigation", "enabled", false) and not p.stationary
+	if p.paths:
+		p.repath_ticks = maxi(1, roundi(Tuning.get_value(file, "navigation", "repath_interval") * tps))
+		p.repath_distance = Tuning.get_value(file, "navigation", "repath_distance")
+		p.waypoint_reach = Tuning.get_value(file, "navigation", "waypoint_reach")
 
 	p.threat_per_damage = Tuning.get_value(file, "threat", "per_damage")
 	p.threat_per_heal = Tuning.get_value(file, "threat", "per_heal")
