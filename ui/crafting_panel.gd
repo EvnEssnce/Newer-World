@@ -6,10 +6,15 @@ extends Control
 ## level it needs (the row is dimmed and the line red when yours is too low), a
 ## quantity picker (1, 5, Max) and a Craft button. The numbers come from the
 ## bag and tradeskills the server last sent; the server checks again.
+## Gear recipes add a line with what a craft can roll at your current level:
+## the gear score range and each rarity's chance, in its color. The list
+## scrolls when it's taller than the screen allows.
 ## A modal_ui panel like I, K and P: opening it closes them (and they close it),
 ## Esc or F closes it, and CraftingSystem closes it when you walk out of range.
 
-const PANEL_WIDTH := 640.0
+const PANEL_WIDTH := 700.0
+## Most of the viewport's height the recipe list takes before it scrolls.
+const LIST_HEIGHT_FRACTION := 0.68
 const QUANTITY_CHOICES: PackedStringArray = ["1", "5", "Max"]
 const HINT_COLOR := Color(0.75, 0.75, 0.8)
 const DETAIL_COLOR := Color(0.7, 0.72, 0.78)
@@ -22,7 +27,8 @@ const LOCKED_ALPHA := 0.55
 var _system: CraftingSystem
 var _title: Label
 var _list: VBoxContainer
-## Recipe id -> {recipe, root, name, inputs (HBoxContainer), status, quantity, craft, mode}.
+var _scroll: ScrollContainer
+## Recipe id -> {recipe, root, name, inputs (HBoxContainer), odds (gear: HBoxContainer of the gear\n## score label, then one label per rarity in rarity order; else null), status, quantity, craft, mode}.
 var _rows: Dictionary[String, Dictionary] = {}
 
 
@@ -59,9 +65,13 @@ func _ready() -> void:
 	panel.add_child(column)
 	_title = _label("", 20, Color.WHITE)
 	column.add_child(_title)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(_scroll)
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override(&"separation", 6)
-	column.add_child(_list)
+	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_list)
 	var hint := _label("Crafting is walk-only. The materials are only taken when the bar fills; walking away or getting hit cancels it and nothing is lost. F or Esc closes.",
 			12, HINT_COLOR)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -100,7 +110,15 @@ func open(station: RecipeDefs.StationDef, recipes: Array[RecipeDefs.Recipe]) -> 
 		visible = true
 		InventoryPanel.hide_other_modals(self)  # one mouse panel at a time
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_scroll.scroll_vertical = 0
 	refresh()
+	_fit_list.call_deferred()
+
+
+## The list as tall as its rows, up to LIST_HEIGHT_FRACTION of the viewport (then it scrolls).
+func _fit_list() -> void:
+	var most := get_viewport_rect().size.y * LIST_HEIGHT_FRACTION
+	_scroll.custom_minimum_size.y = minf(_list.get_combined_minimum_size().y, most)
 
 
 func close() -> void:
@@ -141,6 +159,17 @@ func _recipe_row(recipe: RecipeDefs.Recipe) -> Control:
 		var input_label := _label("", 13, HAVE_COLOR)
 		input_label.set_meta(&"item", item_id)
 		inputs.add_child(input_label)
+	var odds: HBoxContainer = null
+	if recipe.output_kind == RecipeDefs.OUTPUT_GEAR:
+		odds = HBoxContainer.new()
+		odds.add_theme_constant_override(&"separation", 12)
+		info.add_child(odds)
+		odds.add_child(_label("", 13, OUTPUT_COLOR))  # the gear score range
+		var db := ItemDatabase.current()
+		for rarity in db.rarity_order:
+			var rarity_label := _label("", 13, db.rarities[rarity].color)
+			rarity_label.set_meta(&"rarity", rarity)
+			odds.add_child(rarity_label)
 	var status := _label("", 12, DETAIL_COLOR)
 	info.add_child(status)
 	var picker := HBoxContainer.new()
@@ -170,7 +199,7 @@ func _recipe_row(recipe: RecipeDefs.Recipe) -> Control:
 	craft.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	craft.pressed.connect(_craft.bind(recipe.id))
 	row.add_child(craft)
-	_rows[recipe.id] = {"recipe": recipe, "root": frame, "name": name_label, "inputs": inputs,
+	_rows[recipe.id] = {"recipe": recipe, "root": frame, "name": name_label, "inputs": inputs, "odds": odds,
 			"status": status, "quantity": quantity, "craft": craft, "mode": 0}
 	return frame
 
@@ -227,6 +256,8 @@ func refresh() -> void:
 			var def: ItemDatabase.ItemDef = db.items.get(item_id)
 			input_label.text = "%s  %d/%d" % [def.name if def else item_id, have, need]
 			input_label.add_theme_color_override(&"font_color", HAVE_COLOR if have >= need else SHORT_COLOR)
+		if row["odds"] != null:
+			_show_odds(row["odds"], skills, level, db)
 		var error := CraftingRules.check(recipe, shown, bag, level, db, _system.defs.max_batch, skills)
 		if quantity == 0 and error.is_empty():
 			error = "Nothing to craft."
@@ -244,6 +275,29 @@ func refresh() -> void:
 			status.add_theme_color_override(&"font_color", DETAIL_COLOR)
 		(row["quantity"] as Label).text = "x%d" % quantity
 		(row["craft"] as Button).disabled = quantity == 0 or not error.is_empty()
+
+
+## A gear recipe's roll at `level`: "GS 100-110", then "Rare 14%" per rarity
+## that can roll (others hidden).
+func _show_odds(odds: HBoxContainer, skills: TradeskillDefs, level: int, db: ItemDatabase) -> void:
+	var gs_range := skills.gear_score_range(level)
+	(odds.get_child(0) as Label).text = "GS %d–%d" % [gs_range.x, gs_range.y]
+	var chances := skills.gear_rarity_odds(level)
+	for i in range(1, odds.get_child_count()):
+		var label := odds.get_child(i) as Label
+		var rarity: String = label.get_meta(&"rarity")
+		var chance: float = chances.get(rarity, 0.0)
+		label.visible = chance > 0.0
+		var rarity_def: ItemDatabase.RarityDef = db.rarities.get(rarity)
+		label.text = "%s %s%%" % [rarity_def.name if rarity_def else rarity, _percent(chance)]
+
+
+## A chance as a short percent: "14", "2.7", "0.4".
+static func _percent(chance: float) -> String:
+	var percent := chance * 100.0
+	if percent >= 10.0 or is_equal_approx(percent, roundf(percent)):
+		return str(roundi(percent))
+	return "%.1f" % percent
 
 
 func _label(text: String, size: int, color: Color) -> Label:

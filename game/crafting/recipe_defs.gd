@@ -5,9 +5,10 @@ extends RefCounted
 ## add_station). Loaded once, again when Tuning.version moves.
 ##
 ## Output kinds: OUTPUT_ITEM makes `output_count` of a fixed item (refining:
-## resources). OUTPUT_GEAR is where Milestone 3 item 4 plugs in gear recipes
-## (an item rolled through LootRoller, gear score from the skill level): the
-## format accepts it, validate() refuses it until CraftingRules can make one.
+## resources). OUTPUT_GEAR makes one piece of gear per craft, rolled through
+## LootRoller.roll_item with a gear score range and rarity weights from the
+## crafter's level (TradeskillDefs.gear_score_range / gear_rarity_weights;
+## CraftingRules.roll_gear).
 
 const RECIPE_PREFIX := "recipe_"
 const STATION_PREFIX := "station_"
@@ -186,8 +187,6 @@ func validate(db: ItemDatabase, skills: TradeskillDefs) -> PackedStringArray:
 				problems.append("%s uses its own output" % where)
 		if not recipe.output_kind in OUTPUT_KINDS:
 			problems.append("%s: unknown output_kind '%s'" % [where, recipe.output_kind])
-		elif recipe.output_kind == OUTPUT_GEAR:
-			problems.append("%s: gear recipes aren't built yet (Milestone 3 item 4)" % where)
 		var out: ItemDatabase.ItemDef = db.items.get(recipe.output)
 		if out == null:
 			problems.append("%s: unknown output '%s'" % [where, recipe.output])
@@ -196,4 +195,25 @@ func validate(db: ItemDatabase, skills: TradeskillDefs) -> PackedStringArray:
 				problems.append("%s: an \"item\" output must be a resource ('%s' isn't)" % [where, recipe.output])
 			if recipe.output_count < 1:
 				problems.append("%s: output_count must be at least 1" % where)
+		elif recipe.output_kind == OUTPUT_GEAR:
+			if out.is_resource():
+				problems.append("%s: a \"gear\" output must be gear ('%s' is a resource)" % [where, recipe.output])
+			if recipe.output_count != 1:
+				problems.append("%s: gear recipes make 1 per craft (output_count=1)" % where)
+	if recipes.values().any(func(r: Recipe) -> bool: return r.output_kind == OUTPUT_GEAR):
+		problems.append_array(_validate_gear_odds(db, skills))
+	return problems
+
+
+## Crafted gear's rarity weights (data/tradeskills.cfg [crafting]) against the
+## item data: only known rarities, and one to roll at every level.
+func _validate_gear_odds(db: ItemDatabase, skills: TradeskillDefs) -> PackedStringArray:
+	var problems := PackedStringArray()
+	for weights: Dictionary in [skills.rarity_weights_start, skills.rarity_weights_end]:
+		for id: Variant in weights:
+			if not db.rarities.has(str(id)):
+				problems.append("crafted gear: unknown rarity '%s' in rarity_weights" % id)
+	for level in [Tradeskills.START_LEVEL, skills.level_cap]:
+		if skills.gear_rarity_odds(level).is_empty():
+			problems.append("crafted gear: no rarity has a weight at level %d" % level)
 	return problems
