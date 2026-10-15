@@ -104,6 +104,10 @@ func test_validate_checks_resources() -> void:
 	ore.slot = "resource"
 	ore.max_stack = 100
 	db.items["ore_chunk"] = ore
+	assert_eq(db.validate().size(), 1, "a resource needs an icon")
+	ore.icon = "rock"
+	assert_eq(db.validate().size(), 1, "an unknown icon")
+	ore.icon = "ore"
 	assert_eq(db.validate(), PackedStringArray())
 	ore.max_stack = 0
 	ore.primary_stat = "armor"
@@ -123,6 +127,34 @@ func test_validate_checks_resources() -> void:
 	table.item_weights = {"ore_chunk": 1}
 	db.tables["t"] = table
 	assert_eq(db.validate().size(), 1, "loot tables roll gear only")
+
+
+func test_icons_come_from_the_data() -> void:
+	var def := ItemDatabase.ItemDef.new()
+	def.slot = "weapon"
+	assert_eq(def.icon_id(), "melee")
+	def.ranged = true
+	assert_eq(def.icon_id(), "ranged")
+	def.slot = "head"
+	def.ranged = false
+	assert_eq(def.icon_id(), "head", "armor: its slot")
+	def.icon = "wings"
+	assert_eq(def.icon_id(), "wings", "icon overrides the slot")
+	def.slot = "resource"
+	def.icon = ""
+	assert_eq(def.icon_id(), "", "resources have no default")
+	var real := ItemDatabase.from_tuning()
+	for item_id in real.items:
+		assert_true(real.items[item_id].icon_id() in ItemDatabase.ICONS, item_id)
+	var expected := {"iron_broadsword": "melee", "iron_maul": "melee", "iron_talons": "melee",
+		"oakheart_shortstaffs": "melee", "ashwood_longbow": "ranged", "iron_crossbow": "ranged",
+		"cinder_wraps": "ranged", "iron_knives": "ranged", "emberwood_staff": "ranged",
+		"lifeweave_gauntlet": "ranged", "padded_cap": "head", "padded_jerkin": "chest",
+		"padded_leggings": "legs", "cinder_plumes": "wings", "rustvein_ore": "ore",
+		"rustvein_ingot": "ingot", "pine_log": "log", "pine_plank": "plank",
+		"thistle_fiber": "fiber", "thistle_linen": "cloth"}
+	for item_id: String in expected:
+		assert_eq(real.items[item_id].icon_id(), expected[item_id], item_id)
 
 
 # --- Nodes ---

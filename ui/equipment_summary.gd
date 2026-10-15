@@ -23,20 +23,24 @@ var _icons: Array[SlotIcon] = []
 var _stats: Label
 
 
-## One equip slot's symbol, drawn in code.
+## One equip slot's symbol, drawn in code (ItemIcon.draw_glyph): the equipped
+## item's icon (crossed swords or a bow for a weapon), else the slot's.
 class SlotIcon extends Control:
 	var equip_slot := ""
 	var color := EMPTY_COLOR
 	var equipped := false
+	var icon := ""
 
 	func _init(slot: String) -> void:
 		equip_slot = slot
+		icon = "sword" if slot.begins_with("weapon") else slot
 		custom_minimum_size = ICON_SIZE
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	func set_item_color(item_color: Color, is_equipped: bool) -> void:
+	func set_item(item_color: Color, is_equipped: bool, item_icon: String) -> void:
 		color = item_color
 		equipped = is_equipped
+		icon = item_icon
 		queue_redraw()
 
 	func _draw() -> void:
@@ -47,39 +51,11 @@ class SlotIcon extends Control:
 		var glyph := color.lightened(0.25) if equipped else Color(EMPTY_COLOR, 0.8)
 		# Shapes are laid out on a 24 x 24 grid, scaled to the icon.
 		draw_set_transform(Vector2(1, 1), 0.0, (size - Vector2(2, 2)) / 24.0)
-		match equip_slot:
-			"weapon_1", "weapon_2":
-				draw_line(Vector2(5, 19), Vector2(17, 7), glyph, 2.5)  # blade
-				draw_colored_polygon(PackedVector2Array([Vector2(16, 5), Vector2(19, 5),
-						Vector2(19, 8), Vector2(17, 7)]), glyph)  # tip
-				draw_line(Vector2(4, 14), Vector2(10, 20), glyph, 2.0)  # guard
-				draw_string(ThemeDB.fallback_font, Vector2(15, 22),
-						"1" if equip_slot == "weapon_1" else "2",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 9, glyph)
-			"head":
-				var dome := PackedVector2Array()
-				for i in 9:
-					dome.append(Vector2(12, 14) + Vector2.from_angle(PI + PI * i / 8.0) * 8.0)
-				draw_colored_polygon(dome, glyph)
-				draw_rect(Rect2(3, 14, 18, 3), glyph)  # brim
-				draw_rect(Rect2(11, 7, 2, 7), back.darkened(0.5))  # nose guard gap
-			"chest":
-				draw_colored_polygon(PackedVector2Array([Vector2(8, 4), Vector2(10, 4),
-						Vector2(12, 7), Vector2(14, 4), Vector2(16, 4), Vector2(21, 8),
-						Vector2(18, 12), Vector2(17, 11), Vector2(17, 20), Vector2(7, 20),
-						Vector2(7, 11), Vector2(6, 12), Vector2(3, 8)]), glyph)
-			"legs":
-				draw_rect(Rect2(6, 4, 12, 4), glyph)  # belt
-				draw_colored_polygon(PackedVector2Array([Vector2(6, 9), Vector2(11.5, 9),
-						Vector2(10.5, 21), Vector2(6, 21)]), glyph)
-				draw_colored_polygon(PackedVector2Array([Vector2(12.5, 9), Vector2(18, 9),
-						Vector2(18, 21), Vector2(13.5, 21)]), glyph)
-			"wings":
-				draw_colored_polygon(PackedVector2Array([Vector2(11, 9), Vector2(5, 4),
-						Vector2(2, 8), Vector2(3, 14), Vector2(6, 18), Vector2(11, 14)]), glyph)
-				draw_colored_polygon(PackedVector2Array([Vector2(13, 9), Vector2(19, 4),
-						Vector2(22, 8), Vector2(21, 14), Vector2(18, 18), Vector2(13, 14)]), glyph)
-				draw_circle(Vector2(12, 11), 1.6, glyph)
+		ItemIcon.draw_glyph(self, icon, glyph, back)
+		if equip_slot.begins_with("weapon"):
+			draw_string(ThemeDB.fallback_font, Vector2(17, 23),
+					"1" if equip_slot == "weapon_1" else "2",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE if equipped else glyph)
 		draw_set_transform(Vector2.ZERO)
 
 
@@ -139,7 +115,10 @@ func _refresh() -> void:
 	_title.text = "Gear score %d" % roundi(stats.average_gear_score)
 	for icon in _icons:
 		var item := _shown.get_item(icon.equip_slot)
-		icon.set_item_color(item.rarity_color(_db) if item else EMPTY_COLOR, item != null)
+		var def: ItemDatabase.ItemDef = _db.items.get(item.item_id) if item else null
+		var empty_icon := "sword" if icon.equip_slot.begins_with("weapon") else icon.equip_slot
+		icon.set_item(item.rarity_color(_db) if item else EMPTY_COLOR, item != null,
+				def.icon_id() if def else empty_icon)
 	var lines := stats.summary_lines()
 	if lines.is_empty():
 		_stats.text = "No gear bonuses"

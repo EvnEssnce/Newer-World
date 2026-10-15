@@ -76,7 +76,9 @@ static func roll_gear(recipe: RecipeDefs.Recipe, level: int, db: ItemDatabase,
 	if not db.rarities.has(rarity):  # no weights (validate() reports it): the lowest
 		rarity = db.rarity_order[0] if not db.rarity_order.is_empty() else rarity
 	var gear_score := rng.randi_range(gs_range.x, gs_range.y)
-	return LootRoller.roll_item(db.items[recipe.output], rarity, gear_score, db, rng)
+	var item := LootRoller.roll_item(db.items[recipe.output], rarity, gear_score, db, rng)
+	item.crafted = true  # the inventory marks crafted gear
+	return item
 
 
 ## How many of `recipe` one request could craft now (0 = none), at most `max_batch`.

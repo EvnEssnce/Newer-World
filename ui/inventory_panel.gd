@@ -4,7 +4,8 @@ extends Control
 ## compact card per equip slot with a Take off button (hover for its stats and
 ## affixes), your average gear score and what your gear adds up to (armor and
 ## its damage reduction, bonuses). Below: the bag as a grid of compact cards
-## (rarity colour, kind, gear score, how it compares with what you wear,
+## (an ItemIcon symbol, with an anvil badge and "Crafted" for crafted gear;
+## rarity colour, kind, gear score, how it compares with what you wear,
 ## affixes included, Equip and Discard buttons, or which class it's for);
 ## hover a card for every stat. Filters (item type, class) and a sort only
 ## change what this panel shows, never the server's bag. Shows what the server
@@ -21,6 +22,9 @@ const CARD_MIN_WIDTH := 360.0
 const MAX_COLUMNS := 4
 const EQUIPPED_COLUMNS := 3
 const GAP := 6
+## Item symbols (ItemIcon), px: a bag card's two lines, an equipped card's one.
+const BAG_ICON_SIZE := 34.0
+const EQUIPPED_ICON_SIZE := 26.0
 ## Panel border + content margin, each side.
 const PANEL_PADDING := 14.0
 const HINT_COLOR := Color(0.75, 0.75, 0.8)
@@ -317,6 +321,8 @@ func _equipped_card(equip_slot: String) -> Control:
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override(&"separation", 8)
 	card.add_child(line)
+	line.add_child(ItemIcon.for_item(item, _db, EQUIPPED_ICON_SIZE,
+			"sword" if equip_slot.begins_with("weapon") else equip_slot))
 	var slot_name: String = "Wings" if equip_slot == "wings" else Equipment.SLOT_NAMES[equip_slot]
 	var slot_label := _label(slot_name, 12, HINT_COLOR)
 	slot_label.custom_minimum_size.x = 62
@@ -332,6 +338,8 @@ func _equipped_card(equip_slot: String) -> Control:
 		return card
 	text.text = item.display_name(_db)
 	text.add_theme_color_override(&"font_color", item.rarity_color(_db))
+	if item.crafted:
+		line.add_child(_label("Crafted", 12, ItemIcon.CRAFTED_COLOR))
 	line.add_child(_label("GS %d" % item.gear_score, 12, HINT_COLOR))
 	var take_off := _button("Take off")
 	take_off.pressed.connect(_loot.request_unequip.bind(equip_slot))
@@ -359,6 +367,7 @@ func _item_card(item: Item) -> Control:
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override(&"separation", 8)
 	card.add_child(line)
+	line.add_child(ItemIcon.for_item(item, _db, BAG_ICON_SIZE))
 	var text := VBoxContainer.new()
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.add_theme_constant_override(&"separation", 0)
@@ -373,6 +382,12 @@ func _item_card(item: Item) -> Control:
 	var resource := def != null and def.is_resource()
 	top.add_child(_label("Resource · ×%d" % item.count if resource
 			else "%s · GS %d" % [_kind_short(def), item.gear_score], 12, HINT_COLOR))
+	# Second line: "Crafted" (crafted gear), then the comparison or why not.
+	var detail := HBoxContainer.new()
+	detail.add_theme_constant_override(&"separation", 6)
+	text.add_child(detail)
+	if item.crafted:
+		detail.add_child(_label("Crafted", 12, ItemIcon.CRAFTED_COLOR))
 
 	var tooltip := _item_tooltip(item)
 	var buttons := HBoxContainer.new()
@@ -381,20 +396,21 @@ func _item_card(item: Item) -> Control:
 	line.add_child(buttons)
 	var refusal := "" if resource else _refusal(item, def)
 	if resource:
-		text.add_child(_label("Crafting material (stacks to %d)" % def.max_stack, 12, HINT_COLOR))
+		detail.add_child(_label("Crafting material (stacks to %d)" % def.max_stack, 12, HINT_COLOR))
 	elif def and refusal.is_empty():
 		var compare := _comparison(item, def)
 		if compare.is_empty():
-			text.add_child(_label(_replaces_text(), 12, HINT_COLOR))
+			detail.add_child(_label(_replaces_text(), 12, HINT_COLOR))
 		else:
-			text.add_child(_rich(compare[0]))
+			detail.add_child(_rich(compare[0]))
 			tooltip.append("")
 			tooltip.append_array(compare[1])
 		buttons.add_child(_equip_button(item, def))
 	else:
 		var refused := _label(refusal, 12, WORSE_COLOR)
 		refused.clip_text = true
-		text.add_child(refused)
+		refused.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		detail.add_child(refused)
 		tooltip.append("")
 		tooltip.append(refusal)
 

@@ -101,7 +101,8 @@ func set_equip_progress(text: String, fraction: float) -> void:
 		_equip_bar.value = fraction
 
 
-func add_feed_line(text: String, color: Color) -> void:
+## `icon` (an ItemIcon, optional) goes left of the text.
+func add_feed_line(text: String, color: Color, icon: Control = null) -> void:
 	var label := Label.new()
 	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -109,7 +110,16 @@ func add_feed_line(text: String, color: Color) -> void:
 	label.add_theme_color_override(&"font_color", color)
 	label.add_theme_constant_override(&"outline_size", 4)
 	label.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	_feed.add_child(label)
-	_feed_lines.append([label, Time.get_ticks_msec() + FEED_MS])
+	var line: Control = label
+	if icon:
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_END
+		row.add_theme_constant_override(&"separation", 6)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(icon)
+		row.add_child(label)
+		line = row
+	_feed.add_child(line)
+	_feed_lines.append([line, Time.get_ticks_msec() + FEED_MS])
 	while _feed_lines.size() > MAX_FEED_LINES:
 		(_feed_lines.pop_front()[0] as Node).queue_free()
