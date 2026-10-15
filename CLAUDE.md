@@ -111,6 +111,14 @@ game/
   items/loot_system.gd       World/Loot: kill rolls, drop/pickup/discard/equip RPCs, inventories
                              and equipment; client drop visuals, pickup prompt, bot pickups/equips.
   items/loot_drop_visual.gd  Client look of a drop: sack, rarity beam, best item's name.
+  gathering/gather_node_params.gd  One node kind (data/gathering.cfg). gather_node.gd: one node's
+                             charges/respawn, reach, the F choice and crosshair pick (pure, unit tested).
+  gathering/gathering_system.gd  World/Gathering: node state, gather requests, the busy lock,
+                             yields into the bag; client node looks (gather_node_visual.gd), prompt.
+  tradeskills/tradeskill_defs.gd, tradeskills.gd  Skill defs (data/tradeskills.cfg) and one
+                             player's levels/XP, gather speed and bonus yield. Pure, unit tested.
+  tradeskills/tradeskill_system.gd  World/Tradeskills: XP from gathers (and crafting later),
+                             owner updates, level-up feed lines.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
   zones/zone_params.gd       One zone/summon kind (data/zones.cfg [zone_<id>]).
@@ -149,8 +157,9 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      mastery (shared tree rules), mastery_<weapon>, wings_<class> (Wing
                      abilities), mastery_wings_<class> (Wing tree), ember (Ember + Rebirth),
                      loot (rarities + loot tables), items, affixes, gear (gear score curve,
-                     armor, equip time), party, status_effects, projectiles, zones, navigation,
-                     testing (test-only switches: the in-game class change) (.cfg).
+                     armor, equip time), party, status_effects, projectiles, zones, navigation, gathering
+                     (node kinds), tradeskills (skills, XP curve, gathering effects),
+                     testing (test-only switches: the in-game class change, tradeskill join_xp) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
@@ -214,7 +223,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   the World after both the connection and the tuning (`_enter_world`). `Tuning.version`
   moves on every load; every class that caches tuning (`PlayerParams.current()`,
   `ItemDatabase`, `StatusDefs`, `GearScore`, `ClassDef`, `MasteryTree`, `EnemyParams`,
-  `ProjectileParams`/`ProjectileVisual`, `ZoneParams`, `AimRay.tuned()`) rebuilds when it
+  `ProjectileParams`/`ProjectileVisual`, `ZoneParams`, `AimRay.tuned()`, `GatherNodeParams`, `TradeskillDefs`) rebuilds when it
   does: **a new cache must do the same**. Friends' builds only need the same code.
 - **Lag compensation** (`[lag_compensation]` in network.cfg): the server records every
   player's and enemy's position each tick (`PositionHistory`, `World._record_positions`,
@@ -237,6 +246,20 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   Never in snapshots. The only sim state it touches is the equip time
   (`PlayerState.start_equip`, a server event) and, for weapon items, the loadout
   (through `BuildService.apply_weapons`).
+- **Gathering** (`World/Gathering`, `GatheringSystem`; nodes are `Marker3D`s under
+  `World/GatherNodes` with `metadata/kind`, id = marker index on both sides; never in
+  snapshots): client → server `_request_gather(node_id)`; server → all
+  `_receive_all_nodes(bytes)` on join and `_receive_node_state(id, available)` on change.
+  The server checks alive, range + `[gather] range_tolerance`, node available, bag room,
+  then `PlayerState.start_gather(ticks)`: the **equip lock** (`equip_left`, walk-only, a
+  server event; no new synced field). Leaving range, losing health, stagger/stun/force,
+  death or the node running out cancels it (`cancel_equip`); the node keeps its charge.
+  On finish: yield (+ `yield_bonus_hook`) into the bag as stacks (`LootSystem.give_resources`)
+  and `gathered(peer, skill, kind, amount)`. **Tradeskills** (`World/Tradeskills`): wired in
+  `World._ready`: `gathered` → `on_gathered` (XP), `time_multiplier_hook` /
+  `yield_bonus_hook` → `gather_time_multiplier` / `bonus_yield`; server → owner
+  `_receive_skills(dict)` and `_receive_level_up(skill, from, to)`; no client requests;
+  `add_xp(peer, skill, xp)` for crafting. Reset on rejoin until persistence.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
   `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
@@ -807,7 +830,8 @@ charges are cross-class).
 
 WASD move, Space jump, Shift dodge, left click tap = light / hold = heavy, hold right
 click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery panel (K
-or Esc closes it), T/Y/N/L/Delete party (see below), F pick up your loot in reach, I
+or Esc closes it), T/Y/N/L/Delete party (see below), F interact (pick up your loot in
+reach, else gather the node nearest the crosshair), P tradeskills, I
 inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse. Aimed area abilities
 (their zone lands at the crosshair) cast when their key is **released**; holding shows
 the marker; right click or Esc cancels (`AimHold`).
@@ -870,6 +894,10 @@ don't bind them to anything else.
   `Equipment.weapon_target`), and when the K panel changes the types, weapon items
   follow them or return to the bag (`check_weapon_change` / `weapons_changed`,
   `Equipment.sync_weapons`).
+- **Resources** (`slot="resource"` in items.cfg, `max_stack`): stackable (`Item.count`;
+  `Inventory.add_stack` fills stacks then new slots, `room_for`, `count_of`, `remove_count`);
+  no rarity, no equip; loot tables can't name them. Three raw ones: Rustvein Ore, Pine
+  Log, Thistle Fiber (from Rustvein Deposit, Windbent Pine, Thistlebrush nodes).
 - **Equipping takes `[equip] time` (1 s)**: `_request_equip` → server checks →
   `PlayerState.start_equip` (`equip_left`, synced; refused mid-attack, mid-ability or
   mid-swap (`can_change_loadout`) or dead): walking only (no attack,
@@ -1003,7 +1031,7 @@ still swings at its ally when no Husk is near, which the server ignores; see
 `PartySystem._bot_step`), `--verbose` (log positions every 2 s, server logs hits and
 refused build changes), `--hitboxes` (start with hitboxes shown; F3 toggles),
 `--mastery-panel` (open the K panel at start, for screenshot checks; `--mastery-panel=wings`
-opens it on the Wings tab), `--inventory-panel` (open the I panel at start, same use),
+opens it on the Wings tab), `--inventory-panel` (open the I panel at start, same use), `--tradeskills-panel` (the P panel),
 `--bot-aim-pitch=DEG` (the bot's aim pitch, up = positive; default 0),
 `--perf-log` (print every frame slower than 50 ms with the time since launch, plus a
 `SUMMARY perf` line with the worst frame and worst physics step; for chasing lag),

@@ -96,11 +96,11 @@ tested and playtested). Each sub-item is roughly one session with one testable g
 2. **Milestone 3: gathering and crafting.** Brief: two or three node types, one
    refining step, one crafting station, tradeskill XP. Decided (§4): F gathers, no
    durability, no item weight yet, no tool items. Branch `milestone-3`.
-   1. **Resources and nodes:** stackable resources in the inventory (ore, wood, fiber;
+   1. **Done (session 45, agent; needs a playtest).** **Resources and nodes:** (Rustvein Ore, Pine Log, Thistle Fiber, stacks of 100; 9 nodes on the test map; F = interact; gathering reuses the equip lock; `data/gathering.cfg`) stackable resources in the inventory (ore, wood, fiber;
       hide waits for animals; max stack size); server-side nodes with a hit count, no
       tool requirement, a gather time (walk-only lock like equipping) and respawn
       timers, all in `data/`.
-   2. **Tradeskills:** XP curves per skill (`data/tradeskills.cfg`), XP from gathering,
+   2. **Done (session 45, agent; needs a playtest).** **Tradeskills:** (8 skills, cap 100, XP = 100 × level^1.5; gathering −0.4% time and +0.5% bonus chance per level; panel on P; wired to gathering) XP curves per skill (`data/tradeskills.cfg`), XP from gathering,
       higher skill = faster gathering or more yield. Pure logic + tests.
    3. **Refining and a station:** ore → ingots, recipes in `data/recipes.cfg`, a station
       in the world, a crafting panel; the server checks materials, range and skill.
@@ -228,6 +228,7 @@ Gameplay:
 - The greataxe model is mostly hidden behind the body from the follow camera.
 - A drop scattered next to a crate can land inside it (still picked up from beside it).
 - Holding Space keeps jumping (jump is sent as "held").
+- Gathering: nodes don't collide with anything; the smoke bot only finds a node within 6 m in some cycles (Juggernaut runs gather ~1 time: a thin margin for the gathering check).
 - Builds, inventories and gear are lost on disconnect (build order item 3).
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
 
@@ -327,6 +328,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 42 | 2026-10-14 | Playtest approved A3; round A4 (melee facing to the crosshair, hold-to-aim, projectile glow, channel dodge, hyper armor, Husk navmesh), bots aim with the crosshair, beams aim like projectiles; approved; 682 tests |
 | 43 | 2026-10-14 | Internet readiness: server tuning on connect, lag compensation, correction smoothing; `HOSTING.md`, host and export scripts (export untested); 698 tests; smoke default, `-Party`, Mage pass, 0 corrections |
 | 44 | 2026-10-14 | Docs: one build order here; class implementation notes moved from `CLAUDE.md` to `design/classes.md`; old `PLAYTEST.md` (Wave 3 checklist) removed |
+| 45 | 2026-10-14 | Milestone 3 started on branch `milestone-3` (decided: F gathers, no durability, item weight later, no tool items). Two agents: 2.1 stackable resources + gathering nodes (`game/gathering/`, `data/gathering.cfg`, equip lock reused), 2.2 tradeskills (`game/tradeskills/`, `data/tradeskills.cfg`, P panel); merged (5 keep-both conflicts in `world.gd`), gathering wired to tradeskill XP/speed/bonus; smoke checks gathering and XP. 732 tests; smoke default, `-Party`, Juggernaut, Ranger, Mage pass, 0–1 corrections |
 
 ---
 
