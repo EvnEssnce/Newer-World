@@ -16,8 +16,10 @@ codebase.** Update `PROGRESS.md` at the end of every session.
   drop rates, respawn timers. Read them with `Tuning.get_value(file, section, key)`.
   Every value gets a comment saying what it does and its units. The developer edits
   these files directly to tune game feel.
-- **Persistence goes through one module** (not built yet; milestone 5). SQLite in dev,
-  Postgres later. Nothing else touches the database.
+- **Persistence goes through one module** (`game/persistence/persistence.gd`). SQLite in
+  dev (the godot-sqlite GDExtension in `addons/`), Postgres later. Nothing else touches the
+  database or writes SQL. Schema changes are new entries appended to
+  `Persistence.MIGRATIONS`, never edits to shipped ones.
 - **Tests** for systems that don't depend on feel: loot rolls, damage formulas, crafting
   outputs, inventory rules, stamina/dodge rules. Combat feel is playtested by hand. Tests
   use a small in-repo runner (`tests/framework/`), not GUT: extend `TestCase`, put
@@ -125,6 +127,16 @@ game/
                              first: a failed craft loses nothing); crafting_station.gd: reach, pick.
                              Pure, unit tested. crafting_system.gd: World/Crafting (server checks,
                              the busy lock, panel, prompt, bot); station_visual.gd: the Forge.
+  persistence/persistence.gd The one database module (server): SQLite via godot-sqlite (made through
+                             ClassDB, so it parses where the extension is missing), migrations in
+                             `PRAGMA user_version`, accounts, characters (save parts as JSON text
+                             columns; `encode`/`decode` keep ints and full-precision floats). Unit
+                             tested on temporary databases (user://test_persistence/). Not wired
+                             into the game yet (build order 3.2, 3.3).
+  persistence/character_save.gd  CharacterSave: a character's name, class and the to_dict() of its
+                             build, inventory, equipment and tradeskills; capture from live
+                             objects, rebuild through the normal rules (`CharacterBuild.apply_saved`,
+                             `Inventory.from_dict`), `drop_unknown_items`. Pure, unit tested.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
   zones/zone_params.gd       One zone/summon kind (data/zones.cfg [zone_<id>]).
@@ -169,6 +181,9 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      testing (test-only switches: the in-game class change, tradeskill join_xp) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
+addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
+                     binaries only (`gdsqlite.gdextension` lists them). Other platforms: copy
+                     their binaries from the release's addons.zip.
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
 tools/               PowerShell run scripts, unit test runner, smoke test.
 ```

@@ -126,6 +126,28 @@ func to_array() -> Array:
 	return data
 
 
+## The whole bag for a save: its items (uids included) and the next uid.
+## Capacity isn't saved: it comes from data/ when the bag is rebuilt.
+func to_dict() -> Dictionary:
+	return {"items": to_array(), "next_uid": _next_uid}
+
+
+## The reverse of to_dict, with `slots` from data/. Keeps every saved item even
+## past a smaller capacity (the bag is just full then). The next uid stays above
+## every saved one, so a uid is never handed out twice.
+static func from_dict(data: Dictionary, slots: int) -> Inventory:
+	var bag := Inventory.new(slots)
+	var saved: Variant = data.get("items", [])
+	if saved is Array:
+		for entry: Variant in saved:
+			if entry is Dictionary:
+				bag.items.append(Item.from_dict(entry))
+	bag._next_uid = maxi(1, int(data.get("next_uid", 1)))
+	for item in bag.items:
+		bag._next_uid = maxi(bag._next_uid, item.uid + 1)
+	return bag
+
+
 static func items_from_array(data: Array) -> Array[Item]:
 	var result: Array[Item] = []
 	for entry: Dictionary in data:

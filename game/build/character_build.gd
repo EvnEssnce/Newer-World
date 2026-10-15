@@ -304,6 +304,43 @@ func to_dict() -> Dictionary:
 			"wing_nodes": wing_nodes, "wing_slots": wing_slots}
 
 
+## Puts a saved build (to_dict of the same class) on this one, through the same
+## checks as a player's requests, so a save made under older data files can't
+## sneak in a build the rules now refuse: each part that fails (the loadout, a
+## weapon's tree and slots, the Wing tree and slots) keeps what this build has
+## (the class default, for a fresh one). Returns why each refused part failed.
+func apply_saved(data: Dictionary) -> PackedStringArray:
+	var problems := PackedStringArray()
+	if data.has("weapons"):
+		var error := set_weapons(_strings(data["weapons"]))
+		if not error.is_empty():
+			problems.append("weapons: " + error)
+	var data_allocated: Variant = data.get("allocated", {})
+	var data_slots: Variant = data.get("slots", {})
+	if data_allocated is Dictionary and data_slots is Dictionary:
+		for weapon_id: Variant in data_allocated:
+			if not (weapon_id is String and trees.has(weapon_id)):
+				problems.append("%s: no such tree" % weapon_id)
+				continue
+			var error := set_mastery(weapon_id, _strings(data_allocated[weapon_id]),
+					_strings(data_slots.get(weapon_id, ["", "", ""])))
+			if not error.is_empty():
+				problems.append("%s: %s" % [weapon_id, error])
+	if wing_tree and data.has("wing_nodes"):
+		var error := set_wing_mastery(_strings(data["wing_nodes"]),
+				_strings(data.get("wing_slots", ["", ""])))
+		if not error.is_empty():
+			problems.append("wings: " + error)
+	return problems
+
+
+## A saved list of ids as a PackedStringArray (empty if it isn't a list).
+static func _strings(value: Variant) -> PackedStringArray:
+	if value is Array or value is PackedStringArray:
+		return PackedStringArray(value)
+	return PackedStringArray()
+
+
 ## Rebuilds a server's build on a client (trusted data). Null if the class is unknown.
 static func from_dict(data: Dictionary) -> CharacterBuild:
 	var class_def := ClassDef.for_id(str(data.get("class", "")))

@@ -55,7 +55,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Networking | Prediction, snapshots, lag compensation, server tuning on connect | Built; not yet tested over the internet |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
-| Persistence | Accounts, character saves | Not started |
+| Persistence | Accounts, character saves | Database module built (session 49); not wired in yet |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
@@ -69,7 +69,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 2. Loot loop | **Done** (sessions 10–41; playtested) |
 | 3. Gathering and crafting | **Built** on branch `milestone-3` (sessions 45–46); needs its playtest |
 | 4. Second weapon and weapon swap | **Done**, and far past it: six classes, 15 weapons, Wings, statuses, forced movement, projectiles, zones, parties, enemy threat (sessions 11–37) |
-| 5. Persistence | Not started (item 3) |
+| 5. Persistence | Started on branch `persistence` (session 49: the database module) |
 | 6. One zone, then playtest with real people | Internet readiness built (session 43); Husk navmesh done (session 42); the rest is items 1, 5 and 6 |
 
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
@@ -118,10 +118,13 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       shoot: Longbow, Crossbow, Firebolts, Throwing Knives, Great Staff, Gauntlet),
       helmet/chest/legs for armor, wings, and ingot/log/wheat-style icons for materials.
 3. **Milestone 5: persistence.**
-   1. **Persistence module:** SQLite through one module (a Godot SQLite GDExtension
-      such as godot-sqlite; check it supports 4.7); schema for accounts and characters,
-      migrations; save/load of `CharacterBuild`, `Inventory`, `Equipment`, tradeskills
-      (unit tested with a temporary database).
+   1. **Done (session 49, branch `persistence` off `milestone-3`).** **Persistence module:**
+      godot-sqlite v4.9 (built for 4.7.1; runs on 4.7.2) in `addons/godot-sqlite`
+      (Windows + Linux binaries); `Persistence` (`game/persistence/`): schema v1
+      (accounts, characters with JSON columns), migrations by `user_version`, account and
+      character create/find/list/load/save/delete, saving everyone in one transaction;
+      `CharacterSave` captures and rebuilds `CharacterBuild` (through the mastery rules),
+      `Inventory` (stacks, uids), `Equipment` and tradeskills. Nothing calls it yet.
    2. **Accounts and character select:** name + password hash login, create a character
       (class picker instead of `--class`), choose it on connect.
    3. **Saving:** on change and periodically; load on join; survive a server restart
@@ -343,6 +346,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 46 | 2026-10-15 | Milestone 3 session 2.3 by an agent: refining recipes (`data/recipes.cfg`, `data/stations.cfg`, `game/crafting/`), the Forge (two markers so the smoke bot reaches one), crafting panel, refining XP; smoke checks a craft. Merged clean into `milestone-3`; 747 tests; smoke default ×2, `-Party`, Mage pass. Then session 2.4 (crafted gear: 21 recipes, GS and rarity by Weaponforging/Armorcraft level, no Legendaries) merged clean: 757 tests; smoke default, `-Party`, Assassin, Ranger, Mage pass first time; Juggernaut and Paladin passed on rerun (known force and status luck checks, and one missed craft). Milestone 3 built on `milestone-3`, needs its playtest |
 | 47 | 2026-10-15 | Milestone 3 playtest: gathering and the P panel approved. Feedback built by two agents and merged clean on `milestone-3`: XP feed lines, a progress bar in the Forge panel, crafting only with the panel open (moving cancels), one safe Forge at (-7, 0, 17) with the bot walking to it, crafted gear marked, and an icon per item (`ui/item_icon.gd`, `icon`/`ranged` keys). 768 tests; smoke all classes and `-Party` pass (default and Paladin on rerun: force and bleed luck checks) |
 | 48 | 2026-10-15 | Milestone 3 feedback 2 (main session): any move/jump/dodge closes the Forge panel (after you've stood still with it open), and an interrupted batch keeps its finished pieces ("(1 of 4 made)"; `CraftingSystem._make` shared by finish and cancel). 770 tests; smoke default, `-Party`, Ranger pass (the Ranger run made 1 of 4, 1 of 3, 1 of 2 after hits) |
+| 49 | 2026-10-15 | Persistence 3.1 on branch `persistence` (off `milestone-3`, so saves cover resources, tradeskills and crafted gear): godot-sqlite v4.9 added (Windows/Linux binaries), `Persistence` + `CharacterSave` (`game/persistence/`), `Inventory.to_dict/from_dict`, `CharacterBuild.apply_saved`. 785 tests (14 new, on temporary SQLite files); smoke default and `-Party` pass, 0 corrections. Nothing to playtest yet |
 
 ---
 
