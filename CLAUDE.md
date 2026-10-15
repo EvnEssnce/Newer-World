@@ -273,7 +273,13 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   (`CraftingRules.check`), runs one busy lock of craft time × quantity (`start_gather`,
   same cancels as gathering), and on finish applies it atomically (inputs taken then,
   rechecked), grants XP (`TradeskillSystem.on_crafted`) and sends the bag + feed line.
-  Recipes have `output_kind` "item" (refining) or "gear" (rolled through `LootRoller`).
+  Recipes have `output_kind` "item" (refining) or "gear": each piece is its own
+  `CraftingRules.roll_gear` → `LootRoller.roll_item` (server RNG) at a gear score range and
+  rarity weights from the crafter's level (`TradeskillDefs.gear_score_range` /
+  `gear_rarity_weights`, `tradeskills.cfg [crafting]`: GS 100–110 at level 1 to 130–140 at
+  100; Common 85% → 30%; never Legendary) and needs its own free bag slot. Recipe tiers
+  1/4/8 (weapons) and 1/3/6 (Padded armor) add variety, not gear score. `SUMMARY crafting
+  ... gear_made=`.
 - **Builds** (`World/Builds`, `BuildService`): the client sends its class in
   `World._client_ready(class_id)`; the server gives the player its class's default
   `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
