@@ -19,7 +19,8 @@ extends Node
 ## of craft_time x quantity. Leaving range, being hurt, staggered, moved or
 ## defeated cancels it (nothing taken). When it runs out (Player.equip_finished)
 ## CraftingRules.apply takes the inputs and adds the output in one go (or
-## nothing, if the bag changed meanwhile), the owner gets the bag and a feed
+## nothing, if the bag changed meanwhile; gear recipes roll each piece with
+## this node's server RNG, gear_made= on the SUMMARY line), the owner gets the bag and a feed
 ## line (LootSystem.bag_changed), and the tradeskill its XP
 ## (TradeskillSystem.on_crafted).
 ## A --bot refines once a cycle when it has the materials and a station is near
@@ -65,6 +66,10 @@ var _items_made := 0
 var _cancelled := 0
 var _refused := 0
 var _failed := 0
+## Gear pieces crafted (gear recipes; also counted in _items_made).
+var _gear_made := 0
+## Rolls crafted gear (seeded at startup, like loot).
+var _rng := RandomNumberGenerator.new()
 # Client
 var _visuals: Array[StationVisual] = []
 var _panel: CraftingPanel
@@ -95,6 +100,7 @@ func _ready() -> void:
 	_build_stations()
 	if multiplayer.is_server():
 		_verbose = LaunchArgs.has_flag("verbose")
+		_rng.randomize()
 		Net.peer_left.connect(func(peer: int) -> void: _active.erase(peer))
 		return
 	_is_client = true
@@ -229,8 +235,9 @@ func finish_craft(player: Player) -> void:
 	var bag := loot.bag_of(peer)
 	if recipe == null or bag == null:
 		return
+	var made_items: Array[Item] = []
 	var error := CraftingRules.apply(recipe, quantity, bag, tradeskills.level(peer, recipe.tradeskill),
-			_db, defs.max_batch, tradeskills.defs)
+			_db, defs.max_batch, tradeskills.defs, _rng, made_items)
 	if not error.is_empty():
 		_failed += 1
 		loot.notify(peer, error)
@@ -238,7 +245,12 @@ func finish_craft(player: Player) -> void:
 	var made := CraftingRules.made(recipe, quantity)
 	_crafts += 1
 	_items_made += made
-	loot.bag_changed(peer, [Item.resource(recipe.output, made).to_dict()])
+	if recipe.output_kind == RecipeDefs.OUTPUT_GEAR:
+		_gear_made += made
+	var gained := []
+	for item in made_items:
+		gained.append(item.to_dict())
+	loot.bag_changed(peer, gained)
 	tradeskills.on_crafted(peer, recipe.tradeskill, recipe.xp * quantity)
 	if _verbose:
 		print("[server] crafting: %d made %d %s" % [peer, made, recipe.output])
@@ -251,8 +263,8 @@ func _batch_text(recipe: RecipeDefs.Recipe, quantity: int) -> String:
 
 
 func print_summary() -> void:
-	print("SUMMARY crafting crafts=%d items_made=%d started=%d cancelled=%d refused=%d failed=%d stations=%d recipes=%d" % [
-			_crafts, _items_made, _started, _cancelled, _refused, _failed, stations.size(), defs.recipes.size()])
+	print("SUMMARY crafting crafts=%d items_made=%d started=%d cancelled=%d refused=%d failed=%d stations=%d recipes=%d gear_made=%d" % [
+			_crafts, _items_made, _started, _cancelled, _refused, _failed, stations.size(), defs.recipes.size(), _gear_made])
 
 
 # --- Client ---

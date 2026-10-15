@@ -37,6 +37,15 @@ var time_floor := 0.6
 var bonus_chance_per_level := 0.005
 var bonus_chance_max := 0.5
 var bonus_units := 1
+## Crafted gear ([crafting]): the gear score range at a level (gear_score_range)...
+var gear_score_base := 100
+var gear_score_spread := 10
+var gear_score_per_level := 0.3
+var gear_score_cap := 140
+## ...and rarity id -> weight at level 1 and at the cap (gear_rarity_weights
+## blends them). Empty until loaded (tests set them).
+var rarity_weights_start: Dictionary = {}
+var rarity_weights_end: Dictionary = {}
 ## Skill ids in panel order.
 var order: PackedStringArray = []
 var skills: Dictionary[String, SkillDef] = {}
@@ -60,6 +69,12 @@ static func from_tuning() -> TradeskillDefs:
 	defs.bonus_chance_per_level = Tuning.get_value("tradeskills", "gathering", "bonus_chance_per_level")
 	defs.bonus_chance_max = Tuning.get_value("tradeskills", "gathering", "bonus_chance_max")
 	defs.bonus_units = Tuning.get_value("tradeskills", "gathering", "bonus_units")
+	defs.gear_score_base = Tuning.get_value("tradeskills", "crafting", "gear_score_base")
+	defs.gear_score_spread = Tuning.get_value("tradeskills", "crafting", "gear_score_spread")
+	defs.gear_score_per_level = Tuning.get_value("tradeskills", "crafting", "gear_score_per_level")
+	defs.gear_score_cap = Tuning.get_value("tradeskills", "crafting", "gear_score_cap")
+	defs.rarity_weights_start = Tuning.get_value("tradeskills", "crafting", "rarity_weights_start")
+	defs.rarity_weights_end = Tuning.get_value("tradeskills", "crafting", "rarity_weights_end")
 	for id: String in Tuning.get_value("tradeskills", "tradeskills", "order"):
 		if defs.has_skill(id):
 			push_error("tradeskills.cfg: %s is in order twice" % id)
@@ -134,9 +149,56 @@ func bonus_chance(level: int) -> float:
 	return clampf(bonus_chance_per_level * (level - 1), 0.0, minf(1.0, bonus_chance_max))
 
 
+## Crafted gear's gear score range at a crafting level: Vector2i(low, high),
+## rolled evenly (CraftingRules.roll_gear).
+func gear_score_range(level: int) -> Vector2i:
+	var high_cap := maxi(1, gear_score_cap)
+	var low := mini(high_cap, gear_score_base + roundi(gear_score_per_level * maxi(0, level - 1)))
+	return Vector2i(low, mini(high_cap, low + maxi(0, gear_score_spread)))
+
+
+## Crafted gear's rarity id -> weight at a crafting level: rarity_weights_start
+## at level 1, rarity_weights_end at the cap, blended linearly between.
+func gear_rarity_weights(level: int) -> Dictionary:
+	var t := clampf(float(level - 1) / float(maxi(1, level_cap - 1)), 0.0, 1.0)
+	var weights := {}
+	for id: Variant in rarity_weights_start:
+		weights[str(id)] = 0.0
+	for id: Variant in rarity_weights_end:
+		weights[str(id)] = 0.0
+	for id: String in weights:
+		weights[id] = maxf(0.0, lerpf(float(rarity_weights_start.get(id, 0.0)),
+				float(rarity_weights_end.get(id, 0.0)), t))
+	return weights
+
+
+## The chance (0..1) of each rarity at a crafting level (gear_rarity_weights
+## normalized; empty if no weight is above 0).
+func gear_rarity_odds(level: int) -> Dictionary:
+	var weights := gear_rarity_weights(level)
+	var total := 0.0
+	for id: String in weights:
+		total += weights[id]
+	var odds := {}
+	if total <= 0.0:
+		return odds
+	for id: String in weights:
+		odds[id] = weights[id] / total
+	return odds
+
+
 ## Problems with the data, or none (a unit test runs it on the real file).
 func validate() -> PackedStringArray:
 	var problems := PackedStringArray()
+	if gear_score_base < 1 or gear_score_spread < 0 or gear_score_per_level < 0.0 \
+			or gear_score_cap < gear_score_base:
+		problems.append("crafting gear_score_*: base >= 1, spread and per_level >= 0, cap >= base")
+	for weights: Dictionary in [rarity_weights_start, rarity_weights_end]:
+		for id: Variant in weights:
+			if not id is String or not (weights[id] is float or weights[id] is int) or float(weights[id]) < 0.0:
+				problems.append("crafting rarity_weights_*: need rarity id -> weight >= 0")
+	# Whether the weights name real rarities and leave one to roll is checked
+	# with the recipes (RecipeDefs.validate), which know the items.
 	if level_cap < 2:
 		problems.append("level_cap must be at least 2")
 	if xp_base <= 0.0 or xp_exponent < 0.0:
