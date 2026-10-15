@@ -337,6 +337,13 @@ func bot_move(local: Player, phase: float, cycle: int) -> Variant:
 	return Vector2.ZERO
 
 
+## Bot: it asked for a gather and is waiting for it or gathering (crafting's
+## bot leaves it alone meanwhile).
+func bot_busy(local: Player) -> bool:
+	return _bot_asked_msec >= 0 and (local.state.is_equipping()
+			or Time.get_ticks_msec() - _bot_asked_msec < BOT_WAIT_MS)
+
+
 func _nearest_available(from: Vector3, within: float) -> int:
 	var best := -1
 	var best_distance := within

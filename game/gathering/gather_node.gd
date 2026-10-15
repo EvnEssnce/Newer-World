@@ -6,7 +6,7 @@ extends RefCounted
 ## unit tested (tests/test_gathering.gd).
 
 ## What F does (interact_choice).
-enum Interact { PICKUP, GATHER }
+enum Interact { PICKUP, GATHER, CRAFT }
 
 ## Its index under World/GatherNodes (what the network sends).
 var id := 0
@@ -53,12 +53,17 @@ func in_reach(from: Vector3, reach: float) -> bool:
 
 
 ## F: picks up your loot when some is in reach, else gathers the node it
-## means (node_id >= 0), else asks for a pickup (the server answers "nothing
-## to pick up").
-static func interact_choice(loot_in_reach: bool, node_id: int) -> Interact:
-	if loot_in_reach or node_id < 0:
+## means (node_id >= 0), else opens the crafting station it means
+## (station_id >= 0, CraftingStation.pick), else asks for a pickup (the server
+## answers "nothing to pick up").
+static func interact_choice(loot_in_reach: bool, node_id: int, station_id: int = -1) -> Interact:
+	if loot_in_reach:
 		return Interact.PICKUP
-	return Interact.GATHER
+	if node_id >= 0:
+		return Interact.GATHER
+	if station_id >= 0:
+		return Interact.CRAFT
+	return Interact.PICKUP
 
 
 ## Which node F means: of the available nodes whose kind's reach covers `feet`,
