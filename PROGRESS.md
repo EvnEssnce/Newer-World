@@ -55,7 +55,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Networking | Prediction, snapshots, lag compensation, server tuning on connect | Built; not yet tested over the internet |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
-| Persistence | Accounts, character saves | Database module built (session 49); not wired in yet |
+| Persistence | Accounts, character saves | Database module (session 49), accounts and character select (50); saving next |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
@@ -69,11 +69,11 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 2. Loot loop | **Done** (sessions 10–41; playtested) |
 | 3. Gathering and crafting | **Built** on branch `milestone-3` (sessions 45–46); needs its playtest |
 | 4. Second weapon and weapon swap | **Done**, and far past it: six classes, 15 weapons, Wings, statuses, forced movement, projectiles, zones, parties, enemy threat (sessions 11–37) |
-| 5. Persistence | Started on branch `persistence` (session 49: the database module) |
+| 5. Persistence | Started on branch `persistence` (session 49: the database module; 50: accounts and character select) |
 | 6. One zone, then playtest with real people | Internet readiness built (session 43); Husk navmesh done (session 42); the rest is items 1, 5 and 6 |
 
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
-(sessions 26, 41, 41, 42) are built and approved. 698 unit tests; the smoke tests pass
+(sessions 26, 41, 41, 42) are built and approved. 801 unit tests; the smoke tests pass
 for every class with 0 prediction corrections.
 
 ---
@@ -125,8 +125,12 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       character create/find/list/load/save/delete, saving everyone in one transaction;
       `CharacterSave` captures and rebuilds `CharacterBuild` (through the mastery rules),
       `Inventory` (stacks, uids), `Equipment` and tradeskills. Nothing calls it yet.
-   2. **Accounts and character select:** name + password hash login, create a character
-      (class picker instead of `--class`), choose it on connect.
+   2. **Done (session 50, agent; needs a hand check).** **Accounts and character select:**
+      (`game/accounts/`: PBKDF2-SHA256 hashes on a worker thread, 310,000 iterations;
+      name/password rules in `data/accounts.cfg`; `AccountService` at `/root/Main/Accounts`;
+      login, character list and create screens with a class picker; the server spawns the
+      chosen character's class; `--db=`; bots log in by themselves) name + password hash
+      login, create a character (class picker instead of `--class`), choose it on connect.
    3. **Saving:** on change and periodically; load on join; survive a server restart
       (add a smoke check that restarts the server mid-run).
 4. **Progression:** character level and XP (kills, gathering), Wing tree points from
@@ -175,6 +179,13 @@ their PC and connects; hits land on what you see at their ping (compare with
 `[lag_compensation] enabled=false` in `data/network.cfg`); no visible jerks after
 corrections; the HUD's correction count stays low; a tuning edit on your side reaches
 them after a server restart.
+
+**Session 50, login screens** (`run_local_test.ps1 -NoBot`): make an account (a short
+password or a name with a space is refused), make a character of another class and play
+it (you spawn as that class), log out and back in (the character is listed; your account
+name is remembered), a wrong password says "Wrong account name or password.", and the
+same account in the second window is refused while the first plays. Only the bot path
+and `--menu-preview` screenshots were checked automatically.
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -243,7 +254,11 @@ Gameplay:
 - Holding Space keeps jumping (jump is sent as "held").
 - Gathering: nodes don't collide with anything; the smoke bot only finds a node within 6 m in some cycles (Juggernaut runs gather ~1 time: a thin margin for the gathering check).
 - Crafting smoke check: the bot now walks to the one Forge on purpose (17 of 17 runs crafted). Those 3–5 s trips away from the Husks make "no Husk was moved by force" fail about 2 in 10 default runs (was ~1 in 10): a candidate for making that check deterministic.
-- Builds, inventories and gear are lost on disconnect (build order item 3).
+- Builds, inventories and gear are lost on disconnect (build order item 3.3).
+- Accounts (session 50): nameplates and party frames still say "Player N", not the
+  character name; no login attempt limit and no timeout for a connection that never
+  logs in; the in-game class change (test tool) doesn't change the stored class; no
+  character delete or rename on the start screens.
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
 
 Networking:
@@ -347,6 +362,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 47 | 2026-10-15 | Milestone 3 playtest: gathering and the P panel approved. Feedback built by two agents and merged clean on `milestone-3`: XP feed lines, a progress bar in the Forge panel, crafting only with the panel open (moving cancels), one safe Forge at (-7, 0, 17) with the bot walking to it, crafted gear marked, and an icon per item (`ui/item_icon.gd`, `icon`/`ranged` keys). 768 tests; smoke all classes and `-Party` pass (default and Paladin on rerun: force and bleed luck checks) |
 | 48 | 2026-10-15 | Milestone 3 feedback 2 (main session): any move/jump/dodge closes the Forge panel (after you've stood still with it open), and an interrupted batch keeps its finished pieces ("(1 of 4 made)"; `CraftingSystem._make` shared by finish and cancel). 770 tests; smoke default, `-Party`, Ranger pass (the Ranger run made 1 of 4, 1 of 3, 1 of 2 after hits) |
 | 49 | 2026-10-15 | Persistence 3.1 on branch `persistence` (off `milestone-3`, so saves cover resources, tradeskills and crafted gear): godot-sqlite v4.9 added (Windows/Linux binaries), `Persistence` + `CharacterSave` (`game/persistence/`), `Inventory.to_dict/from_dict`, `CharacterBuild.apply_saved`. 785 tests (14 new, on temporary SQLite files); smoke default and `-Party` pass, 0 corrections. Nothing to playtest yet |
+| 50 | 2026-10-15 | Persistence 3.2 by an agent on `persistence`: accounts and character select. `PasswordHash` (PBKDF2-HMAC-SHA256 over Godot's HMAC, RFC vectors in tests, salt + iterations in the stored string), `AccountRules` (`data/accounts.cfg`), `AccountService` (`/root/Main/Accounts`: login/create/play RPCs, hashes on worker threads, one login per account), start screens (address → login → characters → create with a class picker; `--menu-preview` for screenshots), `World._client_ready()` spawns the chosen character's class, `--db=` (smoke and screenshot servers use `:memory:`), bots log in alone (`--account=`/`--character=`). 801 tests; smoke default and `-Party` pass first time (new accounts check), 0 corrections. Needs a hand check of the login screens (§4) |
 
 ---
 

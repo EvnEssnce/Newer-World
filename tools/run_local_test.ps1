@@ -5,13 +5,18 @@
 # -NoBot makes both windows normal players (for two people, or one person
 # switching windows).
 # -Party makes the bot party up: it accepts your invite (T), or invites you (Y to join).
-# -Class picks your class (default fighter; e.g. juggernaut, assassin, ranger, mage, paladin). The bot plays a Fighter.
+# You log in (or make an account) and pick or make a character in your window;
+# the server keeps them in user://newer_world.db. -Class picks the class the
+# character screen offers first (default fighter; e.g. juggernaut, assassin,
+# ranger, mage, paladin). The bot logs in by itself as account localbot and
+# plays its character Localbot (a Fighter, made on its first run).
 param([switch]$NoBot, [switch]$Party, [string]$Class = 'fighter')
 . "$PSScriptRoot\find_godot.ps1"
 
 Start-Process $Godot -WorkingDirectory $ProjectRoot -ArgumentList '--headless', '--', '--server'
 Start-Sleep -Seconds 1
 
-$secondArgs = if ($NoBot) { @('--connect') } elseif ($Party) { @('--bot', '--bot-party') } else { @('--bot') }
+$botArgs = @('--bot', '--account=localbot', '--character=Localbot')
+$secondArgs = if ($NoBot) { @('--connect') } elseif ($Party) { $botArgs + '--bot-party' } else { $botArgs }
 Start-Process $GodotGui -WorkingDirectory $ProjectRoot -ArgumentList '--resolution', '960x540', '--position', '0,40', '--', '--connect', "--class=$Class"
 Start-Process $GodotGui -WorkingDirectory $ProjectRoot -ArgumentList (@('--resolution', '960x540', '--position', '960,40', '--') + $secondArgs)

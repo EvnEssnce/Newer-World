@@ -46,8 +46,11 @@ powershell -ExecutionPolicy Bypass -File tools\host_playtest.ps1
 
 It opens the server in a console window (close it to stop the server) and your own
 game window, and prints your Tailscale address (`100.x.y.z`). Friends type that
-address into the connect screen. Options: `-Class mage` (your class),
-`-NoClassChange` (turns off the K panel's Class picker for everyone).
+address into the connect screen, then make an account (name + password) and a
+character with the class they want. Accounts and characters are kept in the server's
+`user://newer_world.db` (Godot's user data folder on your PC). Options: `-Class mage`
+(the class your create-character screen offers first), `-NoClassChange` (turns off the
+K panel's Class picker for everyone).
 
 Tuning comes from **your** `data\*.cfg` files: edit them, restart the server, and
 everyone gets the new values when they reconnect.

@@ -4,7 +4,10 @@
 # display/window/size/no_focus; it still renders and saves frames), and the
 # server writes its log to a file instead of opening a console window.
 #   powershell -ExecutionPolicy Bypass -File tools\screenshot_run.ps1 -Dir shots [-Seconds 30] [-Port 24650] [-Class fighter] [-Resolution 1280x720] [-ClientArgs '--inventory-panel','--verbose'] [-Tune 'loot/table_husk/drop_chance=1']
-# Frames land in <Dir>\frame_<N>.png (relative to the project); logs in build\screenshot.
+# Frames land in <Dir>\frame_<N>.png (relative to the project), the start screens in
+# menu_<N>.png (-ClientArgs '--menu-preview=characters' shows one with sample data and
+# never logs in; also login, create); logs in build\screenshot. The server uses a
+# fresh in-memory database (the bot makes its account and character).
 # While it runs, other Godot launches from this same checkout also can't take
 # focus (override.cfg is per checkout), so prefer running it in a worktree.
 param(
@@ -29,7 +32,7 @@ $tuneArgs = @($Tune | ForEach-Object { "--tune=$_" })
 [IO.File]::WriteAllText($override, "[display]`n`nwindow/size/no_focus=true`n")
 try {
     $server = Start-Process $Godot -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru `
-        -ArgumentList (@('--headless', '--', '--server', "--port=$Port", "--quit-after=$($Seconds + 3)") + $tuneArgs) `
+        -ArgumentList (@('--headless', '--', '--server', "--port=$Port", '--db=:memory:', "--quit-after=$($Seconds + 3)") + $tuneArgs) `
         -RedirectStandardOutput (Join-Path $logDir 'server.log') `
         -RedirectStandardError (Join-Path $logDir 'server.err.log')
     Start-Sleep -Seconds 1

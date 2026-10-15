@@ -131,12 +131,17 @@ game/
                              ClassDB, so it parses where the extension is missing), migrations in
                              `PRAGMA user_version`, accounts, characters (save parts as JSON text
                              columns; `encode`/`decode` keep ints and full-precision floats). Unit
-                             tested on temporary databases (user://test_persistence/). Not wired
-                             into the game yet (build order 3.2, 3.3).
+                             tested on temporary databases (user://test_persistence/). Opened at
+                             server start by AccountService (`--db=`); saving players is 3.3.
   persistence/character_save.gd  CharacterSave: a character's name, class and the to_dict() of its
                              build, inventory, equipment and tradeskills; capture from live
                              objects, rebuild through the normal rules (`CharacterBuild.apply_saved`,
                              `Inventory.from_dict`), `drop_unknown_items`. Pure, unit tested.
+  accounts/password_hash.gd  PasswordHash: PBKDF2-HMAC-SHA256, stored as one string
+                             `pbkdf2_sha256$iterations$salt$key`. account_rules.gd: AccountRules,
+                             name/password rules (data/accounts.cfg). Pure, unit tested.
+  accounts/account_service.gd  /root/Main/Accounts (both sides): login, character list/create/
+                             choose RPCs, sessions per peer, hashes on worker threads; bot login.
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
   zones/zone_params.gd       One zone/summon kind (data/zones.cfg [zone_<id>]).
@@ -150,7 +155,9 @@ game/
   status/status_effects.gd   One owner's statuses: apply/stack/refresh, tick, queries,
                              cleanse, on-hit (Bloodlust), immunities, taunt source.
                              Pure logic, unit tested.
-ui/                  connect_menu (client start screen), crosshair (screen-centre ticks + dot,
+ui/                  connect_menu (client start screens: address, login/create account,
+                     character list, create character with a class picker; pages built
+                     in code), crosshair (screen-centre ticks + dot,
                      hidden under modal panels), hud (health/stamina/Ember bars with a
                      current/max health number, ability bar, Wing slots, weapon line, status
                      row, Rebirth banner, debug info),
@@ -178,7 +185,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      armor, equip time), party, status_effects, projectiles, zones, navigation, gathering
                      (node kinds), tradeskills (skills, XP curve, gathering effects),
                      recipes (refining/crafting recipes), stations (station kinds),
-                     testing (test-only switches: the in-game class change, tradeskill join_xp) (.cfg).
+                     testing (test-only switches: the in-game class change, tradeskill join_xp),
+                     accounts (name/password rules, max characters, hash iterations) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
@@ -307,9 +315,30 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   100; Common 85% → 30%; never Legendary) and needs its own free bag slot. Recipe tiers
   1/4/8 (weapons) and 1/3/6 (Padded armor) add variety, not gear score. `SUMMARY crafting
   ... gear_made=`.
-- **Builds** (`World/Builds`, `BuildService`): the client sends its class in
-  `World._client_ready(class_id)`; the server gives the player its class's default
-  `CharacterBuild`. Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
+- **Accounts** (`/root/Main/Accounts`, `AccountService`, made by `Main` on both sides
+  before any World; build order 3.2): the server opens the database at start (`--db=`,
+  default `user://newer_world.db`; `:memory:` for the smoke and screenshot scripts;
+  quits if it can't). A client, once connected and holding the server's tuning, logs
+  in, and only makes its World after choosing a character. Reliable RPCs: client →
+  server `_request_login(account, password, create)`, `_request_create_character(name,
+  class_id)`, `_request_play(character_id)`; server → that client `_receive_login(error,
+  account, characters)`, `_receive_characters(error, characters)` (entries `{id, name,
+  class_id}`), `_receive_play(error)`. The server checks `AccountRules`
+  (data/accounts.cfg; names unique ignoring case in the schema), one login per account,
+  that the character is the account's, and hashes with `PasswordHash` (PBKDF2,
+  `[password] iterations`, ~0.3 s) on a `WorkerThreadPool` task polled in `_process`
+  (the database stays on the main thread). Login failures say only "Wrong account name
+  or password." `World._client_ready()` (no arguments) spawns
+  `AccountService.character_of(peer)`'s class; a peer that hasn't chosen one is
+  ignored. Logging out = disconnecting (the session dies with the peer). A new
+  character is stored with its class's default build; nothing else is saved or loaded
+  yet (3.3), and an in-game class change doesn't touch the stored class. `--bot`
+  logs in alone (`start_bot`): account `--account=` (default `bot_<peer id>`, made if
+  missing), character `--character=` (default "Bot" + the peer id as letters), made
+  with `--class=`. `SUMMARY accounts logins= accounts_created= characters_created=
+  plays= refused=` (the smoke test checks every bot made both and played).
+- **Builds** (`World/Builds`, `BuildService`): `World._client_ready()` spawns the
+  character chosen at login with its class's default `CharacterBuild` (see "Accounts"). Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
   slots)` (a whole tree allocation + Q/E/R ability ids: a free respec),
   `_request_wings(nodes, slots)` (the Wing tree allocation + Z/C ability ids) and
   `_request_weapons(weapons)`; server → client `_receive_build(build_dict, error)` after
@@ -1020,7 +1049,7 @@ powershell -ExecutionPolicy Bypass -File tools\host_playtest.ps1         # serve
 powershell -ExecutionPolicy Bypass -File tools\export_client.ps1         # build\export\NewerWorld.zip for friends (needs export templates)
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, snapshots under one packet
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: make an account and character and log in (in-memory database), move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, snapshots under one packet
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage / paladin)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Bots 6    # more bots (not with -Party): same checks for each, and snapshots must still fit one packet
@@ -1050,7 +1079,12 @@ don't collide. Within one checkout, run them one after the other: they share the
 `build\smoke` log folder.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
-`--class=ID` (client: character class, default `fighter`; unknown = default),
+`--db=PATH` (server: the database, default `user://newer_world.db`; `:memory:` = fresh,
+gone at exit), `--class=ID` (client: the class the create-character screen offers first;
+a `--bot`'s class when it makes its character; default `fighter`, unknown = default),
+`--account=NAME` / `--character=NAME` (`--bot`: who it logs in as; see "Accounts"),
+`--menu-preview=login|characters|create` (show that start screen with sample data and
+never connect; with `--screenshot-dir` the start screens save as `menu_<N>.png`),
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
 Husk within 15 m, else the nearest player), then both use abilities (guard up between; a
 knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free

@@ -5,7 +5,10 @@ class_name LaunchArgs
 ##   godot -- --connect --address=192.168.1.20:24565
 ##
 ## Flags: --server, --connect, --bot, --bot-party, --verbose, --hitboxes. Values: --port=,
-## --address=, --class= (client: character class, default fighter),
+## --address=, --db= (server: database file, default user://newer_world.db;
+## ":memory:" = a fresh one), --class= (client: the class the create screen
+## offers first; a --bot's class when it makes its character), --account= and
+## --character= (--bot: who it logs in as, see AccountService), --menu-preview=,
 ## --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning).
 
 

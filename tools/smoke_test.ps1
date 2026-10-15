@@ -125,7 +125,8 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
 
-$server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", "--quit-after=$($Seconds + 2)") + $tune)
+# A fresh in-memory database: each bot makes its account and character by itself.
+$server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", '--db=:memory:', "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
 $clientNames = @(1..$Bots | ForEach-Object { "client$_" })
 $clients = @($clientNames | ForEach-Object {
@@ -141,6 +142,17 @@ $clients | ForEach-Object {
 if (-not $server.WaitForExit(10000)) { taskkill /T /F /PID $server.Id | Out-Null }
 
 $failed = $false
+# Every bot logged in: made its account (a hashed password), made a character
+# and chose it (AccountService). refused= counts each bot's first login try,
+# made before its account exists.
+$accountSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY accounts logins=(\d+) accounts_created=(\d+) characters_created=(\d+) plays=(\d+) refused=(\d+)'
+if (-not $accountSummary -or [int]$accountSummary.Matches[0].Groups[4].Value -lt $Bots `
+        -or [int]$accountSummary.Matches[0].Groups[2].Value -lt $Bots -or [int]$accountSummary.Matches[0].Groups[3].Value -lt $Bots) {
+    Write-Host "FAIL accounts: not every bot made an account and a character and played ($($accountSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS accounts: $($accountSummary.Line)" -ForegroundColor Green
+}
 # The bots fight (Husks when near, else each other) for the first 4 s of every 8 (then use abilities for 2 s);
 # the server must resolve real hits.
 $serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+) blocks=(\d+) guard_breaks=(\d+)'

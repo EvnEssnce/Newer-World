@@ -2,20 +2,30 @@ extends Node
 ## Entry point. Decides whether this process is the dedicated server or a client.
 ##
 ## The World scene is always added as /root/Main/World on both sides, because
-## RPCs are matched by node path.
+## RPCs are matched by node path. /root/Main/Accounts (AccountService) exists
+## from the start on both sides: a client logs in and chooses a character
+## through it, and only then makes its World.
 
 const WORLD_SCENE := preload("res://game/world/world.tscn")
 const CONNECT_MENU_SCENE := preload("res://ui/connect_menu.tscn")
+## The server's database file unless --db= says otherwise (":memory:" = a fresh
+## one that's gone when the server stops: the smoke test).
+const DEFAULT_DB := "user://newer_world.db"
 
 ## Frames slower than this are logged with --perf-log (ms).
 const PERF_SPIKE_MS := 50.0
 
 var _world: World
 var _menu: ConnectMenu
+var _accounts: AccountService
 ## Client: connected to the server, and its tuning arrived (_enter_world needs both).
 var _connected := false
 var _server_tuning := false
 var _perf_log := false
+## --screenshot-dir: the start screens are saved too (menu_<N>.png; World saves
+## the game's frames).
+var _screenshot_dir := ""
+var _last_menu_frame := -1
 var _perf_spikes := 0
 var _perf_worst_ms := 0.0
 var _perf_worst_physics_ms := 0.0
@@ -24,11 +34,15 @@ var _perf_worst_physics_ms := 0.0
 func _ready() -> void:
 	InputActions.register()
 	_perf_log = LaunchArgs.has_flag("perf-log")
-	set_process(_perf_log)
+	_screenshot_dir = LaunchArgs.get_value("screenshot-dir")
+	set_process(_perf_log or not _screenshot_dir.is_empty())
 	var quit_after := float(LaunchArgs.get_value("quit-after", "0"))
 	if quit_after > 0.0:
 		_quit_after(quit_after)
 
+	_accounts = AccountService.new()
+	_accounts.name = "Accounts"
+	add_child(_accounts)
 	if LaunchArgs.has_flag("server") or OS.has_feature("dedicated_server"):
 		_start_server()
 	else:
@@ -38,6 +52,9 @@ func _ready() -> void:
 # --- Server ---
 
 func _start_server() -> void:
+	if not _accounts.server_open(LaunchArgs.get_value("db", DEFAULT_DB)):
+		get_tree().quit(1)
+		return
 	var default_port: int = Tuning.get_value("network", "server", "port")
 	var port := int(LaunchArgs.get_value("port", str(default_port)))
 	var max_players: int = Tuning.get_value("network", "server", "max_players")
@@ -61,8 +78,14 @@ func _start_client() -> void:
 	Tuning.server_tuning_applied.connect(_on_server_tuning)
 	Net.connection_failed.connect(_on_connection_failed)
 	Net.server_disconnected.connect(_on_server_disconnected)
+	_accounts.login_finished.connect(_on_login_finished)
+	_accounts.characters_changed.connect(_on_characters_changed)
+	_accounts.play_finished.connect(_on_play_finished)
 	_show_menu("")
-	if LaunchArgs.has_flag("connect") or LaunchArgs.has_flag("bot"):
+	var preview := LaunchArgs.get_value("menu-preview")
+	if not preview.is_empty():
+		_preview_menu(preview)
+	elif LaunchArgs.has_flag("connect") or LaunchArgs.has_flag("bot"):
 		_connect(_menu.get_address())
 
 
@@ -74,6 +97,10 @@ func _show_menu(status: String) -> void:
 	_menu.set_address(LaunchArgs.get_value("address", default_address))
 	_menu.set_status(status)
 	_menu.connect_requested.connect(_connect)
+	_menu.login_requested.connect(_accounts.login)
+	_menu.create_requested.connect(_accounts.create_character)
+	_menu.play_requested.connect(_accounts.play)
+	_menu.logout_requested.connect(_log_out)
 
 
 func _connect(address: String) -> void:
@@ -101,18 +128,81 @@ func _on_connected() -> void:
 	print("[client] connected as peer %d" % multiplayer.get_unique_id())
 	_connected = true
 	if _server_tuning:
-		_enter_world()
+		_start_login()
 	else:
 		_menu.set_status("Loading the server's settings...", true)
 
 
 ## The server's tuning arrives right after connecting (usually just after
-## _on_connected); the World is only made once both have happened, so every
-## params cache is built from the server's values.
+## _on_connected); logging in (and so the World) only starts once both have
+## happened, so every params cache, and the name rules, use the server's values.
 func _on_server_tuning() -> void:
 	_server_tuning = true
 	if _connected:
-		_enter_world()
+		_start_login()
+
+
+## --bot logs in and picks its character by itself (AccountService.start_bot).
+func _start_login() -> void:
+	if _menu == null:
+		return
+	if LaunchArgs.has_flag("bot"):
+		_menu.set_status("Logging in...", true)
+		_accounts.start_bot()
+	else:
+		_menu.show_login()
+
+
+func _on_login_finished(error: String, account_name: String, characters: Array) -> void:
+	if _menu == null:
+		return
+	if error.is_empty():
+		_menu.show_characters(account_name, characters)
+	else:
+		_menu.show_login(error)
+
+
+func _on_characters_changed(error: String, characters: Array) -> void:
+	if _menu == null:
+		return
+	if error.is_empty():
+		_menu.show_characters("", characters, "Character made.")
+	elif _menu.is_on_create_page():
+		_menu.set_status(error)
+	else:
+		_menu.show_characters("", characters, error)
+
+
+func _on_play_finished(error: String) -> void:
+	if not error.is_empty():
+		if _menu:
+			_menu.set_status(error)
+		return
+	_enter_world()
+
+
+## --menu-preview=login|characters|create: shows that start screen with sample
+## data and never connects, to check it from --screenshot-dir frames.
+func _preview_menu(page: String) -> void:
+	var characters := [{"id": 1, "name": "Ashwyn", "class_id": "fighter"},
+			{"id": 2, "name": "Corvane", "class_id": "mage"}]
+	match page:
+		"login":
+			_menu.show_login()
+		"characters":
+			_menu.show_characters("preview", characters)
+		"create":
+			_menu.show_characters("preview", characters)
+			_menu.show_create("Character name can't contain \"7\".")
+
+
+## Back to the address screen (the server forgets the login with the connection).
+func _log_out() -> void:
+	Net.disconnect_from_server()
+	_connected = false
+	_server_tuning = false
+	if _menu:
+		_menu.show_connect("Logged out.")
 
 
 func _enter_world() -> void:
@@ -154,6 +244,12 @@ func _spawn_world() -> void:
 ## --perf-log: prints every slow frame (a hitch the player would feel), with how
 ## long since launch, so startup lag can be told apart from steady-state lag.
 func _process(delta: float) -> void:
+	if not _screenshot_dir.is_empty() and _menu and Time.get_ticks_msec() / 250 != _last_menu_frame:
+		_last_menu_frame = Time.get_ticks_msec() / 250
+		get_viewport().get_texture().get_image().save_png(
+				_screenshot_dir.path_join("menu_%04d.png" % _last_menu_frame))
+	if not _perf_log:
+		return
 	# Time spent in the last physics step(s): the sim, hit checks, snapshots.
 	_perf_worst_physics_ms = maxf(_perf_worst_physics_ms,
 			Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
@@ -170,6 +266,8 @@ func _quit_after(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 	if _world:
 		_world.print_summary()
+	if multiplayer.is_server():
+		_accounts.print_summary()
 	if _perf_log:
 		print("SUMMARY perf spikes=%d worst_ms=%.0f worst_physics_ms=%.1f" % [
 				_perf_spikes, _perf_worst_ms, _perf_worst_physics_ms])

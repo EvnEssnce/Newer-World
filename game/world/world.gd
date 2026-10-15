@@ -321,7 +321,7 @@ func _ready() -> void:
 			_mastery_panel.toggle()
 			if LaunchArgs.get_value("mastery-panel") == "wings":
 				_mastery_panel.show_wings()
-		_client_ready.rpc_id(1, LaunchArgs.get_value("class", ClassDef.DEFAULT_CLASS))
+		_client_ready.rpc_id(1)
 
 
 func _physics_process(delta: float) -> void:
@@ -485,14 +485,21 @@ func _connected_player_ids() -> Array[int]:
 	return ids
 
 
-## class_id: the character's class (--class=, see ClassDef).
+## The client's World is up: spawn the character it chose at login
+## (AccountService.character_of; a peer that hasn't chosen one is ignored).
 @rpc("any_peer", "call_remote", "reliable")
-func _client_ready(class_id: String) -> void:
+func _client_ready() -> void:
 	if not multiplayer.is_server():
 		return
 	var peer_id := multiplayer.get_remote_sender_id()
 	if _players.has_node(str(peer_id)):
 		return
+	var accounts := get_node_or_null("../Accounts") as AccountService
+	var character: Dictionary = accounts.character_of(peer_id) if accounts else {}
+	if character.is_empty():
+		print("[server] peer %d sent ready without choosing a character: ignored" % peer_id)
+		return
+	var class_id: String = character["class_id"]
 	var player: Player = PLAYER_SCENE.instantiate()
 	player.name = str(peer_id)
 	player.peer_id = peer_id
@@ -517,8 +524,8 @@ func _client_ready(class_id: String) -> void:
 	loot.add_player(peer_id)
 	tradeskills.add_player(peer_id)
 	gathering.add_player(peer_id)
-	print("[server] peer %d joined as %s (%d players)" % [
-			peer_id, player.build.class_def.id, _players.get_child_count()])
+	print("[server] peer %d joined as %s, a %s (%d players)" % [
+			peer_id, character["name"], player.build.class_def.id, _players.get_child_count()])
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered", 1)
