@@ -107,6 +107,16 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    4. **Done (session 46, agent; needs a playtest).** **Crafted gear** (21 recipes at the Forge: every class weapon at Weaponforging levels 1/4/8 and the Padded armor at Armorcraft 1/3/6; GS 100–110 at level 1 to 130–140 at 100; Rare/Epic odds grow with level; no Legendaries; Wing Enhancements deferred) through `LootRoller` (gear score range from skill, rarity
       chance), so crafting feeds the same items as loot. Durability and repairs if
       decided. Then playtest Milestone 3.
+   5. **Milestone 3 playtest feedback (session 47):** approved: gathering feel and speed,
+      the P panel, everything else. To do: (a) an XP feed line after each gather and
+      craft ("+25 Mining XP"); (b) a progress bar for the current craft inside the Forge
+      panel; (c) a craft only finishes while the station panel stays open (closing it
+      cancels; nothing is taken); (d) stations far enough from enemies not to be
+      interrupted: one Forge on the safe side of spawn, the camp Forge removed, the bot
+      walks to it on purpose; (e) crafted gear marked as crafted in the inventory; (f) an
+      icon per item: crossed swords (melee weapons) or a bow (weapons that throw or
+      shoot: Longbow, Crossbow, Firebolts, Throwing Knives, Great Staff, Gauntlet),
+      helmet/chest/legs for armor, wings, and ingot/log/wheat-style icons for materials.
 3. **Milestone 5: persistence.**
    1. **Persistence module:** SQLite through one module (a Godot SQLite GDExtension
       such as godot-sqlite; check it supports 4.7); schema for accounts and characters,
