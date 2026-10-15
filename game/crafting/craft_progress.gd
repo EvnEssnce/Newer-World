@@ -63,6 +63,20 @@ static func is_moving(move: Vector2, buttons: int) -> bool:
 	return move.length() > MOVE_DEADZONE or (buttons & MOVE_BUTTONS) != 0
 
 
+## Server: whole pieces finished when a batch stops with `ticks_left` of its
+## `total_ticks` lock to go (`each_ticks` per piece): those are still made.
+static func pieces_done(total_ticks: int, ticks_left: int, each_ticks: int, quantity: int) -> int:
+	var elapsed := clampi(total_ticks - ticks_left, 0, total_ticks)
+	return clampi(elapsed / maxi(1, each_ticks), 0, maxi(0, quantity))
+
+
+## Client: whether moving closes the station panel now. `armed` turns true once
+## the player has stood still with it open, so the move that walked up to the
+## station (still held as F opened it) doesn't close it at once.
+static func move_closes(armed: bool, moving: bool) -> bool:
+	return armed and moving
+
+
 ## Client: whether closing the panel (or it being closed) must ask the server to
 ## cancel: a craft is under way, or one was asked for and hasn't been answered.
 static func cancel_on_close(crafting: bool, request_pending: bool) -> bool:

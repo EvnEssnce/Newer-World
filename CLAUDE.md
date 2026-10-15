@@ -278,7 +278,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   rechecked), grants XP (`TradeskillSystem.on_crafted`) and sends the bag + feed line.
   **The station panel must stay open:** closing it (Esc, F, its X, range, another panel,
   death) sends `_request_cancel_craft()`, and any move/jump/dodge input at the station
-  cancels on the server (`Player.last_move`/`last_buttons`); inputs are only taken at the
+  cancels on the server (`Player.last_move`/`last_buttons`), and on the client any such
+  input closes the panel once you've stood still with it open (`CraftProgress.move_closes`).
+  A cancelled batch still makes its whole finished pieces (`CraftProgress.pieces_done`,
+  "(2 of 5 made)"); inputs are only taken for what's made, at the
   end. Server → owner `_receive_craft_started(recipe, qty, ticks)` / `_receive_craft_ended`
   drive the panel's progress bar (then the predicted `equip_left`). The bot walks to the
   Forge on purpose once it has materials (`CraftingSystem.bot_trip`).

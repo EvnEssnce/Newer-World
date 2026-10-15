@@ -17,6 +17,8 @@ extends Node
 ## **A craft needs the panel open**: closing it any way (Esc, F, its X, walking
 ## out of range, opening another panel) while a craft runs or is asked for
 ## sends _request_cancel_craft() (the client may only cancel its own action).
+## Any move, jump or dodge input also closes it, once the player has stood still
+## with it open (CraftProgress.move_closes).
 ##
 ## Server: re-checks everything (alive, not busy, in range of its own position,
 ## the recipe belongs to that station's kind, then CraftingRules.check:
@@ -24,7 +26,9 @@ extends Node
 ## (PlayerState.start_gather: equip_left, a server event). A batch is one lock
 ## of craft_time x quantity. Leaving range, being hurt, staggered, moved,
 ## defeated, any movement input (CraftProgress.is_moving: you stand at the
-## station) or the owner's cancel request cancels it (nothing taken). When it
+## station) or the owner's cancel request cancels it: the whole pieces of a batch
+## already done are still made (CraftProgress.pieces_done), the piece under way
+## costs nothing. When it
 ## runs out (Player.equip_finished)
 ## CraftingRules.apply takes the inputs and adds the output in one go (or
 ## nothing, if the bag changed meanwhile; gear recipes roll each piece with
@@ -103,6 +107,9 @@ var _panel_station := -1
 var _panel_timer := 0.0
 ## The panel was open last frame (closing it cancels a craft).
 var _panel_was_open := false
+## Moving closes the panel once the player has stood still with it open
+## (CraftProgress.move_closes).
+var _panel_armed := false
 ## --crafting-panel (screenshot checks): open at the nearest station once the
 ## local player exists, and keep it open wherever the bot walks.
 var _panel_flag := false
@@ -192,6 +199,7 @@ func _physics_process(_delta: float) -> void:
 		var reason := _interruption(player, _active[peer])
 		if reason.is_empty():
 			_active[peer][3] = player.health
+			_active[peer][4] = player.state.equip_left  # how far the batch got
 			continue
 		if reason == MOVED_TEXT:
 			_moved_cancels += 1
@@ -202,12 +210,24 @@ func _physics_process(_delta: float) -> void:
 
 # --- Server ---
 
-## Server: stops `player`'s craft (nothing taken) and tells the owner why.
+## Server: stops `player`'s craft and tells the owner why. Pieces of a batch that
+## were already finished are still made (inputs taken, output, XP); the piece
+## under way is dropped and costs nothing.
 func _cancel(player: Player, reason: String) -> void:
 	var peer := player.peer_id
+	var active: Array = _active[peer]
 	_active.erase(peer)
 	_cancelled += 1
+	var recipe := defs.get_recipe(active[1])
+	var quantity: int = active[2]
+	# The lock's ticks left: the live count if it's still running, else the
+	# last one seen (a stagger or death may already have ended it).
+	var left: int = player.state.equip_left if player.state.is_equipping() else active[4]
+	var done := CraftProgress.pieces_done(recipe.ticks_for(quantity), left,
+			recipe.craft_ticks, quantity) if recipe else 0
 	player.state.cancel_equip()
+	if done > 0 and _make(player, recipe, done):
+		reason += " (%d of %d made)" % [done, quantity]
 	loot.notify(peer, reason)
 	_receive_craft_ended.rpc_id(peer, RESULT_CANCELLED)
 	if _verbose:
@@ -227,7 +247,8 @@ func _request_craft(station_id: int, recipe_id: String, quantity: int) -> void:
 		var recipe := defs.get_recipe(recipe_id)
 		var ticks := recipe.ticks_for(quantity)
 		if player.state.start_gather(ticks):
-			_active[peer] = [station_id, recipe_id, quantity, player.health]
+			# [station, recipe, quantity, health, lock ticks left]
+			_active[peer] = [station_id, recipe_id, quantity, player.health, ticks]
 			_started += 1
 			loot.show_busy_bar(peer, _batch_text(recipe, quantity), ticks)
 			_receive_craft_started.rpc_id(peer, recipe_id, quantity, ticks)
@@ -304,20 +325,26 @@ func finish_craft(player: Player) -> void:
 	var active: Array = _active[peer]
 	_active.erase(peer)
 	var recipe := defs.get_recipe(active[1])
-	var quantity: int = active[2]
-	var bag := loot.bag_of(peer)
-	if recipe == null or bag == null:
+	if recipe == null or not _make(player, recipe, active[2]):
 		_receive_craft_ended.rpc_id(peer, RESULT_FAILED)
 		return
+	_receive_craft_ended.rpc_id(peer, RESULT_FINISHED)
+
+
+## Server: makes `quantity` of `recipe` for `player` now (all or nothing: inputs
+## taken, output in the bag, XP, feed lines). False (with a notice) if it can't.
+func _make(player: Player, recipe: RecipeDefs.Recipe, quantity: int) -> bool:
+	var peer := player.peer_id
+	var bag := loot.bag_of(peer)
+	if bag == null:
+		return false
 	var made_items: Array[Item] = []
 	var error := CraftingRules.apply(recipe, quantity, bag, tradeskills.level(peer, recipe.tradeskill),
 			_db, defs.max_batch, tradeskills.defs, _rng, made_items)
 	if not error.is_empty():
 		_failed += 1
 		loot.notify(peer, error)
-		_receive_craft_ended.rpc_id(peer, RESULT_FAILED)
-		return
-	_receive_craft_ended.rpc_id(peer, RESULT_FINISHED)
+		return false
 	var made := CraftingRules.made(recipe, quantity)
 	_crafts += 1
 	_items_made += made
@@ -330,6 +357,7 @@ func finish_craft(player: Player) -> void:
 	tradeskills.on_crafted(peer, recipe.tradeskill, recipe.xp * quantity)
 	if _verbose:
 		print("[server] crafting: %d made %d %s" % [peer, made, recipe.output])
+	return true
 
 
 ## The busy bar's label: "Smelting Rustvein Ingot x5".
@@ -352,8 +380,12 @@ func _process(delta: float) -> void:
 	var local := loot.local_player() if loot else null
 	if _panel_flag and _panel_station < 0 and local and not stations.is_empty():
 		open_panel(_nearest_station(local.global_position))
-	if _panel.visible and not _panel_flag and _should_close(local):
-		close_panel()
+	if _panel.visible and not _panel_flag:
+		var moving := local != null and CraftProgress.is_moving(local.last_move, local.last_buttons)
+		if _should_close(local) or CraftProgress.move_closes(_panel_armed, moving):
+			close_panel()
+		elif not moving:
+			_panel_armed = true
 	if not _panel.visible:
 		if _panel_was_open:
 			_panel_closed()
@@ -458,6 +490,7 @@ func open_panel(station_id: int) -> void:
 	if station_id < 0 or station_id >= stations.size():
 		return
 	_panel_station = station_id
+	_panel_armed = false
 	_panel_opens += 1
 	_panel_timer = PANEL_REFRESH
 	var kind := defs.get_station(stations[station_id].kind)

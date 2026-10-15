@@ -66,3 +66,20 @@ func test_closing_the_panel_cancels_a_craft_under_way_or_asked_for() -> void:
 
 func test_xp_feed_line() -> void:
 	assert_eq(TradeskillSystem.xp_line("Mining", 25), "+25 Mining XP")
+
+
+func test_pieces_done_counts_whole_pieces_only() -> void:
+	# A batch of 5, 120 ticks each (600 in all).
+	assert_eq(CraftProgress.pieces_done(600, 600, 120, 5), 0, "just started")
+	assert_eq(CraftProgress.pieces_done(600, 481, 120, 5), 0, "first piece not done yet")
+	assert_eq(CraftProgress.pieces_done(600, 480, 120, 5), 1, "first piece done")
+	assert_eq(CraftProgress.pieces_done(600, 250, 120, 5), 2, "two done, third under way")
+	assert_eq(CraftProgress.pieces_done(600, 0, 120, 5), 5, "all done")
+	assert_eq(CraftProgress.pieces_done(600, -10, 120, 5), 5, "never more than the batch")
+	assert_eq(CraftProgress.pieces_done(600, 700, 120, 5), 0, "never negative")
+
+
+func test_move_closes_the_panel_only_once_armed() -> void:
+	assert_false(CraftProgress.move_closes(false, true), "still walking up as F opened it")
+	assert_true(CraftProgress.move_closes(true, true), "moving after standing still")
+	assert_false(CraftProgress.move_closes(true, false), "standing still")
