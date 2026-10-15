@@ -6,6 +6,10 @@ extends RefCounted
 
 ## Item slots ("wings" = a Wing Enhancement). Equipment maps them to equip slots.
 const SLOTS: PackedStringArray = ["weapon", "head", "chest", "legs", "wings"]
+## Stackable crafting materials (gathered): never equipped, no stats.
+const RESOURCE_SLOT := "resource"
+## Every item slot: the gear SLOTS, then resources.
+const ITEM_SLOTS: PackedStringArray = ["weapon", "head", "chest", "legs", "wings", "resource"]
 const PRIMARY_STATS: PackedStringArray = ["weapon_power", "wing_power", "armor"]
 const TABLE_PREFIX := "table_"
 
@@ -31,6 +35,11 @@ class ItemDef:
 	var primary_stat := ""
 	## Its value at the base gear score (GearScore.factor scales it).
 	var primary_base := 0.0
+	## How many fit in one bag slot: 1 for gear, more for resources.
+	var max_stack := 1
+
+	func is_resource() -> bool:
+		return slot == ItemDatabase.RESOURCE_SLOT
 
 
 class AffixDef:
@@ -115,8 +124,9 @@ static func from_tuning() -> ItemDatabase:
 		if Tuning.has_value("items", id, "weapon"):
 			item.weapon_type = Tuning.get_value("items", id, "weapon")
 		item.class_id = Tuning.get_optional("items", id, "class", "")
-		item.primary_stat = Tuning.get_value("items", id, "primary_stat")
-		item.primary_base = Tuning.get_value("items", id, "primary_base")
+		item.primary_stat = Tuning.get_optional("items", id, "primary_stat", "")
+		item.primary_base = Tuning.get_optional("items", id, "primary_base", 0.0)
+		item.max_stack = Tuning.get_optional("items", id, "max_stack", 1)
 		db.items[id] = item
 
 	for id in Tuning.get_sections("affixes"):
@@ -158,8 +168,16 @@ func validate() -> PackedStringArray:
 		if not rarities.has(id):
 			problems.append("rarity '%s' is in the order list but has no section" % id)
 	for item: ItemDef in items.values():
-		if item.slot not in SLOTS:
+		if item.slot not in ITEM_SLOTS:
 			problems.append("item '%s' has unknown slot '%s'" % [item.id, item.slot])
+		if item.is_resource():
+			if item.max_stack < 1:
+				problems.append("resource '%s' needs a max_stack of at least 1" % item.id)
+			if not item.primary_stat.is_empty() or not item.weapon_type.is_empty() or not item.class_id.is_empty():
+				problems.append("resource '%s' mustn't have a primary_stat, weapon or class" % item.id)
+			continue
+		if item.max_stack != 1:
+			problems.append("item '%s': only resources stack (max_stack)" % item.id)
 		if item.primary_stat not in PRIMARY_STATS:
 			problems.append("item '%s' has unknown primary_stat '%s'" % [item.id, item.primary_stat])
 		var is_weapon := item.slot == "weapon"
@@ -184,6 +202,8 @@ func validate() -> PackedStringArray:
 		for item_id: String in table.item_weights:
 			if not items.has(item_id):
 				problems.append("loot table '%s' names unknown item '%s'" % [table.id, item_id])
+			elif items[item_id].is_resource():
+				problems.append("loot table '%s' names resource '%s' (tables roll gear)" % [table.id, item_id])
 		for rarity_id: String in table.rarity_weights:
 			if not rarities.has(rarity_id):
 				problems.append("loot table '%s' names unknown rarity '%s'" % [table.id, rarity_id])

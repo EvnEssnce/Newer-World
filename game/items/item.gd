@@ -16,6 +16,17 @@ var gear_score := 0
 var primary_value := 0.0
 ## Affix id (a section of data/affixes.cfg) -> rolled value.
 var affixes: Dictionary[String, float] = {}
+## How many this is: 1 for gear; a resource stack holds up to its definition's
+## max_stack (Inventory.add_stack merges them).
+var count := 1
+
+
+## A stack of `amount` of a resource (no rarity, gear score or stats).
+static func resource(id: String, amount: int) -> Item:
+	var item := Item.new()
+	item.item_id = id
+	item.count = amount
+	return item
 
 
 func to_dict() -> Dictionary:
@@ -26,12 +37,14 @@ func to_dict() -> Dictionary:
 		"gs": gear_score,
 		"primary": primary_value,
 		"affixes": affixes.duplicate(),
+		"count": count,
 	}
 
 
 static func from_dict(data: Dictionary) -> Item:
 	var item := Item.new()
 	item.uid = data.get("uid", 0)
+	item.count = data.get("count", 1)
 	item.item_id = data.get("item", "")
 	item.rarity = data.get("rarity", "")
 	item.gear_score = data.get("gs", 0)
@@ -107,6 +120,8 @@ func rarity_color(db: ItemDatabase) -> Color:
 func kind_text(db: ItemDatabase) -> String:
 	var rarity_def: ItemDatabase.RarityDef = db.rarities.get(rarity)
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
+	if def and def.is_resource():
+		return "Resource"
 	var slot: String = "?" if def == null else (
 			"Wing Enhancement" if def.slot == "wings" else def.slot.capitalize())
 	if def and not def.weapon_type.is_empty():
@@ -121,7 +136,7 @@ func kind_text(db: ItemDatabase) -> String:
 func stat_lines(db: ItemDatabase) -> PackedStringArray:
 	var lines := PackedStringArray()
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
-	if def:
+	if def and not def.primary_stat.is_empty():
 		var label := _stat_label(def.primary_stat)
 		lines.append("%s%s %d" % [label.left(1).to_upper(), label.substr(1), roundi(primary_value)])
 	for affix_id in affixes:
@@ -147,7 +162,7 @@ static func display_stat(stat: String, value: float) -> String:
 func stat_totals(db: ItemDatabase) -> Dictionary:
 	var totals := {}
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
-	if def:
+	if def and not def.primary_stat.is_empty():
 		totals[def.primary_stat] = primary_value
 	for affix_id in affixes:
 		var affix: ItemDatabase.AffixDef = db.affixes.get(affix_id)

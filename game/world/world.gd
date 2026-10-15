@@ -216,6 +216,8 @@ var party: PartySystem
 var loot: LootSystem
 ## World/Tradeskills: tradeskill levels and XP (both sides).
 var tradeskills: TradeskillSystem
+## World/Gathering: gathering nodes (both sides; markers under World/GatherNodes).
+var gathering: GatheringSystem
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
 ## World/Zones: ground zones and summons (the AREA and SUMMON tags).
@@ -279,6 +281,12 @@ func _ready() -> void:
 	tradeskills = TradeskillSystem.new()
 	tradeskills.name = "Tradeskills"
 	add_child(tradeskills)
+	_add_gathering_system()
+	# Gathering feeds tradeskills (server): XP per gather; the skill's level shortens
+	# the gather time and can add a bonus unit.
+	gathering.gathered.connect(tradeskills.on_gathered)
+	gathering.time_multiplier_hook = tradeskills.gather_time_multiplier
+	gathering.yield_bonus_hook = tradeskills.bonus_yield
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -498,11 +506,13 @@ func _client_ready(class_id: String) -> void:
 	player.zone_placed.connect(func(p: Player) -> void:
 		zones.server_place_for_attack(p, p.state.current_attack(p.params)))
 	player.equip_finished.connect(loot.finish_equip)
+	player.equip_finished.connect(gathering.finish_gather)
 	_builds.setup_player(player, class_id)
 	_players.add_child(player)
 	_builds.send_build(player)
 	loot.add_player(peer_id)
 	tradeskills.add_player(peer_id)
+	gathering.add_player(peer_id)
 	print("[server] peer %d joined as %s (%d players)" % [
 			peer_id, player.build.class_def.id, _players.get_child_count()])
 
@@ -2445,6 +2455,17 @@ func _add_loot_system() -> void:
 	add_child(loot)
 
 
+## World/Gathering must exist on the server and every client (RPCs by path).
+func _add_gathering_system() -> void:
+	gathering = GatheringSystem.new()
+	gathering.name = "Gathering"
+	gathering.players = _players
+	gathering.loot = loot
+	gathering.markers = get_node_or_null("GatherNodes")
+	loot.gathering = gathering
+	add_child(gathering)
+
+
 # --- Projectiles (the PROJ tag; see ProjectileSystem) ---
 
 ## World/Projectiles must exist on the server and every client (RPCs by path).
@@ -2649,6 +2670,10 @@ func _bot_input() -> Array:
 	if phase >= 6.0:
 		var circle_t := t + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(circle_t * 0.8), sin(circle_t * 0.8))
+		# Gathers a node nearby once a cycle (walks to it, stands while gathering).
+		var gather_move: Variant = gathering.bot_move(_local_player, phase, cycle)
+		if gather_move != null:
+			move = gather_move
 		if crossed.call(6.95):
 			buttons |= PlayerState.BUTTON_SWAP
 			_bot_swaps_before = _local_player.swaps
@@ -3200,6 +3225,7 @@ func print_summary() -> void:
 		_projectiles.print_summary()
 		loot.print_summary()
 		tradeskills.print_summary()
+		gathering.print_summary()
 		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [
 				_gear_crits, _armored_hits, roundi(_armor_stopped)])
 		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [
@@ -3212,6 +3238,7 @@ func print_summary() -> void:
 	_projectiles.print_client_summary()
 	loot.print_client_summary()
 	tradeskills.print_client_summary()
+	gathering.print_client_summary()
 	if _local_player:
 		print("SUMMARY client=%d snapshots=%d corrections=%d dodges=%d air_dodges=%d attacks=%d hits_landed=%d abilities=%d swaps=%d" % [
 				multiplayer.get_unique_id(), _snapshots_received, _local_player.corrections,

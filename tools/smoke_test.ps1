@@ -101,6 +101,11 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # Every Husk kill drops something for each bot that damaged it (60% in the
     # real data), so the loot check doesn't hang on a few rolls.
     '--tune=loot/table_husk/drop_chance=1.0',
+    # Short gathers (2.5 / 1.5 s in the real data): the bot gathers once a cycle
+    # while circling and must be done before its swap, dodges and respec.
+    '--tune=gathering/node_ore/gather_time=0.3',
+    '--tune=gathering/node_wood/gather_time=0.3',
+    '--tune=gathering/node_fiber/gather_time=0.3',
     # ...and only armor, which every class can wear, so the gear check (the bots
     # equip what they pick up) doesn't hang on class-locked drops.
     # No spaces, and quotes escaped as \": Start-Process joins the arguments into
@@ -309,6 +314,30 @@ if (-not $gearSummary -or [int]$gearSummary.Matches[0].Groups[1].Value -lt 1) {
     $failed = $true
 } else {
     Write-Host "PASS gear: $($gearSummary.Line)" -ForegroundColor Green
+}
+# Gathering: the bots walk to a node within 6 m as their circling starts and
+# gather it (GatheringSystem.bot_move), so at least one gather must put
+# resources in a bag.
+$gatherSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY gathering gathers=(\d+) resources=(\d+)'
+if (-not $gatherSummary) {
+    Write-Host "FAIL gathering: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$gatherSummary.Matches[0].Groups[1].Value -lt 1 -or [int]$gatherSummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL gathering: nothing was gathered ($($gatherSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS gathering: $($gatherSummary.Line)" -ForegroundColor Green
+}
+# Tradeskills: every gather grants XP (World wires Gathering.gathered to
+# TradeskillSystem.on_gathered), so a gather means XP was granted.
+$skillSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY tradeskills .*xp_granted=(\d+)'
+if ($gatherSummary -and [int]$gatherSummary.Matches[0].Groups[1].Value -ge 1) {
+    if (-not $skillSummary -or [int]$skillSummary.Matches[0].Groups[1].Value -lt 1) {
+        Write-Host "FAIL tradeskills: gathers but no XP ($($skillSummary.Line))" -ForegroundColor Red
+        $failed = $true
+    } else {
+        Write-Host "PASS tradeskills: $($skillSummary.Line)" -ForegroundColor Green
+    }
 }
 # Snapshots (World._broadcast_snapshot, NetCodec) must fit in one ENet packet
 # (1392 bytes, less about 30 for the RPC's own header): a bigger unreliable
