@@ -17,6 +17,9 @@ extends Node
 ## that loadout slot's weapon type (BuildService.apply_weapons). The totals go
 ## to Player.gear / bonus_max_health, which World's combat numbers read.
 ## Inventories and gear are lost on disconnect (persistence is milestone 5).
+## Gathering (World/Gathering) puts resource stacks in the bag through
+## give_resources; F is one interact key: it picks up loot in reach, else
+## gathers the node GatheringSystem.target_node names (GatherNode.interact_choice).
 ## Client: draws its own drops (LootDropVisual), shows the pickup prompt, a feed
 ## of what it picked up and the equip bar (LootHud), and the inventory on I
 ## (InventoryPanel). A --bot picks up whatever of its own lands within reach and
@@ -34,11 +37,15 @@ const BOT_PICKUP_REACH := 0.8
 ## the 1 s equip time is over before its swap retry (7.2 s), dodges and 7.6 s
 ## respec.
 const BOT_EQUIP_PHASES: Array[Vector2] = [Vector2(0.0, 1.0), Vector2(6.0, 6.2)]
+## The "[F] Mine ..." prompt's color.
+const GATHER_PROMPT_COLOR := Color(0.85, 0.95, 0.75)
 
 ## World/Players. Set by World before adding this node.
 var players: Node3D
 ## World/Builds (weapon items change the loadout). Set by World.
 var builds: BuildService
+## World/Gathering: F gathers a node when no loot is in reach. Set by World.
+var gathering: GatheringSystem
 
 var _is_client := false
 var _db: ItemDatabase
@@ -150,6 +157,8 @@ func _process(_delta: float) -> void:
 		if items.size() > 1:
 			prompt += "  (+%d more)" % (items.size() - 1)
 		_hud.set_prompt(prompt, best.rarity_color(_db))
+	elif gathering and local and not local.state.is_equipping():
+		_hud.set_prompt(gathering.prompt_text(local), GATHER_PROMPT_COLOR)
 	else:
 		_hud.set_prompt("", Color.WHITE)
 	if local and local.state.is_equipping():
@@ -297,8 +306,10 @@ func _equip_error(player: Player, item: Item, equip_slot: String) -> String:
 
 ## Starts the equip time for a change; "" or why it can't start.
 func _start_change(player: Player, change: Array, text: String) -> String:
-	if _pending.has(player.peer_id) or player.state.is_equipping():
+	if _pending.has(player.peer_id):
 		return "You're already changing gear."
+	if player.state.is_equipping():
+		return "Finish what you're doing first."
 	if player.state.dead:
 		return "You can't change gear while defeated."
 	var ticks := GearScore.current().equip_ticks
@@ -357,6 +368,43 @@ func finish_equip(player: Player) -> void:
 			print("[server] loot: %d equipped %s in %s" % [peer, item.describe(_db), equip_slot])
 	_apply_gear(player)
 	_send_inventory(peer)
+
+
+## Server (gathering): how many more of resource `item_id` fit in `peer`'s bag.
+func resource_room(peer: int, item_id: String) -> int:
+	var def: ItemDatabase.ItemDef = _db.items.get(item_id)
+	if def == null or not _inventories.has(peer):
+		return 0
+	return _inventories[peer].room_for(item_id, def.max_stack)
+
+
+## Server (gathering): puts up to `amount` of resource `item_id` in `peer`'s
+## bag as stacks, sends the bag and a feed line ("+3 Rustvein Ore"), and says
+## what didn't fit. Returns how many went in.
+func give_resources(peer: int, item_id: String, amount: int) -> int:
+	var def: ItemDatabase.ItemDef = _db.items.get(item_id)
+	if def == null or not _inventories.has(peer) or amount <= 0:
+		return 0
+	var left := _inventories[peer].add_stack(item_id, amount, def.max_stack)
+	var added := amount - left
+	if added > 0:
+		_send_inventory(peer)
+		_receive_picked.rpc_id(peer, [Item.resource(item_id, added).to_dict()])
+	if left > 0:
+		_full_refusals += 1
+		_receive_notice.rpc_id(peer, "Inventory full: %d %s left behind." % [left, def.name])
+	return added
+
+
+## Server: a line in `peer`'s loot feed.
+func notify(peer: int, text: String) -> void:
+	if _has_player(peer):
+		_receive_notice.rpc_id(peer, text)
+
+
+## Server: shows `peer` the walk-only bar (gathering) labelled `text`, `ticks` long.
+func show_busy_bar(peer: int, text: String, ticks: int) -> void:
+	_receive_equip_started.rpc_id(peer, text, ticks)
 
 
 ## Server: the K panel is about to change the weapon types: "" if every weapon
@@ -519,7 +567,9 @@ func _receive_equip_started(text: String, ticks: int) -> void:
 func _receive_picked(item_data: Array) -> void:
 	for item in Inventory.items_from_array(item_data):
 		_picked_seen += 1
-		_hud.add_feed_line("+ %s" % item.display_name(_db), item.rarity_color(_db))
+		var text := ("+%d %s" % [item.count, item.display_name(_db)]) if item.count > 1 \
+				else "+ %s" % item.display_name(_db)
+		_hud.add_feed_line(text, item.rarity_color(_db))
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -578,7 +628,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not _is_client or local_player() == null or event.is_echo():
 		return
 	if event.is_action_pressed(&"pickup"):
-		_request_pickup.rpc_id(1)
+		var local := local_player()
+		var node_id := gathering.target_node(local) if gathering else -1
+		var loot_near := not _drops_in_reach(local, _pickup_range).is_empty()
+		if GatherNode.interact_choice(loot_near, node_id) == GatherNode.Interact.GATHER:
+			gathering.request_gather(node_id)
+		else:
+			_request_pickup.rpc_id(1)
 	elif event.is_action_pressed(&"toggle_inventory"):
 		_panel.toggle()
 

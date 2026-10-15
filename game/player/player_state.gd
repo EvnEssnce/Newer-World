@@ -147,7 +147,8 @@ var swap_tick := -1
 var swap_buffer := 0
 
 # Equipping gear (started by the server: LootSystem)
-## Ticks left of putting on or taking off a piece of gear; 0 = not equipping.
+## Ticks left of putting on or taking off a piece of gear, or of gathering a
+## node (start_gather): walking only meanwhile; 0 = not busy.
 ## Like a swap: you can walk, but not attack, block, dodge, swap or use abilities.
 var equip_left := 0
 
@@ -564,6 +565,23 @@ func start_equip(ticks: int) -> bool:
 
 func is_equipping() -> bool:
 	return equip_left > 0
+
+
+## Server: starts gathering a node (GatheringSystem) for `ticks`: the same
+## walk-only lock as equipping (equip_left; Player.equip_finished when it runs
+## out), but also refused mid-roll, staggered or being moved. A server event.
+func start_gather(ticks: int) -> bool:
+	if not can_act() or dodge_tick >= 0:
+		return false
+	return start_equip(ticks)
+
+
+## Server: ends a gear change or gather early, without Player.equip_finished
+## (GatheringSystem: left the node's range, hurt or staggered). A server event.
+func cancel_equip() -> void:
+	if equip_left > 0:
+		equip_left = 0
+		server_events += 1
 
 
 ## Why the class can't change now (BuildService._request_class, a test tool),

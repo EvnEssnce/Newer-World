@@ -128,7 +128,7 @@ func _header_row() -> Control:
 	_type_picker = _picker("Show only one kind of item.")
 	_type_picker.add_item("All types")
 	_type_picker.set_item_metadata(0, "")
-	for slot in ItemDatabase.SLOTS:
+	for slot in ItemDatabase.ITEM_SLOTS:
 		_type_picker.add_item(_slot_plural(slot))
 		_type_picker.set_item_metadata(_type_picker.item_count - 1, slot)
 	_type_picker.item_selected.connect(func(index: int) -> void:
@@ -282,8 +282,8 @@ static func _order(a: Item, b: Item, db: ItemDatabase, sort: int) -> int:
 		Sort.TYPE:
 			var def_a: ItemDatabase.ItemDef = db.items.get(a.item_id)
 			var def_b: ItemDatabase.ItemDef = db.items.get(b.item_id)
-			var slot_a := ItemDatabase.SLOTS.find(def_a.slot) if def_a else 99
-			var slot_b := ItemDatabase.SLOTS.find(def_b.slot) if def_b else 99
+			var slot_a := ItemDatabase.ITEM_SLOTS.find(def_a.slot) if def_a else 99
+			var slot_b := ItemDatabase.ITEM_SLOTS.find(def_b.slot) if def_b else 99
 			if slot_a != slot_b:
 				return slot_a - slot_b
 			var kind_a := (def_a.weapon_type + def_a.class_id) if def_a else ""
@@ -370,15 +370,19 @@ func _item_card(item: Item) -> Control:
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.clip_text = true
 	top.add_child(name_label)
-	top.add_child(_label("%s · GS %d" % [_kind_short(def), item.gear_score], 12, HINT_COLOR))
+	var resource := def != null and def.is_resource()
+	top.add_child(_label("Resource · ×%d" % item.count if resource
+			else "%s · GS %d" % [_kind_short(def), item.gear_score], 12, HINT_COLOR))
 
 	var tooltip := _item_tooltip(item)
 	var buttons := HBoxContainer.new()
 	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	buttons.add_theme_constant_override(&"separation", 4)
 	line.add_child(buttons)
-	var refusal := _refusal(item, def)
-	if def and refusal.is_empty():
+	var refusal := "" if resource else _refusal(item, def)
+	if resource:
+		text.add_child(_label("Crafting material (stacks to %d)" % def.max_stack, 12, HINT_COLOR))
+	elif def and refusal.is_empty():
 		var compare := _comparison(item, def)
 		if compare.is_empty():
 			text.add_child(_label(_replaces_text(), 12, HINT_COLOR))
@@ -409,6 +413,9 @@ func _item_card(item: Item) -> Control:
 
 ## Name, kind and gear score, then each stat line (primary, then affixes).
 func _item_tooltip(item: Item) -> PackedStringArray:
+	var def: ItemDatabase.ItemDef = _db.items.get(item.item_id)
+	if def and def.is_resource():
+		return PackedStringArray([item.display_name(_db), "Resource   ×%d" % item.count])
 	var lines := PackedStringArray([item.display_name(_db),
 			"%s   Gear score %d" % [item.kind_text(_db), item.gear_score]])
 	lines.append_array(item.stat_lines(_db))
@@ -542,6 +549,8 @@ static func _slot_plural(slot: String) -> String:
 			return "Weapons"
 		"wings":
 			return "Wing Enhancements"
+		"resource":
+			return "Resources"
 	return slot.capitalize()
 
 
