@@ -11,6 +11,11 @@ const RESOURCE_SLOT := "resource"
 ## Every item slot: the gear SLOTS, then resources.
 const ITEM_SLOTS: PackedStringArray = ["weapon", "head", "chest", "legs", "wings", "resource"]
 const PRIMARY_STATS: PackedStringArray = ["weapon_power", "wing_power", "armor"]
+## Inventory icon ids (items.cfg `icon`; ItemIcon draws each): melee weapons
+## (crossed swords), ranged weapons (a bow), the armor slots, Wing
+## Enhancements, then materials.
+const ICONS: PackedStringArray = ["melee", "ranged", "head", "chest", "legs", "wings",
+		"ore", "ingot", "log", "plank", "fiber", "cloth"]
 const TABLE_PREFIX := "table_"
 
 
@@ -37,9 +42,24 @@ class ItemDef:
 	var primary_base := 0.0
 	## How many fit in one bag slot: 1 for gear, more for resources.
 	var max_stack := 1
+	## items.cfg `icon` (one of ICONS), "" = from the slot (icon_id()).
+	var icon := ""
+	## Weapons only: the weapon file's [weapon] ranged (it throws or shoots),
+	## which picks the bow icon.
+	var ranged := false
 
 	func is_resource() -> bool:
 		return slot == ItemDatabase.RESOURCE_SLOT
+
+	## The inventory icon (one of ICONS): `icon` when set, else "ranged" or
+	## "melee" for a weapon, the slot for armor and Wing Enhancements, ""
+	## for a resource without one (validate() reports it).
+	func icon_id() -> String:
+		if not icon.is_empty():
+			return icon
+		if slot == "weapon":
+			return "ranged" if ranged else "melee"
+		return "" if is_resource() else slot
 
 
 class AffixDef:
@@ -127,6 +147,9 @@ static func from_tuning() -> ItemDatabase:
 		item.primary_stat = Tuning.get_optional("items", id, "primary_stat", "")
 		item.primary_base = Tuning.get_optional("items", id, "primary_base", 0.0)
 		item.max_stack = Tuning.get_optional("items", id, "max_stack", 1)
+		item.icon = Tuning.get_optional("items", id, "icon", "")
+		if not item.weapon_type.is_empty():
+			item.ranged = Tuning.get_optional("weapon_" + item.weapon_type, "weapon", "ranged", false)
 		db.items[id] = item
 
 	for id in Tuning.get_sections("affixes"):
@@ -170,6 +193,10 @@ func validate() -> PackedStringArray:
 	for item: ItemDef in items.values():
 		if item.slot not in ITEM_SLOTS:
 			problems.append("item '%s' has unknown slot '%s'" % [item.id, item.slot])
+		if not item.icon.is_empty() and item.icon not in ICONS:
+			problems.append("item '%s' has unknown icon '%s'" % [item.id, item.icon])
+		elif item.icon_id().is_empty():
+			problems.append("resource '%s' needs an icon" % item.id)
 		if item.is_resource():
 			if item.max_stack < 1:
 				problems.append("resource '%s' needs a max_stack of at least 1" % item.id)

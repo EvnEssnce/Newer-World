@@ -234,6 +234,24 @@ func test_gear_craft_rolls_items_into_the_bag() -> void:
 		assert_true(item.gear_score >= 100 and item.gear_score <= 110, "GS %d in level 1's range" % item.gear_score)
 		assert_true(db.rarities.has(item.rarity), item.rarity)
 		assert_true(item.uid > 0 and bag.get_item(item.uid) == item, "in the bag")
+		assert_true(item.crafted, "marked as crafted")
+
+
+func test_crafted_flag_round_trip() -> void:
+	var item := _gear("cap")
+	assert_false(item.crafted, "found gear isn't crafted")
+	assert_false(Item.from_dict(item.to_dict()).crafted)
+	item.crafted = true
+	assert_true(Item.from_dict(item.to_dict()).crafted, "survives to_dict/from_dict")
+	var old := item.to_dict()
+	old.erase("crafted")
+	assert_false(Item.from_dict(old).crafted, "older dicts read as found gear")
+	assert_true(item.kind_text(db).ends_with("Crafted"), item.kind_text(db))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	assert_false(LootRoller.roll_item(db.items["cap"], "common", 100, db, rng).crafted,
+			"a loot roll isn't crafted")
+	assert_true(CraftingRules.roll_gear(_cap_recipe(), 1, db, skills, rng).crafted)
 
 
 func test_gear_rolls_are_seeded() -> void:

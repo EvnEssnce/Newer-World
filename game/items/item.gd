@@ -19,6 +19,9 @@ var affixes: Dictionary[String, float] = {}
 ## How many this is: 1 for gear; a resource stack holds up to its definition's
 ## max_stack (Inventory.add_stack merges them).
 var count := 1
+## Made at a crafting station (CraftingRules.roll_gear), not found as loot. The
+## inventory marks it.
+var crafted := false
 
 
 ## A stack of `amount` of a resource (no rarity, gear score or stats).
@@ -38,6 +41,7 @@ func to_dict() -> Dictionary:
 		"primary": primary_value,
 		"affixes": affixes.duplicate(),
 		"count": count,
+		"crafted": crafted,
 	}
 
 
@@ -49,6 +53,7 @@ static func from_dict(data: Dictionary) -> Item:
 	item.rarity = data.get("rarity", "")
 	item.gear_score = data.get("gs", 0)
 	item.primary_value = data.get("primary", 0.0)
+	item.crafted = data.get("crafted", false)  # older dicts: found gear
 	var rolled: Dictionary = data.get("affixes", {})
 	for affix_id: String in rolled:
 		item.affixes[affix_id] = rolled[affix_id]
@@ -116,8 +121,14 @@ func rarity_color(db: ItemDatabase) -> Color:
 	return rarity_def.color if rarity_def else Color.WHITE
 
 
-## "Rare  Head", "Common  Weapon (Broadsword)" or "Epic  Wing Enhancement".
+## "Rare  Head", "Common  Weapon (Broadsword)", "Epic  Wing Enhancement", or
+## for crafted gear "Rare  Head  ·  Crafted".
 func kind_text(db: ItemDatabase) -> String:
+	var text := _kind(db)
+	return text + "  ·  Crafted" if crafted else text
+
+
+func _kind(db: ItemDatabase) -> String:
 	var rarity_def: ItemDatabase.RarityDef = db.rarities.get(rarity)
 	var def: ItemDatabase.ItemDef = db.items.get(item_id)
 	if def and def.is_resource():

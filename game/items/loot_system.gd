@@ -592,7 +592,7 @@ func _receive_picked(item_data: Array) -> void:
 		_picked_seen += 1
 		var text := ("+%d %s" % [item.count, item.display_name(_db)]) if item.count > 1 \
 				else "+ %s" % item.display_name(_db)
-		_hud.add_feed_line(text, item.rarity_color(_db))
+		_hud.add_feed_line(text, item.rarity_color(_db), ItemIcon.for_item(item, _db, 22.0))
 
 
 @rpc("authority", "call_remote", "reliable")
