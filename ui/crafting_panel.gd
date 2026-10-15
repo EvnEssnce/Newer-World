@@ -10,7 +10,11 @@ extends Control
 ## the gear score range and each rarity's chance, in its color. The list
 ## scrolls when it's taller than the screen allows.
 ## A modal_ui panel like I, K and P: opening it closes them (and they close it),
-## Esc or F closes it, and CraftingSystem closes it when you walk out of range.
+## Esc, F or its X closes it, and CraftingSystem closes it when you walk out of
+## range. Closing it cancels a craft under way (CraftingSystem._panel_closed).
+## While one runs, a box under the title shows it (show_progress): the recipe,
+## a bar filling over the whole batch, "3 / 5" and the time left; the Craft
+## buttons wait for it.
 
 const PANEL_WIDTH := 700.0
 ## Most of the viewport's height the recipe list takes before it scrolls.
@@ -23,9 +27,15 @@ const HAVE_COLOR := Color(0.75, 0.92, 0.7)
 const SHORT_COLOR := Color(1.0, 0.45, 0.4)
 const OUTPUT_COLOR := Color.WHITE
 const LOCKED_ALPHA := 0.55
+const PROGRESS_FILL := Color(0.95, 0.6, 0.3)
 
 var _system: CraftingSystem
 var _title: Label
+## The current craft's box: its name, bar and "3 / 5   1.4 s left".
+var _progress_box: PanelContainer
+var _progress_name: Label
+var _progress_bar: ProgressBar
+var _progress_status: Label
 var _list: VBoxContainer
 var _scroll: ScrollContainer
 ## Recipe id -> {recipe, root, name, inputs (HBoxContainer), odds (gear: HBoxContainer of the gear\n## score label, then one label per rarity in rarity order; else null), status, quantity, craft, mode}.
@@ -63,8 +73,19 @@ func _ready() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override(&"separation", 6)
 	panel.add_child(column)
+	var header := HBoxContainer.new()
+	column.add_child(header)
 	_title = _label("", 20, Color.WHITE)
-	column.add_child(_title)
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(_title)
+	var close_button := Button.new()
+	close_button.text = "X"
+	close_button.tooltip_text = "Close (cancels a craft under way)"
+	close_button.focus_mode = Control.FOCUS_NONE
+	close_button.custom_minimum_size = Vector2(32, 30)
+	close_button.pressed.connect(close)
+	header.add_child(close_button)
+	column.add_child(_build_progress_box())
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	column.add_child(_scroll)
@@ -72,11 +93,68 @@ func _ready() -> void:
 	_list.add_theme_constant_override(&"separation", 6)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(_list)
-	var hint := _label("Crafting is walk-only. The materials are only taken when the bar fills; walking away or getting hit cancels it and nothing is lost. F or Esc closes.",
+	var hint := _label("Stay at the station with this panel open while you craft. The materials are only taken when the bar fills; moving, getting hit or closing the panel cancels it and nothing is lost. F, Esc or X closes.",
 			12, HINT_COLOR)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size.x = PANEL_WIDTH - 28.0
 	column.add_child(hint)
+
+
+func _build_progress_box() -> Control:
+	_progress_box = PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.13, 0.08, 0.95)
+	style.border_color = Color(0.95, 0.6, 0.3, 0.6)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(4)
+	style.set_content_margin_all(8)
+	_progress_box.add_theme_stylebox_override(&"panel", style)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", 4)
+	_progress_box.add_child(box)
+	var line := HBoxContainer.new()
+	box.add_child(line)
+	var crafting := _label("Crafting", 13, SECTION_COLOR)
+	crafting.custom_minimum_size.x = 80
+	line.add_child(crafting)
+	_progress_name = _label("", 15, OUTPUT_COLOR)
+	_progress_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_child(_progress_name)
+	_progress_status = _label("", 14, Color.WHITE)
+	line.add_child(_progress_status)
+	_progress_bar = ProgressBar.new()
+	_progress_bar.show_percentage = false
+	_progress_bar.min_value = 0.0
+	_progress_bar.max_value = 1.0
+	_progress_bar.custom_minimum_size.y = 14
+	_progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = PROGRESS_FILL
+	fill.set_corner_radius_all(3)
+	_progress_bar.add_theme_stylebox_override(&"fill", fill)
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0.05, 0.04, 0.04, 0.9)
+	back.set_corner_radius_all(3)
+	_progress_bar.add_theme_stylebox_override(&"background", back)
+	box.add_child(_progress_bar)
+	_progress_box.visible = false
+	return _progress_box
+
+
+## The current craft (CraftingSystem._progress_view, every frame while open):
+## [recipe name, fraction 0..1, "3 / 5   1.4 s left"], or [] to hide the box.
+func show_progress(view: Array) -> void:
+	if _progress_box == null:
+		return
+	var crafting := view.size() >= 3
+	if crafting != _progress_box.visible:
+		_progress_box.visible = crafting
+		refresh()  # the Craft buttons wait while one runs
+	if not crafting:
+		return
+	_progress_name.text = view[0]
+	_progress_bar.value = view[1]
+	_progress_status.text = view[2]
 
 
 ## Shows `station`'s recipes, grouped by tradeskill (in the Tradeskills panel's order).
@@ -214,6 +292,7 @@ func _craft(recipe_id: String) -> void:
 	var quantity := _quantity(_rows[recipe_id])
 	if quantity > 0:
 		_system.request_craft(recipe_id, quantity)
+		refresh()
 
 
 ## The quantity a row's picker means now (Max = as many as you can, 0 if none).
@@ -274,7 +353,7 @@ func refresh() -> void:
 					recipe.craft_ticks / float(Engine.physics_ticks_per_second), recipe.xp]
 			status.add_theme_color_override(&"font_color", DETAIL_COLOR)
 		(row["quantity"] as Label).text = "x%d" % quantity
-		(row["craft"] as Button).disabled = quantity == 0 or not error.is_empty()
+		(row["craft"] as Button).disabled = quantity == 0 or not error.is_empty() or _system.crafting()
 
 
 ## A gear recipe's roll at `level`: "GS 100-110", then "Rare 14%" per rarity

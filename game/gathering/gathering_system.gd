@@ -31,14 +31,20 @@ extends Node
 ## Server, after every successful gather (amount = what went into the bag).
 signal gathered(peer_id: int, skill_id: String, node_kind: String, amount: int)
 
-## Bot: looks for a node this close when its circling phase starts (m)...
-const BOT_SEARCH := 6.0
-## ...gives up on gathering this cycle if it hasn't started by this phase (s)...
+## Bot: looks for a node this close during its circling phase (m; it brings
+## the materials for its trip to the Forge, CraftingSystem.bot_trip)...
+const BOT_SEARCH := 8.0
+## ...until this phase (s; then it only finishes the walk to one it chose)...
 const BOT_START_BY := 6.8
+## ...and gives up on gathering this cycle if it hasn't asked by this phase (s:
+## a 0.3 s smoke-test gather still ends before the 7.6 respec)...
+const BOT_ASK_BY := 7.2
 ## ...and asks from within this fraction of the node's range.
 const BOT_REACH := 0.6
 ## Bot: stands still this long after asking, until the lock shows up (ms).
 const BOT_WAIT_MS := 500
+## Bot: asks at most this many times a cycle (a refused ask is tried again).
+const BOT_TRIES := 3
 
 ## World/Players and World/Loot. Set by World before adding this node.
 var players: Node3D
@@ -75,6 +81,11 @@ var _bot_cycle := -1
 var _bot_node := -1
 var _bot_done := false
 var _bot_asked_msec := -1
+## Bot: the lock showed up after its last request, and requests this cycle.
+var _bot_saw_lock := false
+var _bot_tries := 0
+## Bot (--verbose): said this cycle that no node is near.
+var _bot_logged := false
 
 
 func _ready() -> void:
@@ -311,16 +322,34 @@ func bot_move(local: Player, phase: float, cycle: int) -> Variant:
 		_bot_node = -1
 		_bot_done = false
 		_bot_asked_msec = -1
-	if _bot_asked_msec >= 0:
-		if local.state.is_equipping() or Time.get_ticks_msec() - _bot_asked_msec < BOT_WAIT_MS:
-			return Vector2.ZERO
-		return null
-	if _bot_done or local.state.dead or phase >= BOT_START_BY:
+		_bot_saw_lock = false
+		_bot_tries = 0
+		_bot_logged = false
+	if bot_busy(local):
+		return Vector2.ZERO
+	# Gathered (bot_busy set _bot_done), or refused (the server's copy was still
+	# finishing a swing): ask again, at most BOT_TRIES times a cycle.
+	if _bot_done or local.state.dead or phase >= BOT_ASK_BY or _bot_tries >= BOT_TRIES:
+		if (phase >= BOT_ASK_BY and _bot_node >= 0 and _bot_tries == 0 and not _bot_logged
+				and LaunchArgs.has_flag("verbose")):
+			_bot_logged = true
+			print("[client] gathering: didn't reach node %d in time (%.1f m, equipping %s, loadout %s) (frame %d)" % [
+					_bot_node, local.global_position.distance_to(nodes[_bot_node].position),
+					local.state.is_equipping(), local.state.can_change_loadout(), Time.get_ticks_msec() / 250])
 		return null
 	if _bot_node < 0 or not nodes[_bot_node].is_available():
+		_bot_node = -1
+		if phase >= BOT_START_BY:
+			return null
+		# Looked for every tick until BOT_START_BY (its circling can bring one in reach).
 		_bot_node = _nearest_available(local.global_position, BOT_SEARCH)
 		if _bot_node < 0:
-			_bot_done = true
+			if not _bot_logged and LaunchArgs.has_flag("verbose"):
+				_bot_logged = true
+				var nearest := _nearest_available(local.global_position, INF)
+				print("[client] gathering: no node within %.0f m (nearest %.1f m) (frame %d)" % [BOT_SEARCH,
+						local.global_position.distance_to(nodes[nearest].position) if nearest >= 0 else -1.0,
+						Time.get_ticks_msec() / 250])
 			return null
 	var node := nodes[_bot_node]
 	var to := node.position - local.global_position
@@ -330,6 +359,8 @@ func bot_move(local: Player, phase: float, cycle: int) -> Variant:
 	if not local.state.can_change_loadout() or local.state.is_dodging() or not local.state.can_act():
 		return Vector2.ZERO  # finish the swing (or gear change) first
 	_bot_asked_msec = Time.get_ticks_msec()
+	_bot_saw_lock = false
+	_bot_tries += 1
 	request_gather(node.id)
 	if LaunchArgs.has_flag("verbose"):
 		# The --screenshot-dir frame number, to find the gather in the frames.
@@ -338,10 +369,24 @@ func bot_move(local: Player, phase: float, cycle: int) -> Variant:
 
 
 ## Bot: it asked for a gather and is waiting for it or gathering (crafting's
-## bot leaves it alone meanwhile).
+## bot leaves it alone meanwhile; World asks every tick). The ask is over once
+## its lock has come and gone (gathered or interrupted: done this cycle), or
+## no lock came within BOT_WAIT_MS (refused), so a later lock (a craft, a gear
+## change) is never taken for the gather's.
 func bot_busy(local: Player) -> bool:
-	return _bot_asked_msec >= 0 and (local.state.is_equipping()
-			or Time.get_ticks_msec() - _bot_asked_msec < BOT_WAIT_MS)
+	if _bot_asked_msec < 0:
+		return false
+	if local.state.is_equipping():
+		_bot_saw_lock = true
+		return true
+	if _bot_saw_lock:
+		_bot_asked_msec = -1
+		_bot_done = true
+		return false
+	if Time.get_ticks_msec() - _bot_asked_msec < BOT_WAIT_MS:
+		return true
+	_bot_asked_msec = -1  # refused
+	return false
 
 
 func _nearest_available(from: Vector3, within: float) -> int:

@@ -106,9 +106,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=gathering/node_ore/gather_time=0.3',
     '--tune=gathering/node_wood/gather_time=0.3',
     '--tune=gathering/node_fiber/gather_time=0.3',
-    # Cheap, short refining (3-4 raw -> 1 refined, 2 s in the real data): after
-    # a gather, the bot refines once a cycle at a Forge within 7 m as its
-    # circling starts (CraftingSystem.bot_move), done before its swap.
+    # Cheap, short refining (3-4 raw -> 1 refined, 2 s in the real data): once
+    # it has gathered, the bot walks to the Forge (far from the Husk camp) as its
+    # circling starts, at most every other cycle, and refines all it can with
+    # the panel open (CraftingSystem.bot_trip).
     '--tune=recipes/recipe_rustvein_ingot/inputs={\"rustvein_ore\":1}',
     '--tune=recipes/recipe_pine_plank/inputs={\"pine_log\":1}',
     '--tune=recipes/recipe_thistle_linen/inputs={\"thistle_fiber\":1}',
@@ -324,7 +325,7 @@ if (-not $gearSummary -or [int]$gearSummary.Matches[0].Groups[1].Value -lt 1) {
 } else {
     Write-Host "PASS gear: $($gearSummary.Line)" -ForegroundColor Green
 }
-# Gathering: the bots walk to a node within 6 m as their circling starts and
+# Gathering: the bots walk to a node within 8 m as their circling starts and
 # gather it (GatheringSystem.bot_move), so at least one gather must put
 # resources in a bag.
 $gatherSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY gathering gathers=(\d+) resources=(\d+)'
@@ -338,19 +339,25 @@ if (-not $gatherSummary) {
     Write-Host "PASS gathering: $($gatherSummary.Line)" -ForegroundColor Green
 }
 # Tradeskills: every gather grants XP (World wires Gathering.gathered to
-# TradeskillSystem.on_gathered), so a gather means XP was granted.
-$skillSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY tradeskills .*xp_granted=(\d+)'
+# TradeskillSystem.on_gathered), so a gather means XP was granted, and the
+# owner was sent its "+N Mining XP" feed line (xp_lines=).
+$skillSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY tradeskills .*xp_granted=(\d+) .*xp_lines=(\d+)'
 if ($gatherSummary -and [int]$gatherSummary.Matches[0].Groups[1].Value -ge 1) {
     if (-not $skillSummary -or [int]$skillSummary.Matches[0].Groups[1].Value -lt 1) {
         Write-Host "FAIL tradeskills: gathers but no XP ($($skillSummary.Line))" -ForegroundColor Red
+        $failed = $true
+    } elseif ([int]$skillSummary.Matches[0].Groups[2].Value -lt 1) {
+        Write-Host "FAIL tradeskills: XP but no XP feed lines ($($skillSummary.Line))" -ForegroundColor Red
         $failed = $true
     } else {
         Write-Host "PASS tradeskills: $($skillSummary.Line)" -ForegroundColor Green
     }
 }
-# Crafting: after a gather, a bot near a Forge refines once a cycle
-# (CraftingSystem.bot_move; 1 raw -> 1 refined with the tuning above), and every
-# craft grants its refining skill XP (TradeskillSystem.on_crafted: craft_xp=).
+# Crafting: after a gather, a bot walks to the Forge and refines with the panel
+# open (CraftingSystem.bot_trip; 1 raw -> 1 refined with the tuning above), and
+# every craft grants its refining skill XP (TradeskillSystem.on_crafted: craft_xp=).
+# cancelled= / moved_cancels= / cancel_requests= aren't checked (a hit at the
+# Forge can cancel; the bot asks again).
 $craftSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY crafting crafts=(\d+) items_made=(\d+)'
 $craftXp = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY tradeskills .*crafts=(\d+) craft_xp=(\d+)'
 if (-not $craftSummary) {
