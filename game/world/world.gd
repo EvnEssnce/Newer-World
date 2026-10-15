@@ -220,6 +220,8 @@ var tradeskills: TradeskillSystem
 var gathering: GatheringSystem
 ## World/Crafting: crafting stations and recipes (both sides; markers under World/Stations).
 var crafting: CraftingSystem
+## World/Saves (server only, else null): loading and saving characters.
+var saves: SaveService
 ## Projectiles (World/Projectiles, both sides).
 var _projectiles: ProjectileSystem
 ## World/Zones: ground zones and summons (the AREA and SUMMON tags).
@@ -300,6 +302,7 @@ func _ready() -> void:
 				* Engine.physics_ticks_per_second)
 		_lag_break_distance = Tuning.get_value("network", "lag_compensation", "teleport_distance")
 		Net.peer_left.connect(_on_peer_left)
+		_add_save_service()
 		enemy_navigation = EnemyNavigation.new()
 		enemy_navigation.name = "EnemyNav"
 		add_child(enemy_navigation)
@@ -518,12 +521,20 @@ func _client_ready() -> void:
 	player.equip_finished.connect(loot.finish_equip)
 	player.equip_finished.connect(gathering.finish_gather)
 	player.equip_finished.connect(crafting.finish_craft)
-	_builds.setup_player(player, class_id)
+	# The character's save (build, bag, gear, tradeskills) through the normal
+	# rules; a new character's is its class default. Null without a database.
+	var save: CharacterSave = saves.load_character(character["id"]) if saves else null
+	var refused := _builds.setup_player(player, class_id, save)
+	if save and not refused.is_empty():
+		saves.note_refused(save, refused)
 	_players.add_child(player)
 	_builds.send_build(player)
-	loot.add_player(peer_id)
-	tradeskills.add_player(peer_id)
+	loot.add_player(peer_id, save)
+	player.health = player.max_health()  # saved gear can raise it
+	tradeskills.add_player(peer_id, save)
 	gathering.add_player(peer_id)
+	if saves:
+		saves.track(peer_id, save)
 	print("[server] peer %d joined as %s, a %s (%d players)" % [
 			peer_id, character["name"], player.build.class_def.id, _players.get_child_count()])
 
@@ -2489,6 +2500,28 @@ func _add_crafting_system() -> void:
 	add_child(crafting)
 
 
+## Server: World/Saves loads characters as they join and saves them (the
+## database is AccountService's). Marked by every system whose state a save holds.
+func _add_save_service() -> void:
+	saves = SaveService.new()
+	saves.name = "Saves"
+	var accounts := get_node_or_null("../Accounts") as AccountService
+	saves.persistence = accounts.persistence if accounts else null
+	saves.players = _players
+	saves.loot = loot
+	saves.tradeskills = tradeskills
+	add_child(saves)
+	_builds.save_changed.connect(saves.mark_changed)
+	loot.save_changed.connect(saves.mark_changed)
+	tradeskills.save_changed.connect(saves.mark_changed)
+
+
+## Server: writes everyone online to the database now (Main, at shutdown).
+func save_everyone() -> void:
+	if saves:
+		saves.save_everyone()
+
+
 # --- Projectiles (the PROJ tag; see ProjectileSystem) ---
 
 ## World/Projectiles must exist on the server and every client (RPCs by path).
@@ -3260,6 +3293,7 @@ func print_summary() -> void:
 		tradeskills.print_summary()
 		gathering.print_summary()
 		crafting.print_summary()
+		saves.print_summary()
 		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [
 				_gear_crits, _armored_hits, roundi(_armor_stopped)])
 		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [

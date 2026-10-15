@@ -5,7 +5,9 @@
 # other; players and Husks must be moved by force (knockback) and the Spear's
 # abilities used; projectiles thrown and hitting; Husks dropping personal loot
 # that the bots pick up and equip; no unexpected prediction corrections;
-# snapshots must fit in one packet.
+# snapshots must fit in one packet; characters saved (periodically, after
+# changes, as they leave), then a server restart on the same database file
+# brings the first bot's character back exactly as last saved.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID] [-Bots N]
 # -Class picks the bots' class (default fighter; e.g. juggernaut).
 # -Bots runs more bot clients (default 2), e.g. to see snapshot sizes with more
@@ -122,15 +124,26 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # one command line, and a bare quote or space there turned this into {}.
     '--tune=loot/table_husk/items={\"padded_cap\":1,\"padded_jerkin\":1,\"padded_leggings\":1}')
 
+# Saves (World/Saves): everyone online every 8 s (60 s in the real data), so
+# periodic saves happen within the run too.
+$tune += '--tune=saving/save/interval=8.0'
+
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
+# The first bot plays a fixed account and character, so the restart check below
+# can log it in again; the others get their peer-id names.
+$keeperFlags = @('--account=smoke_keeper', '--character=Keeper')
 
-# A fresh in-memory database: each bot makes its account and character by itself.
-$server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", '--db=:memory:', "--quit-after=$($Seconds + 2)") + $tune)
+# A fresh database file (relative: no space in the argument): each bot makes
+# its account and character by itself; the restart check reopens it.
+$dbArg = '--db=build/smoke/restart.db'
+Remove-Item (Join-Path $logDir 'restart.db*') -ErrorAction SilentlyContinue
+$server = Start-Godot 'server' (@('--server', '--verbose', "--port=$Port", $dbArg, "--quit-after=$($Seconds + 2)") + $tune)
 Start-Sleep -Seconds 1
 $clientNames = @(1..$Bots | ForEach-Object { "client$_" })
 $clients = @($clientNames | ForEach-Object {
-    Start-Godot $_ ($botFlags + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)
+    $extra = if ($_ -eq 'client1') { $keeperFlags } else { @() }
+    Start-Godot $_ ($botFlags + $extra + @("--address=127.0.0.1:$Port", "--quit-after=$Seconds") + $tune)
 })
 # A script that fails to parse leaves the game running without --quit-after, so
 # don't wait forever: anything still running well past its time is stopped.
@@ -140,6 +153,15 @@ $clients | ForEach-Object {
 }
 # The server quits on its own shortly after the clients, printing its summary.
 if (-not $server.WaitForExit(10000)) { taskkill /T /F /PID $server.Id | Out-Null }
+
+# Restart: a new server on the same database file and the first bot logging in
+# again as Keeper, which must come back exactly as it was last saved (~10 s).
+# This server quits while Keeper still plays, so the shutdown save runs too.
+$restartServer = Start-Godot 'server_restart' (@('--server', '--verbose', "--port=$Port", $dbArg, '--quit-after=6') + $tune)
+Start-Sleep -Seconds 1
+$restartClient = Start-Godot 'client_restart' (@('--bot', '--verbose', "--class=$Class") + $keeperFlags + @("--address=127.0.0.1:$Port", '--quit-after=8') + $tune)
+if (-not $restartClient.WaitForExit(36000)) { taskkill /T /F /PID $restartClient.Id | Out-Null }
+if (-not $restartServer.WaitForExit(10000)) { taskkill /T /F /PID $restartServer.Id | Out-Null }
 
 $failed = $false
 # Every bot logged in: made its account (a hashed password), made a character
@@ -383,6 +405,50 @@ if (-not $craftSummary) {
     $failed = $true
 } else {
     Write-Host "PASS crafting: $($craftSummary.Line)" -ForegroundColor Green
+}
+# Saving (World/Saves): every bot's character was loaded on join, written soon
+# after changes (pickups, gathers, respecs), periodically and as it left, and
+# nothing failed.
+$saveSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY saves loads=(\d+) writes=(\d+) periodic=(\d+) change=(\d+) leave=(\d+) shutdown=(\d+) failed=(\d+)'
+if (-not $saveSummary) {
+    Write-Host "FAIL saves: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$saveSummary.Matches[0].Groups[1].Value -lt $Bots -or [int]$saveSummary.Matches[0].Groups[5].Value -lt $Bots) {
+    Write-Host "FAIL saves: not every bot was loaded and saved as it left ($($saveSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$saveSummary.Matches[0].Groups[3].Value -lt 1 -or [int]$saveSummary.Matches[0].Groups[4].Value -lt 1) {
+    Write-Host "FAIL saves: no periodic or no after-change save ($($saveSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$saveSummary.Matches[0].Groups[7].Value -ne 0) {
+    Write-Host "FAIL saves: a save failed ($($saveSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS saves: $($saveSummary.Line)" -ForegroundColor Green
+}
+# Restart: Keeper's last save before the first server stopped (bag, gear,
+# tradeskills and build, as a fingerprint) is what it came back with after the
+# restart, logged in to the stored account and character (none made anew).
+$lastSave = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^\[server\] saved Keeper \((leave|shutdown)\): (bag=(\d+).*) fp=(\w+)' | Select-Object -Last 1
+$reloaded = Select-String -Path (Join-Path $logDir 'server_restart.log') -Pattern '^\[server\] loaded Keeper: (.*) fp=(\w+)' | Select-Object -First 1
+$restartAccounts = Select-String -Path (Join-Path $logDir 'server_restart.log') -Pattern '^SUMMARY accounts logins=(\d+) accounts_created=(\d+) characters_created=(\d+) plays=(\d+)'
+if (-not $lastSave -or -not $reloaded) {
+    Write-Host "FAIL restart: no last save ($($lastSave.Line)) or no load after the restart ($($reloaded.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$lastSave.Matches[0].Groups[3].Value -lt 1) {
+    Write-Host "FAIL restart: Keeper's bag was empty when saved, nothing to check ($($lastSave.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ($lastSave.Matches[0].Groups[4].Value -ne $reloaded.Matches[0].Groups[2].Value) {
+    Write-Host "FAIL restart: Keeper came back different. Saved: $($lastSave.Matches[0].Groups[2].Value) fp=$($lastSave.Matches[0].Groups[4].Value); loaded: $($reloaded.Line)" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $restartAccounts -or [int]$restartAccounts.Matches[0].Groups[2].Value -ne 0 `
+        -or [int]$restartAccounts.Matches[0].Groups[3].Value -ne 0 -or [int]$restartAccounts.Matches[0].Groups[4].Value -lt 1) {
+    Write-Host "FAIL restart: Keeper didn't log in to its stored account and character ($($restartAccounts.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not (Select-String -Path (Join-Path $logDir 'server_restart.log') -Pattern '^SUMMARY saves .*shutdown=[1-9]' -Quiet)) {
+    Write-Host "FAIL restart: the second server didn't save Keeper as it shut down" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS restart: Keeper came back with $($reloaded.Matches[0].Groups[1].Value) fp=$($reloaded.Matches[0].Groups[2].Value)" -ForegroundColor Green
 }
 # Snapshots (World._broadcast_snapshot, NetCodec) must fit in one ENet packet
 # (1392 bytes, less about 30 for the RPC's own header): a bigger unreliable

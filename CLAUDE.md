@@ -132,7 +132,10 @@ game/
                              `PRAGMA user_version`, accounts, characters (save parts as JSON text
                              columns; `encode`/`decode` keep ints and full-precision floats). Unit
                              tested on temporary databases (user://test_persistence/). Opened at
-                             server start by AccountService (`--db=`); saving players is 3.3.
+                             server start by AccountService (`--db=`).
+  persistence/save_schedule.gd  SaveSchedule: when to save (a change saved `after_change` s
+                             after the first unsaved one; everyone every `interval` s). Pure,
+                             unit tested. save_service.gd: World/Saves (server), see "Saving".
   persistence/character_save.gd  CharacterSave: a character's name, class and the to_dict() of its
                              build, inventory, equipment and tradeskills; capture from live
                              objects, rebuild through the normal rules (`CharacterBuild.apply_saved`,
@@ -186,7 +189,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      (node kinds), tradeskills (skills, XP curve, gathering effects),
                      recipes (refining/crafting recipes), stations (station kinds),
                      testing (test-only switches: the in-game class change, tradeskill join_xp),
-                     accounts (name/password rules, max characters, hash iterations) (.cfg).
+                     accounts (name/password rules, max characters, hash iterations),
+                     saving (periodic and after-change save delays) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
@@ -290,7 +294,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `yield_bonus_hook` → `gather_time_multiplier` / `bonus_yield`; server → owner
   `_receive_skills(dict)` and `_receive_level_up(skill, from, to)`; no client requests;
   `add_xp(peer, skill, xp)` for crafting; every gain also sends the owner
-  `_receive_xp(skill, xp)`, a "+25 Mining XP" feed line. Reset on rejoin until persistence.
+  `_receive_xp(skill, xp)`, a "+25 Mining XP" feed line. Saved with the character (`join_xp` only for a
+  character with no saved tradeskills).
   **Crafting** (`World/Crafting`, `CraftingSystem`; stations are `Marker3D`s under
   `World/Stations`: one Forge at (-7, 0, 17), ~31 m from the Husk homes, out of their
   leash + reach; stateless): client →
@@ -317,7 +322,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   ... gear_made=`.
 - **Accounts** (`/root/Main/Accounts`, `AccountService`, made by `Main` on both sides
   before any World; build order 3.2): the server opens the database at start (`--db=`,
-  default `user://newer_world.db`; `:memory:` for the smoke and screenshot scripts;
+  default `user://newer_world.db`; `:memory:` for the screenshot script, a fresh
+  `build/smoke/restart.db` for the smoke test;
   quits if it can't). A client, once connected and holding the server's tuning, logs
   in, and only makes its World after choosing a character. Reliable RPCs: client →
   server `_request_login(account, password, create)`, `_request_create_character(name,
@@ -331,14 +337,39 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   or password." `World._client_ready()` (no arguments) spawns
   `AccountService.character_of(peer)`'s class; a peer that hasn't chosen one is
   ignored. Logging out = disconnecting (the session dies with the peer). A new
-  character is stored with its class's default build; nothing else is saved or loaded
-  yet (3.3), and an in-game class change doesn't touch the stored class. `--bot`
+  character is stored with its class's default build (then see "Saving"); an in-game
+  class change doesn't touch the stored class, so the other class's saved build is
+  refused on the next join (logged) and its gear goes back to the bag. `--bot`
   logs in alone (`start_bot`): account `--account=` (default `bot_<peer id>`, made if
   missing), character `--character=` (default "Bot" + the peer id as letters), made
   with `--class=`. `SUMMARY accounts logins= accounts_created= characters_created=
   plays= refused=` (the smoke test checks every bot made both and played).
+- **Saving** (`World/Saves`, `SaveService`, server only, no RPCs; build order 3.3):
+  `World._client_ready` loads the chosen character (`load_character`: Persistence +
+  `drop_unknown_items`, logged) and rebuilds it through the normal paths:
+  `BuildService.setup_player(player, class, save)` (class default + `restore_build`;
+  refused parts logged, `SUMMARY saves refused_parts=`), `LootSystem.add_player(peer,
+  save)` (bag capacity from data/; saved gear the class can't wear or weapon items off
+  the loadout go back to the bag, past capacity if need be), full health with the gear,
+  `TradeskillSystem.add_player(peer, save)`; then `track`. Writes go through
+  `Persistence.save_characters` (one transaction) on the main thread, from
+  `CharacterSave.capture` of the live objects: everyone every `[save] interval` s
+  (data/saving.cfg), a character `after_change` s after its first unsaved change (the
+  `save_changed(peer)` signals: `BuildService.send_build` without an error, every
+  `LootSystem._send_inventory`, every tradeskill XP gain; `SaveSchedule` holds the
+  rules), on disconnect (`Net.peer_leaving`, emitted just before `peer_left` so every
+  system still has the peer's data) and at shutdown (`Main._save_before_quitting`:
+  `--quit-after` or closing the window; a killed process loses at most `interval`).
+  **An action under way isn't saved:** a save is the state before it (an equip still
+  has the item in the bag, a gather has yielded nothing, a craft's inputs are taken at
+  the end); leaving mid-craft keeps the inputs and loses the batch, finished pieces
+  included. Not saved: health, Ember, cooldowns, statuses, position, party, ground
+  drops. Logs `[server] loaded/saved <name> (<reason>): bag= equipped= skill_levels=
+  skill_xp= fp=<CharacterSave.fingerprint>` (saves only on leave/shutdown unless
+  `--verbose`); `SUMMARY saves loads= writes= periodic= change= leave= shutdown=
+  failed= dropped_items= refused_parts=` (characters per reason).
 - **Builds** (`World/Builds`, `BuildService`): `World._client_ready()` spawns the
-  character chosen at login with its class's default `CharacterBuild` (see "Accounts"). Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
+  character chosen at login with its saved `CharacterBuild` (see "Accounts", "Saving"). Reliable RPCs: client → server `_request_mastery(weapon_id, nodes,
   slots)` (a whole tree allocation + Q/E/R ability ids: a free respec),
   `_request_wings(nodes, slots)` (the Wing tree allocation + Z/C ability ids) and
   `_request_weapons(weapons)`; server → client `_receive_build(build_dict, error)` after
@@ -940,8 +971,8 @@ don't bind them to anything else.
   (horizontal, its own positions; not while dead) into their `Inventory`, nearest
   first; a full inventory (`[inventory] slots`) leaves the rest on the ground with a
   notice. Items get a `uid` in the inventory (requests name items by it). Discard (two
-  clicks in the I panel) deletes an item. Inventories live on the server and are lost
-  on disconnect (persistence is milestone 5).
+  clicks in the I panel) deletes an item. Inventories live on the server and are saved
+  with the character (see "Saving"); ground drops aren't saved.
 - **Client**: `LootDropVisual` (sack, a beam in the best item's rarity color, its name
   drawn on top), the "[F] Pick up" prompt and a feed of pickups/notices (`LootHud`,
   canvas layer 2, above the HUD), `InventoryPanel` (I: newest first, rarity color, kind,
@@ -1049,7 +1080,7 @@ powershell -ExecutionPolicy Bypass -File tools\host_playtest.ps1         # serve
 powershell -ExecutionPolicy Bypass -File tools\export_client.ps1         # build\export\NewerWorld.zip for friends (needs export templates)
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s: make an account and character and log in (in-memory database), move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, snapshots under one packet
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s, then ~10 s of restart: make an account and character and log in (a fresh database file), move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, characters saved (periodic, after changes, on leaving), snapshots under one packet; then a second server on the same database file: the first bot (account smoke_keeper, character Keeper) logs in again and must come back exactly as last saved (fingerprint), and is saved as that server shuts down
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage / paladin)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Bots 6    # more bots (not with -Party): same checks for each, and snapshots must still fit one packet

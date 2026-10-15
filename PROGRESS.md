@@ -55,7 +55,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Networking | Prediction, snapshots, lag compensation, server tuning on connect | Built; not yet tested over the internet |
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
-| Persistence | Accounts, character saves | Database module (session 49), accounts and character select (50); saving next |
+| Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
@@ -69,11 +69,11 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | 2. Loot loop | **Done** (sessions 10–41; playtested) |
 | 3. Gathering and crafting | **Built** on branch `milestone-3` (sessions 45–46); needs its playtest |
 | 4. Second weapon and weapon swap | **Done**, and far past it: six classes, 15 weapons, Wings, statuses, forced movement, projectiles, zones, parties, enemy threat (sessions 11–37) |
-| 5. Persistence | Started on branch `persistence` (session 49: the database module; 50: accounts and character select) |
+| 5. Persistence | **Built** on branch `persistence` (session 49: the database module; 50: accounts and character select; 51: saving); needs its hand check, then merge into main |
 | 6. One zone, then playtest with real people | Internet readiness built (session 43); Husk navmesh done (session 42); the rest is items 1, 5 and 6 |
 
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
-(sessions 26, 41, 41, 42) are built and approved. 801 unit tests; the smoke tests pass
+(sessions 26, 41, 41, 42) are built and approved. 809 unit tests; the smoke tests pass
 for every class with 0 prediction corrections.
 
 ---
@@ -131,8 +131,13 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       login, character list and create screens with a class picker; the server spawns the
       chosen character's class; `--db=`; bots log in by themselves) name + password hash
       login, create a character (class picker instead of `--class`), choose it on connect.
-   3. **Saving:** on change and periodically; load on join; survive a server restart
-      (add a smoke check that restarts the server mid-run).
+   3. **Done (session 51, agent; needs a hand check).** **Saving:** (`World/Saves`,
+      `SaveSchedule`, `data/saving.cfg`: everyone every 60 s, a character 3 s after its
+      first unsaved change, on disconnect and at shutdown; an equip or craft under way
+      isn't saved: the save is the state before it) on change and periodically; load on
+      join; survive a server restart (the smoke test restarts the server on the same
+      database file and checks the first bot comes back exactly as saved).
+      Then merge `persistence` into main.
 4. **Progression:** character level and XP (kills, gathering), Wing tree points from
    level, weapon mastery XP per weapon (1 point per level, cap 20, as in
    `design/classes.md`). Pure logic + tests; saved through the persistence module.
@@ -186,6 +191,12 @@ it (you spawn as that class), log out and back in (the character is listed; your
 name is remembered), a wrong password says "Wrong account name or password.", and the
 same account in the second window is refused while the first plays. Only the bot path
 and `--menu-preview` screenshots were checked automatically.
+
+**Session 51, saving** (`run_local_test.ps1 -NoBot`): gather, craft, pick up and equip
+gear, respec in K; log out and back in (everything is as you left it, gear stats
+included in max health); then do a little more, close everything, start it again (same
+`user://newer_world.db`) and log in: still there. Also: log out mid-craft (inputs kept,
+nothing made) and mid-equip (the item is back in the bag, not worn).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -254,7 +265,11 @@ Gameplay:
 - Holding Space keeps jumping (jump is sent as "held").
 - Gathering: nodes don't collide with anything; the smoke bot only finds a node within 6 m in some cycles (Juggernaut runs gather ~1 time: a thin margin for the gathering check).
 - Crafting smoke check: the bot now walks to the one Forge on purpose (17 of 17 runs crafted). Those 3–5 s trips away from the Husks make "no Husk was moved by force" fail about 2 in 10 default runs (was ~1 in 10): a candidate for making that check deterministic.
-- Builds, inventories and gear are lost on disconnect (build order item 3.3).
+- Saving (session 51): a killed server (Ctrl+C, a crash) loses up to `[save] interval`
+  (60 s); closing it normally or `--quit-after` saves everyone. Leaving mid-craft loses
+  that batch's finished pieces (inputs kept). Health, Ember, cooldowns, position and
+  ground drops aren't saved. After the in-game class change (test tool) the other
+  class's build is saved but refused on the next join (the stored class didn't change).
 - Accounts (session 50): nameplates and party frames still say "Player N", not the
   character name; no login attempt limit and no timeout for a connection that never
   logs in; the in-game class change (test tool) doesn't change the stored class; no
@@ -363,6 +378,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 48 | 2026-10-15 | Milestone 3 feedback 2 (main session): any move/jump/dodge closes the Forge panel (after you've stood still with it open), and an interrupted batch keeps its finished pieces ("(1 of 4 made)"; `CraftingSystem._make` shared by finish and cancel). 770 tests; smoke default, `-Party`, Ranger pass (the Ranger run made 1 of 4, 1 of 3, 1 of 2 after hits) |
 | 49 | 2026-10-15 | Persistence 3.1 on branch `persistence` (off `milestone-3`, so saves cover resources, tradeskills and crafted gear): godot-sqlite v4.9 added (Windows/Linux binaries), `Persistence` + `CharacterSave` (`game/persistence/`), `Inventory.to_dict/from_dict`, `CharacterBuild.apply_saved`. 785 tests (14 new, on temporary SQLite files); smoke default and `-Party` pass, 0 corrections. Nothing to playtest yet |
 | 50 | 2026-10-15 | Persistence 3.2 by an agent on `persistence`: accounts and character select. `PasswordHash` (PBKDF2-HMAC-SHA256 over Godot's HMAC, RFC vectors in tests, salt + iterations in the stored string), `AccountRules` (`data/accounts.cfg`), `AccountService` (`/root/Main/Accounts`: login/create/play RPCs, hashes on worker threads, one login per account), start screens (address → login → characters → create with a class picker; `--menu-preview` for screenshots), `World._client_ready()` spawns the chosen character's class, `--db=` (smoke and screenshot servers use `:memory:`), bots log in alone (`--account=`/`--character=`). 801 tests; smoke default and `-Party` pass first time (new accounts check), 0 corrections. Needs a hand check of the login screens (§4) |
+| 51 | 2026-10-15 | Persistence 3.3 by an agent on `persistence`: saving. `World/Saves` (`SaveService`) loads the chosen character on join through the normal rules (build, bag, gear back to the bag if unwearable, tradeskills; unknown items dropped and logged) and saves through `Persistence.save_characters`: every 60 s, 3 s after a character's first unsaved change (`SaveSchedule`, `data/saving.cfg`; `save_changed` signals from Builds/Loot/Tradeskills), on disconnect (new `Net.peer_leaving`) and at shutdown. Equips/crafts under way aren't saved (the state before them). Smoke test: a database file, `SUMMARY saves` check, then a restart phase (second server on the same file, Keeper logs in again: same `CharacterSave.fingerprint`, saved at that server's shutdown). 809 tests; smoke default ×2 pass, `-Party` passed on the third run (known luck checks: `party_members=0` quit timing, then "no Husk moved by force"), 0 corrections. Needs the saving hand check (§4) |
 
 ---
 

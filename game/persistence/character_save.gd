@@ -61,6 +61,28 @@ func make_tradeskills(defs: TradeskillDefs) -> Tradeskills:
 	return Tradeskills.from_dict(tradeskills, defs)
 
 
+## A short hash of the four save parts as they'd be stored (whole floats read
+## back as ints, as Persistence.decode does), so a save and the same character
+## captured again after loading match exactly. The server logs it on every
+## save and load; the smoke test's restart check compares the two.
+func fingerprint() -> String:
+	var parts := [build, inventory, equipment, tradeskills]
+	return Persistence.encode(Persistence.decode(Persistence.encode(parts))).md5_text().substr(0, 12)
+
+
+## For the server's log: "bag=12 equipped=3 skill_levels=9 skill_xp=140" (bag
+## = slots used; skill totals over every tradeskill).
+func summary_text() -> String:
+	var levels := 0
+	var xp := 0
+	for entry: Variant in tradeskills.values():
+		if entry is Array and entry.size() == 2:
+			levels += int(entry[0])
+			xp += int(entry[1])
+	return "bag=%d equipped=%d skill_levels=%d skill_xp=%d" % [
+			inventory.get("items", []).size(), equipment.size(), levels, xp]
+
+
 ## Removes bag and equipped items whose item id isn't in `db` any more (a
 ## definition renamed or removed from data/items.cfg). Returns their ids, for
 ## the server's log.

@@ -2,8 +2,8 @@ class_name TradeskillSystem
 extends Node
 ## World/Tradeskills, on the server and every client (RPCs match by node path).
 ##
-## Server: each player's Tradeskills (fresh on join; saved with the character
-## once persistence exists). XP only ever comes from server code: gathering
+## Server: each player's Tradeskills (the character's saved ones on join, see
+## add_player; save_changed marks them for saving after any gain). XP only ever comes from server code: gathering
 ## (on_gathered, connected to World/Gathering's `gathered` signal) and crafting
 ## (on_crafted, called by World/Crafting). The gathering hooks read gather_time_multiplier and
 ## bonus_yield. Clients send nothing here.
@@ -19,6 +19,9 @@ extends Node
 
 ## The "+25 Mining XP" feed line's color.
 const XP_COLOR := Color(0.65, 0.85, 1.0)
+
+## Server: `peer` gained XP (World/Saves marks it for saving).
+signal save_changed(peer: int)
 
 var defs: TradeskillDefs
 var _is_client := false
@@ -67,14 +70,16 @@ func _ready() -> void:
 
 # --- Server ---
 
-## A player joined: fresh tradeskills, sent to them.
-func add_player(peer: int) -> void:
-	_skills[peer] = Tradeskills.new(defs)
+## A player joined: their saved tradeskills (`save`; null or never saved =
+## fresh), sent to them.
+func add_player(peer: int, save: CharacterSave = null) -> void:
+	var fresh := save == null or save.tradeskills.is_empty()
+	_skills[peer] = Tradeskills.new(defs) if fresh else save.make_tradeskills(defs)
 	_players_tracked += 1
 	_send(peer)
-	# Test-only (data/testing.cfg): a head start in every skill.
+	# Test-only (data/testing.cfg): a head start in every skill, once per character.
 	var join_xp: int = Tuning.get_optional("testing", "tradeskills", "join_xp", 0)
-	if join_xp > 0:
+	if join_xp > 0 and fresh:
 		for id in defs.order:
 			add_xp(peer, id, join_xp)
 
@@ -112,6 +117,7 @@ func add_xp(peer: int, skill: String, xp: int, announce := false) -> int:
 	var gained := skills.add_xp(skill, xp)
 	_xp_granted += xp
 	_level_ups += gained
+	save_changed.emit(peer)
 	if _connected(peer):
 		_send(peer)
 		if announce:

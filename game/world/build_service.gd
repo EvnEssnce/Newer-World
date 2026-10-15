@@ -14,6 +14,8 @@ extends Node
 
 ## Client: local_build or last_message changed.
 signal build_changed
+## Server: `peer`'s build changed (World/Saves marks it for saving).
+signal save_changed(peer: int)
 
 # Server
 ## World/Loot, for weapon items that follow the weapon slots. Set by World.
@@ -37,18 +39,27 @@ func _players() -> Node:
 # --- Server ---
 
 ## Gives a joining player the default build of their class (or of the default
-## class if theirs is unknown) and puts it into their state.
-func setup_player(player: Player, class_id: String) -> void:
+## class if theirs is unknown), with the character's saved build on top
+## (`save`; parts the rules refuse keep the default, returned for the log),
+## and puts it into their state.
+func setup_player(player: Player, class_id: String, save: CharacterSave = null) -> PackedStringArray:
 	var class_def := ClassDef.for_id(class_id)
 	if class_def == null:
 		print("[server] peer %d asked for unknown class \"%s\", using %s" % [
 				player.peer_id, class_id, ClassDef.DEFAULT_CLASS])
 		class_def = ClassDef.for_id(ClassDef.DEFAULT_CLASS)
 	player.build = CharacterBuild.create_default(class_def)
+	var refused := save.restore_build(player.build) if save else PackedStringArray()
 	player.build.apply_to_state(player.state, player.params)
+	return refused
 
 
+## Sends the owner its build; `message` = why a request was refused. A send
+## without one follows every accepted change, so it's where builds are marked
+## for saving.
 func send_build(player: Player, message: String = "") -> void:
+	if message.is_empty():
+		save_changed.emit(player.peer_id)
 	if player.peer_id in multiplayer.get_peers():
 		_receive_build.rpc_id(player.peer_id, player.build.to_dict(), message)
 

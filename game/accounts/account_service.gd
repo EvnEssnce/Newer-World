@@ -215,8 +215,8 @@ func _request_create_character(character_name: String, class_id: String) -> void
 	if error.is_empty():
 		error = rules.character_count_error(characters.size())
 	if error.is_empty():
-		# A new character starts with its class's default build (saving the
-		# rest is build order item 3.3).
+		# A new character starts with its class's default build and nothing
+		# else; World/Saves loads and saves it from then on.
 		var save := CharacterSave.capture(character_name, CharacterBuild.create_default(class_def),
 				null, null, null)
 		if persistence.create_character(session.account_id, save) == 0:

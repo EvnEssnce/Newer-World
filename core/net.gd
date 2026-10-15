@@ -10,6 +10,9 @@ signal connection_failed(reason: String)
 signal server_disconnected
 ## Server only.
 signal peer_joined(peer_id: int)
+## Server only. Fired just before peer_left, while every system still holds
+## the peer's data: saving it (World/Saves) happens here.
+signal peer_leaving(peer_id: int)
 ## Server only.
 signal peer_left(peer_id: int)
 
@@ -98,6 +101,7 @@ func _on_peer_connected(peer_id: int) -> void:
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	if is_server:
+		peer_leaving.emit(peer_id)
 		peer_left.emit(peer_id)
 
 

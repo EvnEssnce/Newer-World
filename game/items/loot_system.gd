@@ -16,7 +16,8 @@ extends Node
 ## change on the step it ends (Player.equip_finished): a weapon item also sets
 ## that loadout slot's weapon type (BuildService.apply_weapons). The totals go
 ## to Player.gear / bonus_max_health, which World's combat numbers read.
-## Inventories and gear are lost on disconnect (persistence is milestone 5).
+## A joining character's saved bag and gear come in through add_player;
+## save_changed tells World/Saves whenever either changes.
 ## Gathering (World/Gathering) puts resource stacks in the bag through
 ## give_resources; crafting (World/Crafting) changes it through bag_of /
 ## bag_changed. F is one interact key: it picks up loot in reach, else gathers
@@ -41,6 +42,9 @@ const BOT_PICKUP_REACH := 0.8
 const BOT_EQUIP_PHASES: Array[Vector2] = [Vector2(0.0, 1.0), Vector2(6.0, 6.2)]
 ## The "[F] Mine ..." prompt's color.
 const GATHER_PROMPT_COLOR := Color(0.85, 0.95, 0.75)
+
+## Server: `peer`'s bag or gear changed (World/Saves marks it for saving).
+signal save_changed(peer: int)
 
 ## World/Players. Set by World before adding this node.
 var players: Node3D
@@ -179,10 +183,29 @@ func _process(_delta: float) -> void:
 
 # --- Server ---
 
-## A player joined: give them an empty inventory and no gear, and send them.
-func add_player(peer: int) -> void:
-	_inventories[peer] = Inventory.new(_slots)
-	_equipment[peer] = Equipment.new()
+## A player joined (already in World/Players, build applied): their saved bag
+## and gear (`save`; null or a new character = empty), and send them. Saved
+## gear the class can't wear, and weapon items whose type isn't in the loadout,
+## go back to the bag (past its capacity if need be: nothing is lost).
+func add_player(peer: int, save: CharacterSave = null) -> void:
+	_inventories[peer] = save.make_inventory(_slots) if save else Inventory.new(_slots)
+	_equipment[peer] = save.make_equipment() if save else Equipment.new()
+	var player := players.get_node_or_null(str(peer)) as Player
+	if save and player and player.build:
+		var bag := _inventories[peer]
+		var worn := _equipment[peer]
+		var class_def := player.build.class_def
+		var back: Array[Item] = []
+		for equip_slot in worn.slots_off_for_class(_db, class_def.id, class_def.weapons):
+			back.append(worn.unequip(equip_slot))
+		back.append_array(worn.sync_weapons(player.state.weapons, _db))
+		for item in back:
+			if not bag.add(item):
+				bag.capacity += 1
+				bag.add(item)
+				bag.capacity -= 1
+			print("[server] peer %d: saved %s can't be worn now, back in the bag" % [peer, item.describe(_db)])
+		_apply_gear(player)
 	_send_inventory(peer)
 
 
@@ -409,6 +432,11 @@ func bag_of(peer: int) -> Inventory:
 	return _inventories.get(peer)
 
 
+## Server (saving): `peer`'s equipped gear, or null.
+func equipment_of(peer: int) -> Equipment:
+	return _equipment.get(peer)
+
+
 ## Server (crafting): sends `peer` its bag after a change made elsewhere, and a
 ## feed line per entry of `gained` (Item.to_dict()s: "+2 Rustvein Ingot").
 func bag_changed(peer: int, gained: Array) -> void:
@@ -515,9 +543,12 @@ func _send_drop(drop: GroundLoot.Drop) -> void:
 	_receive_drop.rpc_id(drop.owner, drop.id, drop.position, items)
 
 
+## Sends `peer` its bag and gear: every change to either comes through here, so
+## it's also where they're marked for saving.
 func _send_inventory(peer: int) -> void:
 	var bag := _inventories[peer]
 	_receive_inventory.rpc_id(peer, bag.to_array(), bag.capacity, _equipment[peer].to_dict())
+	save_changed.emit(peer)
 
 
 ## Where a drop lands: the ground straight below `from` (a launched enemy can

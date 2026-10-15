@@ -18,6 +18,8 @@ const PERF_SPIKE_MS := 50.0
 var _world: World
 var _menu: ConnectMenu
 var _accounts: AccountService
+## Server: the shutdown save ran (_save_before_quitting).
+var _saved_on_quit := false
 ## Client: connected to the server, and its tuning arrived (_enter_world needs both).
 var _connected := false
 var _server_tuning := false
@@ -264,6 +266,7 @@ func _process(delta: float) -> void:
 
 func _quit_after(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
+	_save_before_quitting()
 	if _world:
 		_world.print_summary()
 	if multiplayer.is_server():
@@ -281,5 +284,15 @@ func _notification(what: int) -> void:
 
 ## Disconnects cleanly first, so the server drops this player immediately.
 func _quit() -> void:
+	_save_before_quitting()
 	Net.disconnect_from_server()
 	get_tree().quit()
+
+
+## Server: everyone online is written to the database before the process ends
+## (--quit-after or closing the window; a killed process loses what changed
+## since the last save, at most [save] interval in data/saving.cfg).
+func _save_before_quitting() -> void:
+	if _world and multiplayer.is_server() and not _saved_on_quit:
+		_saved_on_quit = true
+		_world.save_everyone()
