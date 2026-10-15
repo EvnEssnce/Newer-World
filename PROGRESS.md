@@ -107,7 +107,7 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    4. **Done (session 46, agent; needs a playtest).** **Crafted gear** (21 recipes at the Forge: every class weapon at Weaponforging levels 1/4/8 and the Padded armor at Armorcraft 1/3/6; GS 100–110 at level 1 to 130–140 at 100; Rare/Epic odds grow with level; no Legendaries; Wing Enhancements deferred) through `LootRoller` (gear score range from skill, rarity
       chance), so crafting feeds the same items as loot. Durability and repairs if
       decided. Then playtest Milestone 3.
-   5. **Milestone 3 playtest feedback (session 47):** approved: gathering feel and speed,
+   5. **Done (session 47, agents; needs a playtest).** **Milestone 3 playtest feedback (session 47):** approved: gathering feel and speed,
       the P panel, everything else. To do: (a) an XP feed line after each gather and
       craft ("+25 Mining XP"); (b) a progress bar for the current craft inside the Forge
       panel; (c) a craft only finishes while the station panel stays open (closing it
@@ -239,7 +239,7 @@ Gameplay:
 - A drop scattered next to a crate can land inside it (still picked up from beside it).
 - Holding Space keeps jumping (jump is sent as "held").
 - Gathering: nodes don't collide with anything; the smoke bot only finds a node within 6 m in some cycles (Juggernaut runs gather ~1 time: a thin margin for the gathering check).
-- Crafting smoke check: the bot crafts only if it gathered early enough and passes a Forge before 7.3 s of a cycle; it missed once in 8 runs (Paladin).
+- Crafting smoke check: the bot now walks to the one Forge on purpose (17 of 17 runs crafted). Those 3–5 s trips away from the Husks make "no Husk was moved by force" fail about 2 in 10 default runs (was ~1 in 10): a candidate for making that check deterministic.
 - Builds, inventories and gear are lost on disconnect (build order item 3).
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
 
@@ -341,6 +341,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 44 | 2026-10-14 | Docs: one build order here; class implementation notes moved from `CLAUDE.md` to `design/classes.md`; old `PLAYTEST.md` (Wave 3 checklist) removed |
 | 45 | 2026-10-14 | Milestone 3 started on branch `milestone-3` (decided: F gathers, no durability, item weight later, no tool items). Two agents: 2.1 stackable resources + gathering nodes (`game/gathering/`, `data/gathering.cfg`, equip lock reused), 2.2 tradeskills (`game/tradeskills/`, `data/tradeskills.cfg`, P panel); merged (5 keep-both conflicts in `world.gd`), gathering wired to tradeskill XP/speed/bonus; smoke checks gathering and XP. 732 tests; smoke default, `-Party`, Juggernaut, Ranger, Mage pass, 0–1 corrections |
 | 46 | 2026-10-15 | Milestone 3 session 2.3 by an agent: refining recipes (`data/recipes.cfg`, `data/stations.cfg`, `game/crafting/`), the Forge (two markers so the smoke bot reaches one), crafting panel, refining XP; smoke checks a craft. Merged clean into `milestone-3`; 747 tests; smoke default ×2, `-Party`, Mage pass. Then session 2.4 (crafted gear: 21 recipes, GS and rarity by Weaponforging/Armorcraft level, no Legendaries) merged clean: 757 tests; smoke default, `-Party`, Assassin, Ranger, Mage pass first time; Juggernaut and Paladin passed on rerun (known force and status luck checks, and one missed craft). Milestone 3 built on `milestone-3`, needs its playtest |
+| 47 | 2026-10-15 | Milestone 3 playtest: gathering and the P panel approved. Feedback built by two agents and merged clean on `milestone-3`: XP feed lines, a progress bar in the Forge panel, crafting only with the panel open (moving cancels), one safe Forge at (-7, 0, 17) with the bot walking to it, crafted gear marked, and an icon per item (`ui/item_icon.gd`, `icon`/`ranged` keys). 768 tests; smoke all classes and `-Party` pass (default and Paladin on rerun: force and bleed luck checks) |
 
 ---
 

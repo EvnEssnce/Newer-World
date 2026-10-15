@@ -119,6 +119,7 @@ game/
                              player's levels/XP, gather speed and bonus yield. Pure, unit tested.
   tradeskills/tradeskill_system.gd  World/Tradeskills: XP from gathers (and crafting later),
                              owner updates, level-up feed lines.
+  crafting/craft_progress.gd The Forge panel's progress maths, cancel rules, XP line text. Pure.
   crafting/recipe_defs.gd    Recipes (data/recipes.cfg) and station kinds (data/stations.cfg);
                              crafting_rules.gd: can-craft checks and an atomic apply (a bag copy
                              first: a failed craft loses nothing); crafting_station.gd: reach, pick.
@@ -265,14 +266,22 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `World._ready`: `gathered` → `on_gathered` (XP), `time_multiplier_hook` /
   `yield_bonus_hook` → `gather_time_multiplier` / `bonus_yield`; server → owner
   `_receive_skills(dict)` and `_receive_level_up(skill, from, to)`; no client requests;
-  `add_xp(peer, skill, xp)` for crafting. Reset on rejoin until persistence.
+  `add_xp(peer, skill, xp)` for crafting; every gain also sends the owner
+  `_receive_xp(skill, xp)`, a "+25 Mining XP" feed line. Reset on rejoin until persistence.
   **Crafting** (`World/Crafting`, `CraftingSystem`; stations are `Marker3D`s under
-  `World/Stations`, a Forge near spawn and one by the Husk camp; stateless): client →
+  `World/Stations`: one Forge at (-7, 0, 17), ~31 m from the Husk homes, out of their
+  leash + reach; stateless): client →
   server `_request_craft(station_id, recipe_id, quantity)`; the server checks range +
   `[crafting] range_tolerance`, level, materials and bag room after the inputs go
   (`CraftingRules.check`), runs one busy lock of craft time × quantity (`start_gather`,
   same cancels as gathering), and on finish applies it atomically (inputs taken then,
   rechecked), grants XP (`TradeskillSystem.on_crafted`) and sends the bag + feed line.
+  **The station panel must stay open:** closing it (Esc, F, its X, range, another panel,
+  death) sends `_request_cancel_craft()`, and any move/jump/dodge input at the station
+  cancels on the server (`Player.last_move`/`last_buttons`); inputs are only taken at the
+  end. Server → owner `_receive_craft_started(recipe, qty, ticks)` / `_receive_craft_ended`
+  drive the panel's progress bar (then the predicted `equip_left`). The bot walks to the
+  Forge on purpose once it has materials (`CraftingSystem.bot_trip`).
   Recipes have `output_kind` "item" (refining) or "gear": each piece is its own
   `CraftingRules.roll_gear` → `LootRoller.roll_item` (server RNG) at a gear score range and
   rarity weights from the crafter's level (`TradeskillDefs.gear_score_range` /
@@ -915,6 +924,12 @@ don't bind them to anything else.
   `Equipment.weapon_target`), and when the K panel changes the types, weapon items
   follow them or return to the bag (`check_weapon_change` / `weapons_changed`,
   `Equipment.sync_weapons`).
+- **Item icons** (`ui/item_icon.gd`, `ItemIcon`, drawn in code, rarity-tinted): bag and
+  equipped cards, feed lines, the HUD gear box. Resources name theirs (`icon` in items.cfg,
+  `ItemDatabase.ICONS`, checked by `validate()`); gear gets one from its slot, weapons
+  crossed swords or a bow (`[weapon] ranged=true`: Longbow, Crossbow, Firebolts, Throwing
+  Knives, Great Staff, Gauntlet). **Crafted gear** carries `Item.crafted` (set by
+  `CraftingRules.roll_gear`): a gold "Crafted" and an anvil badge in the bag.
 - **Resources** (`slot="resource"` in items.cfg, `max_stack`): stackable (`Item.count`;
   `Inventory.add_stack` fills stacks then new slots, `room_for`, `count_of`, `remove_count`);
   no rarity, no equip; loot tables can't name them. Three raw ones: Rustvein Ore, Pine
