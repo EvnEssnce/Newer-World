@@ -137,9 +137,5 @@ metadata/kind = "fiber"
 [node name="Stations" type="Node3D" parent="."]
 
 [node name="Forge" type="Marker3D" parent="Stations"]
-transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -4, 0, -4)
-metadata/kind = "forge"
-
-[node name="CampForge" type="Marker3D" parent="Stations"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -11)
+transform = Transform3D(-0.924678, 0, -0.38075, 0, 1, 0, 0.38075, 0, -0.924678, -7, 0, 17)
 metadata/kind = "forge"

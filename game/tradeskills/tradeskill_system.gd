@@ -9,10 +9,16 @@ extends Node
 ## bonus_yield. Clients send nothing here.
 ##
 ## Server -> owner, reliable: _receive_skills(Tradeskills.to_dict()) on join and
-## after every XP change, _receive_level_up(skill, from, to) for the feed line.
+## after every XP change, _receive_xp(skill, xp) after each gather and craft
+## (the "+25 Mining XP" feed line; after the items' line, since both are
+## reliable on the same channel), _receive_level_up(skill, from, to) for the
+## level-up line.
 ##
 ## Client: the local player's copy (`local`), the Tradeskills panel (P) and the
-## "Mining 12 -> 13" feed line (LootHud's feed).
+## "+25 Mining XP" and "Mining 12 -> 13" feed lines (LootHud's feed).
+
+## The "+25 Mining XP" feed line's color.
+const XP_COLOR := Color(0.65, 0.85, 1.0)
 
 var defs: TradeskillDefs
 var _is_client := false
@@ -27,6 +33,8 @@ var _bonus_units := 0
 var _players_tracked := 0
 var _crafts := 0
 var _craft_xp := 0
+## "+N Skill XP" feed lines sent.
+var _xp_lines := 0
 
 # Client
 ## The local player's tradeskills, as the server last sent them (empty before).
@@ -35,6 +43,7 @@ var _panel: TradeskillsPanel
 var _layer: CanvasLayer
 var _updates_received := 0
 var _level_ups_seen := 0
+var _xp_lines_seen := 0
 
 
 func _ready() -> void:
@@ -76,7 +85,7 @@ func on_gathered(peer: int, skill: String, node_kind: String, amount: int) -> vo
 	if _is_client or not _skills.has(peer) or not defs.is_gathering(skill):
 		return
 	_gathers += 1
-	add_xp(peer, skill, defs.gather_xp(skill, node_kind, amount))
+	add_xp(peer, skill, defs.gather_xp(skill, node_kind, amount), true)
 
 
 ## World/Crafting finished a craft: `xp` (the recipe's XP x the quantity) for
@@ -87,13 +96,13 @@ func on_crafted(peer: int, skill: String, xp: int) -> void:
 	_crafts += 1
 	if not _skills[peer].is_capped(skill):
 		_craft_xp += maxi(0, xp)
-	add_xp(peer, skill, xp)
+	add_xp(peer, skill, xp, true)
 
 
 ## Gives `peer` XP in a skill (gathering and crafting); returns the
-## levels gained. Sends the owner its skills, and a feed line per level-up.
-## Server only.
-func add_xp(peer: int, skill: String, xp: int) -> int:
+## levels gained. Sends the owner its skills, with `announce` the "+N Skill XP"
+## feed line, and a feed line per level-up. Nothing at the level cap. Server only.
+func add_xp(peer: int, skill: String, xp: int, announce := false) -> int:
 	if _is_client or not _skills.has(peer) or not defs.has_skill(skill) or xp <= 0:
 		return 0
 	var skills := _skills[peer]
@@ -105,6 +114,9 @@ func add_xp(peer: int, skill: String, xp: int) -> int:
 	_level_ups += gained
 	if _connected(peer):
 		_send(peer)
+		if announce:
+			_xp_lines += 1
+			_receive_xp.rpc_id(peer, skill, xp)
 		if gained > 0:
 			_receive_level_up.rpc_id(peer, skill, before, skills.level(skill))
 	return gained
@@ -148,9 +160,9 @@ func _on_peer_left(peer: int) -> void:
 
 
 func print_summary() -> void:
-	print("SUMMARY tradeskills players=%d tracked_now=%d gathers=%d xp_granted=%d level_ups=%d bonus_units=%d crafts=%d craft_xp=%d" % [
+	print("SUMMARY tradeskills players=%d tracked_now=%d gathers=%d xp_granted=%d level_ups=%d bonus_units=%d crafts=%d craft_xp=%d xp_lines=%d" % [
 			_players_tracked, _skills.size(), _gathers, _xp_granted, _level_ups, _bonus_units,
-			_crafts, _craft_xp])
+			_crafts, _craft_xp, _xp_lines])
 
 
 # --- Client ---
@@ -161,6 +173,22 @@ func _receive_skills(data: Dictionary) -> void:
 	_updates_received += 1
 	if _panel:
 		_panel.refresh()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_xp(skill: String, xp: int) -> void:
+	_xp_lines_seen += 1
+	var text := xp_line(defs.display_name(skill), xp)
+	var feed := _feed()
+	if feed:
+		feed.add_feed_line(text, XP_COLOR)
+	elif LaunchArgs.has_flag("verbose"):
+		print("[client] %s" % text)
+
+
+## The feed line for an XP gain: "+25 Mining XP".
+static func xp_line(skill_name: String, xp: int) -> String:
+	return "+%d %s XP" % [xp, skill_name]
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -191,5 +219,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func print_client_summary() -> void:
-	print("SUMMARY client=%d tradeskills updates=%d skills=%d level_ups_seen=%d" % [
-			multiplayer.get_unique_id(), _updates_received, local.to_dict().size(), _level_ups_seen])
+	print("SUMMARY client=%d tradeskills updates=%d skills=%d level_ups_seen=%d xp_lines_seen=%d" % [
+			multiplayer.get_unique_id(), _updates_received, local.to_dict().size(), _level_ups_seen,
+			_xp_lines_seen])

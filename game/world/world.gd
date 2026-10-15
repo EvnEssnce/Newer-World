@@ -2683,14 +2683,16 @@ func _bot_input() -> Array:
 	var aim_yaw := 0.0
 	if phase < 4.0:
 		_bot_first_ability_pressed = false
+	# A trip to the Forge (it has materials; starts as the circling does, may run
+	# into the next fight phase): walks there, crafts with the panel open,
+	# presses nothing meanwhile (CraftingSystem.bot_trip).
+	var trip: Variant = null if gathering.bot_busy(_local_player) \
+			else crafting.bot_trip(_local_player, phase, cycle)
 	if phase >= 6.0:
 		var circle_t := t + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(circle_t * 0.8), sin(circle_t * 0.8))
-		# Refines at a station nearby once a cycle when it has the materials, else
-		# gathers a node nearby (walks to it, stands while crafting/gathering).
-		var craft_move: Variant = null if gathering.bot_busy(_local_player) \
-				else crafting.bot_move(_local_player, phase, cycle)
-		var gather_move: Variant = craft_move if craft_move != null \
+		# Else gathers a node nearby (walks to it, stands while gathering).
+		var gather_move: Variant = null if trip != null \
 				else gathering.bot_move(_local_player, phase, cycle)
 		if gather_move != null:
 			move = gather_move
@@ -2754,6 +2756,10 @@ func _bot_input() -> Array:
 			buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length())
 			if (buttons & ABILITY_BUTTONS) == 0:
 				buttons |= _bot_projectile_button(flat.length())
+	if trip != null:
+		move = trip
+		buttons = 0  # a jump or dodge at the station would cancel the craft
+		_bot_held_presses = 0
 	# Don't cancel its own swing: presses during a light/heavy's windup wait for
 	# the windup to end (in the hit window the sim buffers them as before).
 	var cancel_buttons := ABILITY_BUTTONS | PlayerState.BUTTON_DODGE

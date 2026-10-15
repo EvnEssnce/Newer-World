@@ -202,6 +202,10 @@ var wall_stun_source := 0
 ## (aim_ray; not sim state: only projectiles, server state, use it).
 var last_aim_yaw := 0.0
 var last_aim_pitch := 0.0
+## Server and the local client: the move direction and buttons of the last
+## simulated input (CraftingSystem: moving at a station cancels the craft).
+var last_move := Vector2.ZERO
+var last_buttons := 0
 ## Server: the server tick this player's client was drawing everyone else at
 ## when it sent the input being simulated (-1 = unknown); World._lag_position
 ## tests its hits there. Unchecked here: World clamps it.
@@ -309,6 +313,8 @@ func _process(delta: float) -> void:
 func _simulate(move: Vector2, buttons: int, aim_yaw: float, aim_pitch: float, delta: float) -> void:
 	last_aim_yaw = aim_yaw
 	last_aim_pitch = aim_pitch
+	last_move = move
+	last_buttons = buttons
 	var was_on_floor := is_on_floor()
 	var was_equipping := state.is_equipping()
 	var before := global_position
