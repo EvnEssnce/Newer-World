@@ -18,8 +18,10 @@ extends Node
 ## to Player.gear / bonus_max_health, which World's combat numbers read.
 ## Inventories and gear are lost on disconnect (persistence is milestone 5).
 ## Gathering (World/Gathering) puts resource stacks in the bag through
-## give_resources; F is one interact key: it picks up loot in reach, else
-## gathers the node GatheringSystem.target_node names (GatherNode.interact_choice).
+## give_resources; crafting (World/Crafting) changes it through bag_of /
+## bag_changed. F is one interact key: it picks up loot in reach, else gathers
+## the node GatheringSystem.target_node names, else opens the crafting panel of
+## the station CraftingSystem.target_station names (GatherNode.interact_choice).
 ## Client: draws its own drops (LootDropVisual), shows the pickup prompt, a feed
 ## of what it picked up and the equip bar (LootHud), and the inventory on I
 ## (InventoryPanel). A --bot picks up whatever of its own lands within reach and
@@ -46,6 +48,8 @@ var players: Node3D
 var builds: BuildService
 ## World/Gathering: F gathers a node when no loot is in reach. Set by World.
 var gathering: GatheringSystem
+## World/Crafting: F opens a station's panel when no loot or node is in reach. Set by World.
+var crafting: CraftingSystem
 
 var _is_client := false
 var _db: ItemDatabase
@@ -158,7 +162,10 @@ func _process(_delta: float) -> void:
 			prompt += "  (+%d more)" % (items.size() - 1)
 		_hud.set_prompt(prompt, best.rarity_color(_db))
 	elif gathering and local and not local.state.is_equipping():
-		_hud.set_prompt(gathering.prompt_text(local), GATHER_PROMPT_COLOR)
+		prompt = gathering.prompt_text(local)
+		if prompt.is_empty() and crafting and not crafting.panel_open():
+			prompt = crafting.prompt_text(local)
+		_hud.set_prompt(prompt, GATHER_PROMPT_COLOR)
 	else:
 		_hud.set_prompt("", Color.WHITE)
 	if local and local.state.is_equipping():
@@ -396,6 +403,22 @@ func give_resources(peer: int, item_id: String, amount: int) -> int:
 	return added
 
 
+## Server (crafting): `peer`'s bag, or null. Only change it through rules that
+## keep it valid (CraftingRules.apply), then call bag_changed.
+func bag_of(peer: int) -> Inventory:
+	return _inventories.get(peer)
+
+
+## Server (crafting): sends `peer` its bag after a change made elsewhere, and a
+## feed line per entry of `gained` (Item.to_dict()s: "+2 Rustvein Ingot").
+func bag_changed(peer: int, gained: Array) -> void:
+	if not _has_player(peer) or not _inventories.has(peer):
+		return
+	_send_inventory(peer)
+	if not gained.is_empty():
+		_receive_picked.rpc_id(peer, gained)
+
+
 ## Server: a line in `peer`'s loot feed.
 func notify(peer: int, text: String) -> void:
 	if _has_player(peer):
@@ -628,13 +651,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not _is_client or local_player() == null or event.is_echo():
 		return
 	if event.is_action_pressed(&"pickup"):
+		if crafting and crafting.panel_open():
+			crafting.close_panel()  # F closes the crafting panel it opened
+			return
 		var local := local_player()
 		var node_id := gathering.target_node(local) if gathering else -1
+		var station_id := crafting.target_station(local) if crafting else -1
 		var loot_near := not _drops_in_reach(local, _pickup_range).is_empty()
-		if GatherNode.interact_choice(loot_near, node_id) == GatherNode.Interact.GATHER:
-			gathering.request_gather(node_id)
-		else:
-			_request_pickup.rpc_id(1)
+		match GatherNode.interact_choice(loot_near, node_id, station_id):
+			GatherNode.Interact.GATHER:
+				gathering.request_gather(node_id)
+			GatherNode.Interact.CRAFT:
+				crafting.open_panel(station_id)
+			_:
+				_request_pickup.rpc_id(1)
 	elif event.is_action_pressed(&"toggle_inventory"):
 		_panel.toggle()
 

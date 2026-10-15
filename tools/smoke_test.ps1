@@ -106,6 +106,15 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     '--tune=gathering/node_ore/gather_time=0.3',
     '--tune=gathering/node_wood/gather_time=0.3',
     '--tune=gathering/node_fiber/gather_time=0.3',
+    # Cheap, short refining (3-4 raw -> 1 refined, 2 s in the real data): after
+    # a gather, the bot refines once a cycle at a Forge within 7 m as its
+    # circling starts (CraftingSystem.bot_move), done before its swap.
+    '--tune=recipes/recipe_rustvein_ingot/inputs={\"rustvein_ore\":1}',
+    '--tune=recipes/recipe_pine_plank/inputs={\"pine_log\":1}',
+    '--tune=recipes/recipe_thistle_linen/inputs={\"thistle_fiber\":1}',
+    '--tune=recipes/recipe_rustvein_ingot/craft_time=0.15',
+    '--tune=recipes/recipe_pine_plank/craft_time=0.15',
+    '--tune=recipes/recipe_thistle_linen/craft_time=0.15',
     # ...and only armor, which every class can wear, so the gear check (the bots
     # equip what they pick up) doesn't hang on class-locked drops.
     # No spaces, and quotes escaped as \": Start-Process joins the arguments into
@@ -338,6 +347,23 @@ if ($gatherSummary -and [int]$gatherSummary.Matches[0].Groups[1].Value -ge 1) {
     } else {
         Write-Host "PASS tradeskills: $($skillSummary.Line)" -ForegroundColor Green
     }
+}
+# Crafting: after a gather, a bot near a Forge refines once a cycle
+# (CraftingSystem.bot_move; 1 raw -> 1 refined with the tuning above), and every
+# craft grants its refining skill XP (TradeskillSystem.on_crafted: craft_xp=).
+$craftSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY crafting crafts=(\d+) items_made=(\d+)'
+$craftXp = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY tradeskills .*crafts=(\d+) craft_xp=(\d+)'
+if (-not $craftSummary) {
+    Write-Host "FAIL crafting: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$craftSummary.Matches[0].Groups[1].Value -lt 1 -or [int]$craftSummary.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL crafting: nothing was crafted ($($craftSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $craftXp -or [int]$craftXp.Matches[0].Groups[2].Value -lt 1) {
+    Write-Host "FAIL crafting: crafts but no refining XP ($($craftXp.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS crafting: $($craftSummary.Line)" -ForegroundColor Green
 }
 # Snapshots (World._broadcast_snapshot, NetCodec) must fit in one ENet packet
 # (1392 bytes, less about 30 for the RPC's own header): a bigger unreliable

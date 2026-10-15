@@ -108,6 +108,16 @@ func remove_count(item_id: String, amount: int) -> bool:
 	return true
 
 
+## A separate copy (items and the next uid too), to try changes on without
+## touching this bag (CraftingRules checks a craft on one first).
+func copy() -> Inventory:
+	var bag := Inventory.new(capacity)
+	for item in items:
+		bag.items.append(Item.from_dict(item.to_dict()))
+	bag._next_uid = _next_uid
+	return bag
+
+
 ## Item.to_dict() of each, in order: what the server sends its owner.
 func to_array() -> Array:
 	var data := []

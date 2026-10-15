@@ -4,8 +4,8 @@ extends Node
 ##
 ## Server: each player's Tradeskills (fresh on join; saved with the character
 ## once persistence exists). XP only ever comes from server code: gathering
-## (on_gathered, connected to World/Gathering's `gathered` signal) and, later,
-## crafting (add_xp). The gathering hooks read gather_time_multiplier and
+## (on_gathered, connected to World/Gathering's `gathered` signal) and crafting
+## (on_crafted, called by World/Crafting). The gathering hooks read gather_time_multiplier and
 ## bonus_yield. Clients send nothing here.
 ##
 ## Server -> owner, reliable: _receive_skills(Tradeskills.to_dict()) on join and
@@ -25,6 +25,8 @@ var _level_ups := 0
 var _gathers := 0
 var _bonus_units := 0
 var _players_tracked := 0
+var _crafts := 0
+var _craft_xp := 0
 
 # Client
 ## The local player's tradeskills, as the server last sent them (empty before).
@@ -77,7 +79,18 @@ func on_gathered(peer: int, skill: String, node_kind: String, amount: int) -> vo
 	add_xp(peer, skill, defs.gather_xp(skill, node_kind, amount))
 
 
-## Gives `peer` XP in a skill (gathering and, later, crafting); returns the
+## World/Crafting finished a craft: `xp` (the recipe's XP x the quantity) for
+## the recipe's refining or crafting skill. Server only.
+func on_crafted(peer: int, skill: String, xp: int) -> void:
+	if _is_client or not _skills.has(peer):
+		return
+	_crafts += 1
+	if not _skills[peer].is_capped(skill):
+		_craft_xp += maxi(0, xp)
+	add_xp(peer, skill, xp)
+
+
+## Gives `peer` XP in a skill (gathering and crafting); returns the
 ## levels gained. Sends the owner its skills, and a feed line per level-up.
 ## Server only.
 func add_xp(peer: int, skill: String, xp: int) -> int:
@@ -135,8 +148,9 @@ func _on_peer_left(peer: int) -> void:
 
 
 func print_summary() -> void:
-	print("SUMMARY tradeskills players=%d tracked_now=%d gathers=%d xp_granted=%d level_ups=%d bonus_units=%d" % [
-			_players_tracked, _skills.size(), _gathers, _xp_granted, _level_ups, _bonus_units])
+	print("SUMMARY tradeskills players=%d tracked_now=%d gathers=%d xp_granted=%d level_ups=%d bonus_units=%d crafts=%d craft_xp=%d" % [
+			_players_tracked, _skills.size(), _gathers, _xp_granted, _level_ups, _bonus_units,
+			_crafts, _craft_xp])
 
 
 # --- Client ---
