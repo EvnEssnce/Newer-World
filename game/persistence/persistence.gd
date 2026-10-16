@@ -37,6 +37,10 @@ const MIGRATIONS := [
 		);""",
 		"CREATE INDEX characters_by_account ON characters(account_id);",
 	],
+	# 2: progression (character level, weapon mastery; build order item 4).
+	[
+		"ALTER TABLE characters ADD COLUMN progression TEXT NOT NULL DEFAULT '{}';",
+	],
 ]
 
 ## Why the last call failed ("" after a success).
@@ -124,9 +128,10 @@ func create_character(account_id: int, save: CharacterSave) -> int:
 		return _failed_id("The name %s is taken." % save.name)
 	var now := _now()
 	if not _run("""INSERT INTO characters (account_id, name, class_id, build, inventory,
-			equipment, tradeskills, created_at, saved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+			equipment, tradeskills, progression, created_at, saved_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
 			[account_id, save.name, save.class_id, encode(save.build), encode(save.inventory),
-			encode(save.equipment), encode(save.tradeskills), now, now]):
+			encode(save.equipment), encode(save.tradeskills), encode(save.progression), now, now]):
 		return 0
 	save.id = _db.last_insert_rowid
 	save.account_id = account_id
@@ -145,7 +150,7 @@ func list_characters(account_id: int) -> Array[Dictionary]:
 ## The character with this id, or null (last_error says why).
 func load_character(character_id: int) -> CharacterSave:
 	var rows := _select("""SELECT id, account_id, name, class_id, build, inventory, equipment,
-			tradeskills FROM characters WHERE id = ?;""", [character_id])
+			tradeskills, progression FROM characters WHERE id = ?;""", [character_id])
 	if rows.size() != 1:
 		if last_error.is_empty():
 			_failed("No character %d." % character_id)
@@ -160,6 +165,7 @@ func load_character(character_id: int) -> CharacterSave:
 	save.inventory = _decode_dict(row["inventory"])
 	save.equipment = _decode_dict(row["equipment"])
 	save.tradeskills = _decode_dict(row["tradeskills"])
+	save.progression = _decode_dict(row["progression"])
 	return save
 
 
@@ -171,9 +177,9 @@ func save_character(save: CharacterSave) -> bool:
 	if _select("SELECT id FROM characters WHERE id = ?;", [save.id]).is_empty():
 		return _failed("No character %d." % save.id)
 	if not _run("""UPDATE characters SET build = ?, inventory = ?, equipment = ?,
-			tradeskills = ?, saved_at = ? WHERE id = ?;""",
+			tradeskills = ?, progression = ?, saved_at = ? WHERE id = ?;""",
 			[encode(save.build), encode(save.inventory), encode(save.equipment),
-			encode(save.tradeskills), _now(), save.id]):
+			encode(save.tradeskills), encode(save.progression), _now(), save.id]):
 		return false
 	return _ok()
 

@@ -121,6 +121,11 @@ game/
                              player's levels/XP, gather speed and bonus yield. Pure, unit tested.
   tradeskills/tradeskill_system.gd  World/Tradeskills: XP from gathers (and crafting later),
                              owner updates, level-up feed lines.
+  progression/progression_defs.gd, progression.gd  Character level and per-weapon mastery
+                             level (data/progression.cfg: caps, XP curves, tree points per
+                             level) and one character's levels/XP. Pure, unit tested.
+                             progression_system.gd: World/Progression (server holds each
+                             player's, saved with the character; no XP granted yet).
   crafting/craft_progress.gd The Forge panel's progress maths, cancel rules, XP line text. Pure.
   crafting/recipe_defs.gd    Recipes (data/recipes.cfg) and station kinds (data/stations.cfg);
                              crafting_rules.gd: can-craft checks and an atomic apply (a bag copy
@@ -192,7 +197,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      recipes (refining/crafting recipes), stations (station kinds),
                      testing (test-only switches: the in-game class change, tradeskill join_xp),
                      accounts (name/password rules, max characters, hash iterations),
-                     saving (periodic and after-change save delays) (.cfg).
+                     saving (periodic and after-change save delays), progression
+                     (character/mastery level caps and XP curves, tree points per level) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
@@ -361,7 +367,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   refused parts logged, `SUMMARY saves refused_parts=`), `LootSystem.add_player(peer,
   save)` (bag capacity from data/; saved gear the class can't wear or weapon items off
   the loadout go back to the bag, past capacity if need be), full health with the gear,
-  `TradeskillSystem.add_player(peer, save)`; then `track`. Writes go through
+  `TradeskillSystem.add_player(peer, save)`, `ProgressionSystem.add_player(peer, save)`
+  (`CharacterSave.progression`, schema 2's `progression` column; levels clamped to the
+  current caps); then `track`. Writes go through
   `Persistence.save_characters` (one transaction) on the main thread, from
   `CharacterSave.capture` of the live objects: everyone every `[save] interval` s
   (data/saving.cfg), a character `after_change` s after its first unsaved change (the

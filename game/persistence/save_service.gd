@@ -23,6 +23,7 @@ var persistence: Persistence
 var players: Node
 var loot: LootSystem
 var tradeskills: TradeskillSystem
+var progression: ProgressionSystem
 
 var schedule: SaveSchedule
 ## Seconds since this node started (the schedule's clock).
@@ -125,7 +126,8 @@ func capture(peer: int) -> CharacterSave:
 	if joined == null or player == null or player.build == null:
 		return null
 	var save := CharacterSave.capture(joined.name, player.build, loot.bag_of(peer),
-			loot.equipment_of(peer), tradeskills.skills_of(peer))
+			loot.equipment_of(peer), tradeskills.skills_of(peer),
+			progression.progression_of(peer) if progression else null)
 	save.id = joined.id
 	save.account_id = joined.account_id
 	return save

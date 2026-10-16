@@ -9,6 +9,7 @@ const DB_DIR := "user://test_persistence/"
 var class_def: ClassDef
 var trees: Dictionary
 var skill_defs: TradeskillDefs
+var level_defs: ProgressionDefs
 var item_db: ItemDatabase
 var _paths: PackedStringArray = []
 
@@ -33,6 +34,10 @@ func before_each() -> void:
 	skill_defs.xp_exponent = 1.5
 	skill_defs.add_skill("mining", "Mining", "gathering")
 	skill_defs.add_skill("smelting", "Smelting", "refining")
+
+	level_defs = ProgressionDefs.new()
+	level_defs.character = ProgressionDefs.LevelCurve.new(20, 100.0, 1.5)
+	level_defs.mastery = ProgressionDefs.LevelCurve.new(20, 100.0, 1.5)
 
 	item_db = ItemDatabase.new()
 	for id in ["sword", "cap", "ore"]:
@@ -63,7 +68,7 @@ func _gear(id: String, gear_score: int, primary: float) -> Item:
 
 
 ## A character with a changed build, a bag of gear and resource stacks, an
-## equipped item and some tradeskill XP.
+## equipped item, some tradeskill XP and progression (level 2, sword mastery 3).
 func _sample_save(char_name: String = "Ash") -> CharacterSave:
 	var build := CharacterBuild.create(class_def, trees)
 	assert_eq(build.set_weapons(PackedStringArray(["spear", "sword"])), "")
@@ -76,7 +81,10 @@ func _sample_save(char_name: String = "Ash") -> CharacterSave:
 	gear.items["head"] = _gear("cap", 111, 17.5)
 	var skills := Tradeskills.new(skill_defs)
 	skills.add_xp("mining", 250)
-	return CharacterSave.capture(char_name, build, bag, gear, skills)
+	var levels := Progression.new(level_defs)
+	levels.add_xp(150)  # level 2 (100), 50 into it
+	levels.add_mastery_xp("sword", 400)  # 100 + 283 -> level 3, 17 into it
+	return CharacterSave.capture(char_name, build, bag, gear, skills, levels)
 
 
 func _open() -> Persistence:
@@ -252,6 +260,13 @@ func test_character_round_trip() -> void:
 	var build := CharacterBuild.create(class_def, trees)
 	assert_eq(loaded.restore_build(build), PackedStringArray())
 	assert_eq(build.to_dict(), save.build)
+	assert_eq(loaded.progression, save.progression)
+	var levels := loaded.make_progression(level_defs)
+	assert_eq(levels.level(), 2)
+	assert_eq(levels.xp(), 50)
+	assert_eq(levels.mastery_level("sword"), 3)
+	assert_eq(levels.mastery_xp("sword"), 17)
+	assert_eq(loaded.fingerprint(), save.fingerprint())
 
 	var bag := loaded.make_inventory(10)
 	bag.remove_count("ore", 30)
@@ -301,6 +316,33 @@ func test_saving_everyone_is_all_or_nothing() -> void:
 	saves = [ash]
 	assert_true(p.save_characters(saves), p.last_error)
 	assert_eq(p.load_character(ash.id).tradeskills["mining"][0], 5)
+	_cleanup(p)
+
+
+func test_a_schema_1_database_gains_progression() -> void:
+	var p := _open()
+	# Rebuild the file as schema 1 had it, with a character stored then.
+	for sql in ["DROP TABLE characters;", "DROP TABLE accounts;"]:
+		assert_true(p._run(sql, []), p.last_error)
+	for sql: String in Persistence.MIGRATIONS[0]:
+		assert_true(p._run(sql, []), p.last_error)
+	assert_true(p._run("PRAGMA user_version = 1;", []))
+	var account := p.create_account("ember", "hash")
+	assert_true(p._run("""INSERT INTO characters (account_id, name, class_id, tradeskills,
+			created_at, saved_at) VALUES (?, 'Old', 'fighter', '{"mining":[3,0]}', 0, 0);""",
+			[account]), p.last_error)
+	var id: int = p.list_characters(account)[0]["id"]
+	p = _reopen(p)
+	assert_eq(p.schema_version(), Persistence.MIGRATIONS.size())
+	var loaded := p.load_character(id)
+	assert_true(loaded != null, p.last_error)
+	if loaded:
+		assert_eq(loaded.tradeskills["mining"][0], 3, "old data kept")
+		assert_eq(loaded.progression, {})
+		assert_eq(loaded.make_progression(level_defs).level(), 1, "starts at level 1")
+		loaded.progression = {"level": 4, "xp": 0, "mastery": {}}
+		assert_true(p.save_character(loaded), p.last_error)
+		assert_eq(p.load_character(id).progression["level"], 4)
 	_cleanup(p)
 
 

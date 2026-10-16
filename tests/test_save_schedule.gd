@@ -79,4 +79,7 @@ func test_summary_text_counts_bag_gear_and_skills() -> void:
 	save.inventory = {"items": [{}, {}, {}]}
 	save.equipment = {"head": {}}
 	save.tradeskills = {"mining": [2, 150], "smelting": [1, 30]}
-	assert_eq(save.summary_text(), "bag=3 equipped=1 skill_levels=3 skill_xp=180")
+	assert_eq(save.summary_text(), "bag=3 equipped=1 skill_levels=3 skill_xp=180 level=1",
+			"no progression saved = level 1")
+	save.progression = {"level": 7, "xp": 12, "mastery": {}}
+	assert_eq(save.summary_text(), "bag=3 equipped=1 skill_levels=3 skill_xp=180 level=7")

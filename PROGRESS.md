@@ -56,7 +56,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Built (Milestone 3): ore, wood and fiber nodes with charges and respawn timers; no tool items; hide waits for animals |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
-| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
+| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Started: levels, XP curves and saving (session 54); no XP sources yet, all points free |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
 ---
@@ -75,7 +75,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
 crafted gear (Milestone 3) and accounts with saved characters (Milestone 5) are on main.
-815 unit tests; the smoke tests pass for every class with 0 prediction corrections.
+827 unit tests; the smoke tests pass for every class with 0 prediction corrections.
 
 ---
 
@@ -143,6 +143,20 @@ tested and playtested). Each sub-item is roughly one session with one testable g
 4. **Progression:** character level and XP (kills, gathering), Wing tree points from
    level, weapon mastery XP per weapon (1 point per level, cap 20, as in
    `design/classes.md`). Pure logic + tests; saved through the persistence module.
+   1. **Done (session 54, branch `progression`).** **Levels and saving:**
+      `ProgressionDefs` + `Progression` (`game/progression/`, `data/progression.cfg`):
+      character level (cap 20, XP 400 × L^1.5) and a mastery level per weapon type (cap
+      20, XP 200 × L^1.5), 1 Wing point per character level and 1 tree point per mastery
+      level after the first; saved with the character (schema 2: a `progression`
+      column; old databases migrate on open); `World/Progression` holds them on the
+      server. Nothing grants XP and the trees still get full points.
+   2. **XP sources:** character XP from kills (per enemy kind, every contributor, like
+      loot rolls) and gathering; mastery XP for the weapon that dealt the damage; owner
+      updates (an XP bar, "+N XP" and level-up feed lines). Smoke checks XP and a
+      saved level surviving the restart.
+   3. **Points from levels:** Wing and weapon trees limited to the points the levels
+      give (K panel shows them, respec when a save has more than allowed); a test
+      switch in `data/testing.cfg` for full points (bots, playtests).
 5. **Content for a zone (Milestone 6).**
    1. **More enemies and camps:** 2–3 new enemy kinds with their own loot tables and
       gear score ranges (everything drops GS 101–140 today), placed as camps.
@@ -228,6 +242,12 @@ Say "keep" or what to change.
   Guardian Link moves 30% of hit damage (not damage over time or zones).
 - **Charges and knives:** a spare charge lets you reuse something while its cooldown
   runs (a Wing spare doesn't restart it). Embedded knives have no visual.
+
+- **Progression (session 54):** character level cap 20 (like weapon mastery), 1 Wing
+  point per level after the first so the 12-point Wing tree is full at level 13 (levels
+  14–20 give nothing yet; Ember cap upgrades could go there); XP curves 400 × L^1.5
+  (character, ~270,000 XP to 20) and 200 × L^1.5 (each weapon, ~135,000). Unknown weapon
+  ids in a save are kept (a renamed weapon starts over).
 
 **Decided for Milestone 3 (session 45):**
 - **Gathering key: F**, the same as loot pickup (one interact key; the prompt says
@@ -370,6 +390,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 51 | 2026-10-15 | Persistence 3.3 by an agent on `persistence`: saving. `World/Saves` (`SaveService`) loads the chosen character on join through the normal rules (build, bag, gear back to the bag if unwearable, tradeskills; unknown items dropped and logged) and saves through `Persistence.save_characters`: every 60 s, 3 s after a character's first unsaved change (`SaveSchedule`, `data/saving.cfg`; `save_changed` signals from Builds/Loot/Tradeskills), on disconnect (new `Net.peer_leaving`) and at shutdown. Equips/crafts under way aren't saved (the state before them). Smoke test: a database file, `SUMMARY saves` check, then a restart phase (second server on the same file, Keeper logs in again: same `CharacterSave.fingerprint`, saved at that server's shutdown). 809 tests; smoke default ×2 pass, `-Party` passed on the third run (known luck checks: `party_members=0` quit timing, then "no Husk moved by force"), 0 corrections. Needs the saving hand check (§4) |
 | 52 | 2026-10-16 | Main fast-forwarded to `milestone-3`, then (after the developer's hand checks of the login screens and saving passed) to `persistence`; both pushed. Docs: Milestones 3 and 5 marked done here |
 | 53 | 2026-10-16 | Two parallel agent sessions, merged clean into main. **Character names:** a server-sent peer → name table (`PlayerNames` in `AccountService`, reliable RPCs on play/leave, never in snapshots) for nameplates, party frames and party notices, "Player N" until a name arrives; `Net.is_peer_connected` shared with PartySystem. **Deterministic smoke checks** (bot-only, the game unchanged): a duel 3 s after launch (guard break, knockback, a Rebirth and a respawn), a training-dummy push after the first craft, a first gather on joining, staggered Forge trips, guard down against Husks until knocked back and a bleed has ticked, heavies wait for reach; branch runs default ×5, `-Party` ×2, Juggernaut, Paladin all passed first time. On merged main: 815 tests; smoke default and `-Party` pass first time, 0 corrections. Nameplates/party frames with friends: check in the playtest |
+| 54 | 2026-10-16 | Progression 4.1 on branch `progression`: `ProgressionDefs`/`Progression` (`game/progression/`, `data/progression.cfg`: character level and per-weapon mastery, caps 20, XP curves, tree points per level), saved with the character (`CharacterSave.progression`, migration 2 adds the `progression` column), `World/Progression` holds them on the server; no XP granted yet. 827 tests (12 new: curves, level-ups, caps, points, clamped saves, a schema-1 database migrating); smoke default and `-Party` pass first time, 0 corrections. Nothing to playtest yet |
 
 ---
 

@@ -247,6 +247,8 @@ var tradeskills: TradeskillSystem
 var gathering: GatheringSystem
 ## World/Crafting: crafting stations and recipes (both sides; markers under World/Stations).
 var crafting: CraftingSystem
+## World/Progression: character level and weapon mastery (both sides; server holds them).
+var progression: ProgressionSystem
 ## World/Saves (server only, else null): loading and saving characters.
 var saves: SaveService
 ## Projectiles (World/Projectiles, both sides).
@@ -342,6 +344,10 @@ func _ready() -> void:
 	gathering.time_multiplier_hook = tradeskills.gather_time_multiplier
 	gathering.yield_bonus_hook = tradeskills.bonus_yield
 	_add_crafting_system()
+	# World/Progression: character and weapon mastery levels (both sides).
+	progression = ProgressionSystem.new()
+	progression.name = "Progression"
+	add_child(progression)
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -582,6 +588,7 @@ func _client_ready() -> void:
 	loot.add_player(peer_id, save)
 	player.health = player.max_health()  # saved gear can raise it
 	tradeskills.add_player(peer_id, save)
+	progression.add_player(peer_id, save)
 	gathering.add_player(peer_id)
 	if saves:
 		saves.track(peer_id, save)
@@ -2560,6 +2567,7 @@ func _add_save_service() -> void:
 	saves.players = _players
 	saves.loot = loot
 	saves.tradeskills = tradeskills
+	saves.progression = progression
 	add_child(saves)
 	_builds.save_changed.connect(saves.mark_changed)
 	loot.save_changed.connect(saves.mark_changed)
@@ -3533,6 +3541,7 @@ func print_summary() -> void:
 		_projectiles.print_summary()
 		loot.print_summary()
 		tradeskills.print_summary()
+		progression.print_summary()
 		gathering.print_summary()
 		crafting.print_summary()
 		saves.print_summary()

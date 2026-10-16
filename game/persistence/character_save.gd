@@ -1,8 +1,8 @@
 class_name CharacterSave
 extends RefCounted
 ## Everything a character keeps between sessions, as plain data: who it is
-## (name, class, account) and the to_dict() of its build, inventory, equipment
-## and tradeskills. Persistence stores and loads these; the server captures one
+## (name, class, account) and the to_dict() of its build, inventory, equipment,
+## tradeskills and progression. Persistence stores and loads these; the server captures one
 ## from a player's live objects and rebuilds the objects from one. No database
 ## here, so it's unit tested on its own (tests/test_persistence.gd).
 ##
@@ -24,11 +24,13 @@ var inventory: Dictionary = {}
 var equipment: Dictionary = {}
 ## Tradeskills.to_dict(): skill id -> [level, xp].
 var tradeskills: Dictionary = {}
+## Progression.to_dict(): character level and XP, mastery per weapon ({} = new).
+var progression: Dictionary = {}
 
 
 ## A save of a character's live objects (null ones are saved empty).
 static func capture(char_name: String, char_build: CharacterBuild, bag: Inventory,
-		gear: Equipment, skills: Tradeskills) -> CharacterSave:
+		gear: Equipment, skills: Tradeskills, levels: Progression = null) -> CharacterSave:
 	var save := CharacterSave.new()
 	save.name = char_name
 	if char_build:
@@ -40,6 +42,8 @@ static func capture(char_name: String, char_build: CharacterBuild, bag: Inventor
 		save.equipment = gear.to_dict()
 	if skills:
 		save.tradeskills = skills.to_dict()
+	if levels:
+		save.progression = levels.to_dict()
 	return save
 
 
@@ -61,17 +65,22 @@ func make_tradeskills(defs: TradeskillDefs) -> Tradeskills:
 	return Tradeskills.from_dict(tradeskills, defs)
 
 
-## A short hash of the four save parts as they'd be stored (whole floats read
+## Levels clamped to the current caps (Progression.from_dict); {} = a new one.
+func make_progression(defs: ProgressionDefs) -> Progression:
+	return Progression.from_dict(progression, defs)
+
+
+## A short hash of the save parts as they'd be stored (whole floats read
 ## back as ints, as Persistence.decode does), so a save and the same character
 ## captured again after loading match exactly. The server logs it on every
 ## save and load; the smoke test's restart check compares the two.
 func fingerprint() -> String:
-	var parts := [build, inventory, equipment, tradeskills]
+	var parts := [build, inventory, equipment, tradeskills, progression]
 	return Persistence.encode(Persistence.decode(Persistence.encode(parts))).md5_text().substr(0, 12)
 
 
-## For the server's log: "bag=12 equipped=3 skill_levels=9 skill_xp=140" (bag
-## = slots used; skill totals over every tradeskill).
+## For the server's log: "bag=12 equipped=3 skill_levels=9 skill_xp=140 level=1"
+## (bag = slots used; skill totals over every tradeskill; character level).
 func summary_text() -> String:
 	var levels := 0
 	var xp := 0
@@ -79,8 +88,9 @@ func summary_text() -> String:
 		if entry is Array and entry.size() == 2:
 			levels += int(entry[0])
 			xp += int(entry[1])
-	return "bag=%d equipped=%d skill_levels=%d skill_xp=%d" % [
-			inventory.get("items", []).size(), equipment.size(), levels, xp]
+	return "bag=%d equipped=%d skill_levels=%d skill_xp=%d level=%d" % [
+			inventory.get("items", []).size(), equipment.size(), levels, xp,
+			int(progression.get("level", Progression.START_LEVEL))]
 
 
 ## Removes bag and equipped items whose item id isn't in `db` any more (a
