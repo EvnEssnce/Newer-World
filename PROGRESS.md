@@ -75,7 +75,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
 crafted gear (Milestone 3) and accounts with saved characters (Milestone 5) are on main.
-809 unit tests; the smoke tests pass for every class with 0 prediction corrections.
+815 unit tests; the smoke tests pass for every class with 0 prediction corrections.
 
 ---
 
@@ -253,15 +253,13 @@ Gameplay:
 - The greataxe model is mostly hidden behind the body from the follow camera.
 - A drop scattered next to a crate can land inside it (still picked up from beside it).
 - Holding Space keeps jumping (jump is sent as "held").
-- Gathering: nodes don't collide with anything; the smoke bot only finds a node within 6 m in some cycles (Juggernaut runs gather ~1 time: a thin margin for the gathering check).
-- Crafting smoke check: the bot now walks to the one Forge on purpose (17 of 17 runs crafted). Those 3–5 s trips away from the Husks make "no Husk was moved by force" fail about 2 in 10 default runs (was ~1 in 10): a candidate for making that check deterministic.
+- Gathering: nodes don't collide with anything.
 - Saving (session 51): a killed server (Ctrl+C, a crash) loses up to `[save] interval`
   (60 s); closing it normally or `--quit-after` saves everyone. Leaving mid-craft loses
   that batch's finished pieces (inputs kept). Health, Ember, cooldowns, position and
   ground drops aren't saved. After the in-game class change (test tool) the other
   class's build is saved but refused on the next join (the stored class didn't change).
-- Accounts (session 50): nameplates and party frames still say "Player N", not the
-  character name; no login attempt limit and no timeout for a connection that never
+- Accounts (session 50): no login attempt limit and no timeout for a connection that never
   logs in; the in-game class change (test tool) doesn't change the stored class; no
   character delete or rename on the start screens.
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
@@ -282,10 +280,11 @@ Networking:
 - When 9 bots quit at once the server had one ~100 ms tick (disconnect handling).
 
 Testing:
-- Bot-luck smoke checks fail about 1 run in 10 on Windows ("no hit landed on a guard",
-  "no Husk / no player was moved by force"; Juggernaut player knockbacks are 1–2 per run
-  since hyper armor). Rerun once; a second failure is real. On a Linux container it's
-  closer to 1 in 2 for Fighter runs: worth making these checks deterministic.
+- The smoke test's former luck checks (guard hit, player/enemy knockback, death +
+  respawn, bleed tick, gather) are now scheduled by the bot (session 53): a failure there
+  is real. Untested on Linux and with `-Bots 6` (duel pairs come from each bot's nearest
+  player and may not match up). "An enemy was moved by force" can be met by the
+  training-dummy push, not only a Husk.
 - Linux only: two bots quitting at the same instant sometimes print `party_members=0`;
   `-Bots 6` on 4 cores needs the server to quit later (seconds + 8) or late clients miss
   their summaries.
@@ -370,6 +369,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 50 | 2026-10-15 | Persistence 3.2 by an agent on `persistence`: accounts and character select. `PasswordHash` (PBKDF2-HMAC-SHA256 over Godot's HMAC, RFC vectors in tests, salt + iterations in the stored string), `AccountRules` (`data/accounts.cfg`), `AccountService` (`/root/Main/Accounts`: login/create/play RPCs, hashes on worker threads, one login per account), start screens (address → login → characters → create with a class picker; `--menu-preview` for screenshots), `World._client_ready()` spawns the chosen character's class, `--db=` (smoke and screenshot servers use `:memory:`), bots log in alone (`--account=`/`--character=`). 801 tests; smoke default and `-Party` pass first time (new accounts check), 0 corrections. Needs a hand check of the login screens (§4) |
 | 51 | 2026-10-15 | Persistence 3.3 by an agent on `persistence`: saving. `World/Saves` (`SaveService`) loads the chosen character on join through the normal rules (build, bag, gear back to the bag if unwearable, tradeskills; unknown items dropped and logged) and saves through `Persistence.save_characters`: every 60 s, 3 s after a character's first unsaved change (`SaveSchedule`, `data/saving.cfg`; `save_changed` signals from Builds/Loot/Tradeskills), on disconnect (new `Net.peer_leaving`) and at shutdown. Equips/crafts under way aren't saved (the state before them). Smoke test: a database file, `SUMMARY saves` check, then a restart phase (second server on the same file, Keeper logs in again: same `CharacterSave.fingerprint`, saved at that server's shutdown). 809 tests; smoke default ×2 pass, `-Party` passed on the third run (known luck checks: `party_members=0` quit timing, then "no Husk moved by force"), 0 corrections. Needs the saving hand check (§4) |
 | 52 | 2026-10-16 | Main fast-forwarded to `milestone-3`, then (after the developer's hand checks of the login screens and saving passed) to `persistence`; both pushed. Docs: Milestones 3 and 5 marked done here |
+| 53 | 2026-10-16 | Two parallel agent sessions, merged clean into main. **Character names:** a server-sent peer → name table (`PlayerNames` in `AccountService`, reliable RPCs on play/leave, never in snapshots) for nameplates, party frames and party notices, "Player N" until a name arrives; `Net.is_peer_connected` shared with PartySystem. **Deterministic smoke checks** (bot-only, the game unchanged): a duel 3 s after launch (guard break, knockback, a Rebirth and a respawn), a training-dummy push after the first craft, a first gather on joining, staggered Forge trips, guard down against Husks until knocked back and a bleed has ticked, heavies wait for reach; branch runs default ×5, `-Party` ×2, Juggernaut, Paladin all passed first time. On merged main: 815 tests; smoke default and `-Party` pass first time, 0 corrections. Nameplates/party frames with friends: check in the playtest |
 
 ---
 
