@@ -175,15 +175,8 @@ func _push_views() -> void:
 			_receive_view.rpc_id(peer, rules.view_for(peer, _tick))
 
 
-## A peer can still be listed for a moment after its connection has dropped.
 func _is_connected(peer: int) -> bool:
-	if peer not in multiplayer.get_peers():
-		return false
-	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
-	if enet == null:
-		return true
-	var packet_peer := enet.get_peer(peer)
-	return packet_peer != null and packet_peer.get_state() == ENetPacketPeer.STATE_CONNECTED
+	return Net.is_peer_connected(peer)
 
 
 # --- Client ---
@@ -346,5 +339,5 @@ func _local_player() -> Player:
 	return null
 
 
-static func _name(peer: int) -> String:
-	return "Player %d" % (peer % 10000)
+func _name(peer: int) -> String:
+	return AccountService.player_name(self, peer)

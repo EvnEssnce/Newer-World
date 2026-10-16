@@ -297,6 +297,9 @@ func _ready() -> void:
 	_build_ranger_models()
 	_beam = BeamVisual.new()
 	_model.add_child(_beam)
+	var accounts := get_node_or_null("/root/Main/Accounts") as AccountService
+	if accounts:
+		accounts.name_changed.connect(_on_name_changed)
 	_update_label()
 	if is_local:
 		_setup_camera()
@@ -748,9 +751,15 @@ func _update_label() -> void:
 	# Your own health is on the HUD; a label over your head just covers others'.
 	_name_label.visible = not is_local
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
-	_name_label.text = "Player %d\n%s" % [peer_id % 10000, status]
+	_name_label.text = "%s\n%s" % [AccountService.player_name(self, peer_id), status]
 	if not _status_text.is_empty():
 		_name_label.text += "\n" + _status_text
+
+
+## Client: the server sent (or forgot) a player's character name.
+func _on_name_changed(peer: int) -> void:
+	if peer == peer_id:
+		_update_label()
 
 
 ## The status line under a remote player's health ("Bleed x3, Slow"; client).

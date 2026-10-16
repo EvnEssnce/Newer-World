@@ -17,6 +17,13 @@ extends Node
 ## _receive_characters(error, characters), _receive_play(error). A character
 ## entry is {id, name, class_id}. Logging out = disconnecting.
 ##
+## Names (both sides: `names`, a PlayerNames): once a peer chooses a character
+## the server sends it _receive_names({peer: name}) for everyone playing
+## (itself included) and every other playing peer _receive_name(peer, name);
+## a playing peer leaving sends the rest _receive_name_removed(peer). Sent
+## before _receive_play, so a client has them before its World exists. Not in
+## snapshots. Nameplates and the party HUD draw player_name(node, peer).
+##
 ## --bot clients log in without typing (start_bot): account --account= (default
 ## bot_<peer id>), password "botpassword", the account's character named
 ## --character= (default "Bot" + the peer id in letters), made with --class= if
@@ -28,6 +35,8 @@ signal login_finished(error: String, account_name: String, characters: Array)
 signal characters_changed(error: String, characters: Array)
 ## Client: "" = the chosen character is ready, enter the world.
 signal play_finished(error: String)
+## Client: a player's name arrived, changed or was forgotten.
+signal name_changed(peer: int)
 
 const BOT_PASSWORD := "botpassword"
 const LOGIN_FAILED := "Wrong account name or password."
@@ -42,6 +51,9 @@ class Session:
 	var class_id := ""
 	## A password hash is running for this peer (further requests are ignored).
 	var busy := false
+
+## Both sides: the character names of the peers playing (see the top).
+var names := PlayerNames.new()
 
 ## Server: the database (opened by server_open).
 var persistence: Persistence
@@ -84,6 +96,17 @@ func character_of(peer: int) -> Dictionary:
 
 func _on_peer_left(peer: int) -> void:
 	_sessions.erase(peer)
+	if names.forget(peer):
+		for other in names.peers():
+			if Net.is_peer_connected(other):
+				_receive_name_removed.rpc_id(other, peer)
+
+
+## The name to draw for a player: its character's, or "Player N" until the
+## server has sent it. `from` is any node in the tree.
+static func player_name(from: Node, peer: int) -> String:
+	var accounts := from.get_node_or_null("/root/Main/Accounts") as AccountService
+	return accounts.names.name_of(peer) if accounts else PlayerNames.fallback(peer)
 
 
 func print_summary() -> void:
@@ -244,10 +267,20 @@ func _request_play(character_id: int) -> void:
 			session.character_name = entry["name"]
 			session.class_id = entry["class_id"]
 			_plays += 1
+			_send_names(peer, session.character_name)
 			_receive_play.rpc_id(peer, "")
 			return
 	_refused += 1
 	_receive_play.rpc_id(peer, "That character can't be played.")
+
+
+## Server: the new player gets everyone's name, everyone else gets its.
+func _send_names(peer: int, character_name: String) -> void:
+	names.put(peer, character_name)
+	for other in names.peers():
+		if other != peer and Net.is_peer_connected(other):
+			_receive_name.rpc_id(other, peer, character_name)
+	_receive_names.rpc_id(peer, names.to_dict())
 
 
 func _characters(session: Session) -> Array:
@@ -295,6 +328,24 @@ func _receive_play(error: String) -> void:
 	if _bot and not error.is_empty():
 		printerr("[client] bot couldn't play: %s" % error)
 	play_finished.emit(error)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_names(entries: Dictionary) -> void:
+	for peer in names.put_all(entries):
+		name_changed.emit(peer)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_name(peer: int, character_name: String) -> void:
+	if names.put(peer, character_name):
+		name_changed.emit(peer)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_name_removed(peer: int) -> void:
+	if names.forget(peer):
+		name_changed.emit(peer)
 
 
 # --- Client: --bot ---
