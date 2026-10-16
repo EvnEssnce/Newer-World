@@ -205,7 +205,7 @@ Still to check at the 2–3 friend playtest: the HUD's correction count stays lo
 each friend; hits land on what you see at their ping (compare with
 `[lag_compensation] enabled=false` in `data/network.cfg`); no visible jerks after
 corrections; a tuning edit on your side reaches them after a server restart; names on
-nameplates and party frames (session 53).
+party frames (session 53; nameplates showed names in the session 56 playtest).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -397,7 +397,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 53 | 2026-10-16 | Two parallel agent sessions, merged clean into main. **Character names:** a server-sent peer → name table (`PlayerNames` in `AccountService`, reliable RPCs on play/leave, never in snapshots) for nameplates, party frames and party notices, "Player N" until a name arrives; `Net.is_peer_connected` shared with PartySystem. **Deterministic smoke checks** (bot-only, the game unchanged): a duel 3 s after launch (guard break, knockback, a Rebirth and a respawn), a training-dummy push after the first craft, a first gather on joining, staggered Forge trips, guard down against Husks until knocked back and a bleed has ticked, heavies wait for reach; branch runs default ×5, `-Party` ×2, Juggernaut, Paladin all passed first time. On merged main: 815 tests; smoke default and `-Party` pass first time, 0 corrections. Nameplates/party frames with friends: check in the playtest |
 | 54 | 2026-10-16 | Progression 4.1 on branch `progression`: `ProgressionDefs`/`Progression` (`game/progression/`, `data/progression.cfg`: character level and per-weapon mastery, caps 20, XP curves, tree points per level), saved with the character (`CharacterSave.progression`, migration 2 adds the `progression` column), `World/Progression` holds them on the server; no XP granted yet. 827 tests (12 new: curves, level-ups, caps, points, clamped saves, a schema-1 database migrating); smoke default and `-Party` pass first time, 0 corrections. Nothing to playtest yet |
 | 55 | 2026-10-16 | Export: templates installed by the developer; `export_client.ps1` now also zips the godot-sqlite DLL (exported beside the exe, left out of the zip before). The exported exe ran as a headless server (database opened, port listening). `build\export\NewerWorld.zip` made for friends |
-| 56 | 2026-10-16 | First playtest with a friend over Tailscale (~104 ms ping): no lag or roughness, performed very well. Corrections on their side not checked; next playtest with 2–3 friends |
+| 56 | 2026-10-16 | First playtest with a friend over Tailscale (~104 ms ping): no lag or roughness, performed very well; character names showed on nameplates. Corrections on their side not checked; next playtest with 2–3 friends |
 
 ---
 
