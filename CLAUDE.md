@@ -1236,8 +1236,9 @@ use the smoke test instead.
 - `export_presets.cfg` has a "Windows Desktop" preset (one exe with the pack embedded,
   `include_filter="data/*"`: `data/*.cfg` aren't Godot resources; tests/tools/design
   excluded). `tools\export_client.ps1` exports it to `build\export\` and zips it; it
-  needs Godot's export templates (installed from the editor; not installed as of
-  session 43, so the preset is untested).
+  needs Godot's export templates (installed from the editor). The zip holds the exe
+  and the godot-sqlite DLL exported beside it (session 55: the exe ran as a headless
+  server).
 - Playtests with friends: `HOSTING.md` (Tailscale node sharing, firewall rule,
   `tools\host_playtest.ps1`: a visible server console + the developer's window, prints
   the Tailscale address; `-NoClassChange`). The developer's script: never run it from

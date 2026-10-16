@@ -86,9 +86,9 @@ tested and playtested). Each sub-item is roughly one session with one testable g
 (Session log entries before session 44 use the old step letters A–G.)
 
 1. **Playtest with real people** (developer first, then one session of fixes).
-   - **Developer's setup** (`HOSTING.md`): install Tailscale, install Godot's export
-     templates from the editor, run `tools\export_client.ps1` and try the exe yourself
-     (the export preset has never run), share the PC with a friend.
+   - **Developer's setup** (`HOSTING.md`): install Tailscale, share the PC with a
+     friend. Export templates are installed and `tools\export_client.ps1` works
+     (session 55); the exe hasn't been played as a client yet.
    - **Play** with `tools\host_playtest.ps1`. Check the session 43 work (§4) and note
      anything that felt laggy.
    - **Fix session** for what it finds. Candidates already known: a build check (a
@@ -391,6 +391,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 52 | 2026-10-16 | Main fast-forwarded to `milestone-3`, then (after the developer's hand checks of the login screens and saving passed) to `persistence`; both pushed. Docs: Milestones 3 and 5 marked done here |
 | 53 | 2026-10-16 | Two parallel agent sessions, merged clean into main. **Character names:** a server-sent peer → name table (`PlayerNames` in `AccountService`, reliable RPCs on play/leave, never in snapshots) for nameplates, party frames and party notices, "Player N" until a name arrives; `Net.is_peer_connected` shared with PartySystem. **Deterministic smoke checks** (bot-only, the game unchanged): a duel 3 s after launch (guard break, knockback, a Rebirth and a respawn), a training-dummy push after the first craft, a first gather on joining, staggered Forge trips, guard down against Husks until knocked back and a bleed has ticked, heavies wait for reach; branch runs default ×5, `-Party` ×2, Juggernaut, Paladin all passed first time. On merged main: 815 tests; smoke default and `-Party` pass first time, 0 corrections. Nameplates/party frames with friends: check in the playtest |
 | 54 | 2026-10-16 | Progression 4.1 on branch `progression`: `ProgressionDefs`/`Progression` (`game/progression/`, `data/progression.cfg`: character level and per-weapon mastery, caps 20, XP curves, tree points per level), saved with the character (`CharacterSave.progression`, migration 2 adds the `progression` column), `World/Progression` holds them on the server; no XP granted yet. 827 tests (12 new: curves, level-ups, caps, points, clamped saves, a schema-1 database migrating); smoke default and `-Party` pass first time, 0 corrections. Nothing to playtest yet |
+| 55 | 2026-10-16 | Export: templates installed by the developer; `export_client.ps1` now also zips the godot-sqlite DLL (exported beside the exe, left out of the zip before). The exported exe ran as a headless server (database opened, port listening). `build\export\NewerWorld.zip` made for friends |
 
 ---
 

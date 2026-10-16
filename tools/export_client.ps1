@@ -34,8 +34,10 @@ if (-not (Test-Path $exe)) {
 }
 $zip = Join-Path $outDir 'NewerWorld.zip'
 # The console wrapper (NewerWorld.console.exe) shows the game's log; handy if a
-# friend can't connect.
-$files = Get-ChildItem $outDir -Filter 'NewerWorld*.exe' | Select-Object -ExpandProperty FullName
+# friend can't connect. The godot-sqlite DLL is exported beside the exe; without
+# it the game logs an extension error at start (clients don't use the database).
+$files = @(Get-ChildItem $outDir -Filter 'NewerWorld*.exe') + @(Get-ChildItem $outDir -Filter '*.dll') |
+    Select-Object -ExpandProperty FullName
 Compress-Archive -Path $files -DestinationPath $zip -Force
 "Exported $exe"
 "Send $zip to your friends (unzip, run NewerWorld.exe, enter your Tailscale address)."
