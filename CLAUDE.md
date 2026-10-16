@@ -144,7 +144,9 @@ game/
                              `pbkdf2_sha256$iterations$salt$key`. account_rules.gd: AccountRules,
                              name/password rules (data/accounts.cfg). Pure, unit tested.
   accounts/account_service.gd  /root/Main/Accounts (both sides): login, character list/create/
-                             choose RPCs, sessions per peer, hashes on worker threads; bot login.
+                             choose RPCs, sessions per peer, hashes on worker threads; bot login;
+                             player names for every machine (player_names.gd: PlayerNames, the
+                             peer → name table and "Player N" fallback; pure, unit tested).
   party/party_rules.gd       Parties, invites, ally rule. Pure logic, unit tested.
   party/party_system.gd      World/Party: party RPCs, server validation, client keys/HUD/bot.
   zones/zone_params.gd       One zone/summon kind (data/zones.cfg [zone_<id>]).
@@ -329,7 +331,15 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   server `_request_login(account, password, create)`, `_request_create_character(name,
   class_id)`, `_request_play(character_id)`; server → that client `_receive_login(error,
   account, characters)`, `_receive_characters(error, characters)` (entries `{id, name,
-  class_id}`), `_receive_play(error)`. The server checks `AccountRules`
+  class_id}`), `_receive_play(error)`. **Names** (`AccountService.names`, a
+  `PlayerNames`, peer id → character name, both sides; never in snapshots, so it
+  doesn't depend on who is in view): when a peer chooses a character (just before its
+  `_receive_play`) the server sends it `_receive_names({peer: name})` for everyone
+  playing, itself included, and every other playing peer `_receive_name(peer, name)`;
+  a playing peer leaving sends the rest `_receive_name_removed(peer)` (only to
+  connected peers: `Net.is_peer_connected`). Clients emit `name_changed(peer)`.
+  Nameplates, party frames and party notices draw `AccountService.player_name(node,
+  peer)`: the name, or "Player N" until it arrives. The server checks `AccountRules`
   (data/accounts.cfg; names unique ignoring case in the schema), one login per account,
   that the character is the account's, and hashes with `PasswordHash` (PBKDF2,
   `[password] iterations`, ~0.3 s) on a `WorkerThreadPool` task polled in `_process`

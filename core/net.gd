@@ -59,6 +59,19 @@ func disconnect_from_server() -> void:
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 
 
+## Server: whether a reliable RPC to `peer` can be sent. A peer can still be
+## listed for a moment after its connection has dropped (two clients quitting
+## at once), and sending to it logs an ENet error.
+func is_peer_connected(peer: int) -> bool:
+	if peer not in multiplayer.get_peers():
+		return false
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return true
+	var packet_peer := enet.get_peer(peer)
+	return packet_peer != null and packet_peer.get_state() == ENetPacketPeer.STATE_CONNECTED
+
+
 ## Round-trip time to the server in milliseconds. Client only.
 func get_ping_ms() -> int:
 	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
