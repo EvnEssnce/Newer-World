@@ -51,10 +51,10 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Weapons | Two equipped, swap key, abilities on cooldowns, mastery trees | Built (15 weapons) |
 | Classes & Wings | Class-locked weapons, Wing abilities, Ember, Rebirth | All six classes built (stealth is visual only) |
 | Loot | Loot tables, rarity tiers, rolled stats, gear score ranges | Built |
-| Inventory | Equipment slots, item weight, durability | Slots built; durability skipped, weight later (session 45) |
+| Inventory | Equipment slots, item weight, durability | Slots and resource stacks built; durability skipped, weight later (session 45) |
 | Networking | Prediction, snapshots, lag compensation, server tuning on connect | Built; not yet tested over the internet |
-| Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Not started |
-| Crafting | Tradeskill XP curves, refining chains, recipes, stations | Not started |
+| Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Built (Milestone 3): ore, wood and fiber nodes with charges and respawn timers; no tool items; hide waits for animals |
+| Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Not started (all points free) |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
@@ -67,14 +67,15 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 |---|---|
 | 1. Networked combat slice | **Done** (session 9) |
 | 2. Loot loop | **Done** (sessions 10–41; playtested) |
-| 3. Gathering and crafting | **Built** on branch `milestone-3` (sessions 45–46); needs its playtest |
+| 3. Gathering and crafting | **Done** (sessions 45–48: built, playtested, two rounds of feedback; on main since session 52) |
 | 4. Second weapon and weapon swap | **Done**, and far past it: six classes, 15 weapons, Wings, statuses, forced movement, projectiles, zones, parties, enemy threat (sessions 11–37) |
-| 5. Persistence | **Built** on branch `persistence` (session 49: the database module; 50: accounts and character select; 51: saving); needs its hand check, then merge into main |
+| 5. Persistence | **Done** (session 49: the database module; 50: accounts and character select; 51: saving; hand checked and on main since session 52) |
 | 6. One zone, then playtest with real people | Internet readiness built (session 43); Husk navmesh done (session 42); the rest is items 1, 5 and 6 |
 
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
-(sessions 26, 41, 41, 42) are built and approved. 809 unit tests; the smoke tests pass
-for every class with 0 prediction corrections.
+(sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
+crafted gear (Milestone 3) and accounts with saved characters (Milestone 5) are on main.
+809 unit tests; the smoke tests pass for every class with 0 prediction corrections.
 
 ---
 
@@ -93,31 +94,33 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    - **Fix session** for what it finds. Candidates already known: a build check (a
      friend on older code gets odd failures, not a message), projectile lag
      compensation if leading shots feels bad.
-2. **Milestone 3: gathering and crafting.** Brief: two or three node types, one
-   refining step, one crafting station, tradeskill XP. Decided (§4): F gathers, no
-   durability, no item weight yet, no tool items. Branch `milestone-3`.
-   1. **Done (session 45, agent; needs a playtest).** **Resources and nodes:** (Rustvein Ore, Pine Log, Thistle Fiber, stacks of 100; 9 nodes on the test map; F = interact; gathering reuses the equip lock; `data/gathering.cfg`) stackable resources in the inventory (ore, wood, fiber;
-      hide waits for animals; max stack size); server-side nodes with a hit count, no
-      tool requirement, a gather time (walk-only lock like equipping) and respawn
-      timers, all in `data/`.
-   2. **Done (session 45, agent; needs a playtest).** **Tradeskills:** (8 skills, cap 100, XP = 100 × level^1.5; gathering −0.4% time and +0.5% bonus chance per level; panel on P; wired to gathering) XP curves per skill (`data/tradeskills.cfg`), XP from gathering,
-      higher skill = faster gathering or more yield. Pure logic + tests.
-   3. **Done (session 46, agent; needs a playtest).** **Refining and a station:** (Rustvein Ingot, Pine Plank, Thistle Linen; 3 raw → 1 refined (fiber 4), 2 s, 30 XP; a Forge near spawn and one by the Husk camp; F order loot → node → station; panel with 1/5/Max; one lock per batch, inputs taken at the end) ore → ingots, recipes in `data/recipes.cfg`, a station
-      in the world, a crafting panel; the server checks materials, range and skill.
-   4. **Done (session 46, agent; needs a playtest).** **Crafted gear** (21 recipes at the Forge: every class weapon at Weaponforging levels 1/4/8 and the Padded armor at Armorcraft 1/3/6; GS 100–110 at level 1 to 130–140 at 100; Rare/Epic odds grow with level; no Legendaries; Wing Enhancements deferred) through `LootRoller` (gear score range from skill, rarity
-      chance), so crafting feeds the same items as loot. Durability and repairs if
-      decided. Then playtest Milestone 3.
-   5. **Done (session 47, agents; needs a playtest).** **Milestone 3 playtest feedback (session 47):** approved: gathering feel and speed,
-      the P panel, everything else. To do: (a) an XP feed line after each gather and
-      craft ("+25 Mining XP"); (b) a progress bar for the current craft inside the Forge
-      panel; (c) a craft only finishes while the station panel stays open (closing it
-      cancels; nothing is taken); (d) stations far enough from enemies not to be
-      interrupted: one Forge on the safe side of spawn, the camp Forge removed, the bot
-      walks to it on purpose; (e) crafted gear marked as crafted in the inventory; (f) an
-      icon per item: crossed swords (melee weapons) or a bow (weapons that throw or
-      shoot: Longbow, Crossbow, Firebolts, Throwing Knives, Great Staff, Gauntlet),
-      helmet/chest/legs for armor, wings, and ingot/log/wheat-style icons for materials.
-3. **Milestone 5: persistence.**
+2. **Done: Milestone 3, gathering and crafting** (sessions 45–48; on main since
+   session 52). Brief: two or three node types, one refining step, one crafting station,
+   tradeskill XP. Decided (§4): F gathers, no durability, no item weight yet, no tool
+   items.
+   1. **Done (session 45).** **Resources and nodes:** Rustvein Ore, Pine Log and Thistle
+      Fiber in stacks of 100; 9 nodes on the test map with charges and respawn timers;
+      F = interact; a gather is a walk-only lock (the equip lock); `data/gathering.cfg`.
+      Hide waits for animals.
+   2. **Done (session 45).** **Tradeskills:** 8 skills, cap 100, XP = 100 × level^1.5;
+      each gathering level is −0.4% gather time and +0.5% bonus chance; P panel;
+      `data/tradeskills.cfg`.
+   3. **Done (session 46).** **Refining and a station:** Rustvein Ingot, Pine Plank,
+      Thistle Linen (3 raw → 1, fiber 4 → 1; 2 s; 30 XP); the Forge; crafting panel with
+      1/5/Max; the server checks materials, range and skill; `data/recipes.cfg`,
+      `data/stations.cfg`.
+   4. **Done (session 46).** **Crafted gear** through `LootRoller`: 21 recipes (every
+      class weapon at Weaponforging 1/4/8, Padded armor at Armorcraft 1/3/6); GS 100–110
+      at level 1 to 130–140 at 100; Rare/Epic odds grow with level; no Legendaries.
+      Wing Enhancement recipes and durability/repairs deferred.
+   5. **Done (sessions 47–48).** **Playtest and feedback:** gathering feel and speed and
+      the P panel approved. Built from the feedback: "+25 Mining XP" feed lines, a
+      progress bar in the Forge panel, crafting only while the panel is open (moving
+      closes it; a cancelled batch keeps its finished pieces), one Forge at (-7, 0, 17)
+      away from the Husks (the bot walks to it), crafted gear marked, and an icon per
+      item.
+3. **Done: Milestone 5, persistence** (sessions 49–51; hand checked, on main since
+   session 52).
    1. **Done (session 49, branch `persistence` off `milestone-3`).** **Persistence module:**
       godot-sqlite v4.9 (built for 4.7.1; runs on 4.7.2) in `addons/godot-sqlite`
       (Windows + Linux binaries); `Persistence` (`game/persistence/`): schema v1
@@ -125,19 +128,18 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       character create/find/list/load/save/delete, saving everyone in one transaction;
       `CharacterSave` captures and rebuilds `CharacterBuild` (through the mastery rules),
       `Inventory` (stacks, uids), `Equipment` and tradeskills. Nothing calls it yet.
-   2. **Done (session 50, agent; needs a hand check).** **Accounts and character select:**
+   2. **Done (session 50, agent; hand checked).** **Accounts and character select:**
       (`game/accounts/`: PBKDF2-SHA256 hashes on a worker thread, 310,000 iterations;
       name/password rules in `data/accounts.cfg`; `AccountService` at `/root/Main/Accounts`;
       login, character list and create screens with a class picker; the server spawns the
       chosen character's class; `--db=`; bots log in by themselves) name + password hash
       login, create a character (class picker instead of `--class`), choose it on connect.
-   3. **Done (session 51, agent; needs a hand check).** **Saving:** (`World/Saves`,
+   3. **Done (session 51, agent; hand checked).** **Saving:** (`World/Saves`,
       `SaveSchedule`, `data/saving.cfg`: everyone every 60 s, a character 3 s after its
       first unsaved change, on disconnect and at shutdown; an equip or craft under way
       isn't saved: the save is the state before it) on change and periodically; load on
       join; survive a server restart (the smoke test restarts the server on the same
       database file and checks the first bot comes back exactly as saved).
-      Then merge `persistence` into main.
 4. **Progression:** character level and XP (kills, gathering), Wing tree points from
    level, weapon mastery XP per weapon (1 point per level, cap 20, as in
    `design/classes.md`). Pure logic + tests; saved through the persistence module.
@@ -171,7 +173,8 @@ Fighter (sessions 12–24), Juggernaut (25), Assassin (32), Ranger (33), zones a
 in-game class picker (40); four rounds of playtest feedback (sessions 26–42: panels,
 HUD, crosshair aiming, aimed zones and beams, teleports, knife ammo, animation
 canceling, tree prerequisites, Juggernaut hyper armor, Shield Wall redesign, the
-training dummy); Husk navmesh pathing (42); internet readiness and hosting setup (43).
+training dummy); Husk navmesh pathing (42); internet readiness and hosting setup (43);
+Milestone 3, gathering and crafting (45–48); Milestone 5, persistence (49–51).
 
 ---
 
@@ -184,19 +187,6 @@ their PC and connects; hits land on what you see at their ping (compare with
 `[lag_compensation] enabled=false` in `data/network.cfg`); no visible jerks after
 corrections; the HUD's correction count stays low; a tuning edit on your side reaches
 them after a server restart.
-
-**Session 50, login screens** (`run_local_test.ps1 -NoBot`): make an account (a short
-password or a name with a space is refused), make a character of another class and play
-it (you spawn as that class), log out and back in (the character is listed; your account
-name is remembered), a wrong password says "Wrong account name or password.", and the
-same account in the second window is refused while the first plays. Only the bot path
-and `--menu-preview` screenshots were checked automatically.
-
-**Session 51, saving** (`run_local_test.ps1 -NoBot`): gather, craft, pick up and equip
-gear, respec in K; log out and back in (everything is as you left it, gear stats
-included in max health); then do a little more, close everything, start it again (same
-`user://newer_world.db`) and log in: still there. Also: log out mid-craft (inputs kept,
-nothing made) and mid-equip (the item is back in the bag, not worn).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -239,7 +229,7 @@ Say "keep" or what to change.
 - **Charges and knives:** a spare charge lets you reuse something while its cooldown
   runs (a Wing spare doesn't restart it). Embedded knives have no visual.
 
-**Decided for build order item 2 (session 45):**
+**Decided for Milestone 3 (session 45):**
 - **Gathering key: F**, the same as loot pickup (one interact key; the prompt says
   which it will do).
 - **Durability: skipped** for now (can come later as its own step if the economy
@@ -379,6 +369,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 49 | 2026-10-15 | Persistence 3.1 on branch `persistence` (off `milestone-3`, so saves cover resources, tradeskills and crafted gear): godot-sqlite v4.9 added (Windows/Linux binaries), `Persistence` + `CharacterSave` (`game/persistence/`), `Inventory.to_dict/from_dict`, `CharacterBuild.apply_saved`. 785 tests (14 new, on temporary SQLite files); smoke default and `-Party` pass, 0 corrections. Nothing to playtest yet |
 | 50 | 2026-10-15 | Persistence 3.2 by an agent on `persistence`: accounts and character select. `PasswordHash` (PBKDF2-HMAC-SHA256 over Godot's HMAC, RFC vectors in tests, salt + iterations in the stored string), `AccountRules` (`data/accounts.cfg`), `AccountService` (`/root/Main/Accounts`: login/create/play RPCs, hashes on worker threads, one login per account), start screens (address → login → characters → create with a class picker; `--menu-preview` for screenshots), `World._client_ready()` spawns the chosen character's class, `--db=` (smoke and screenshot servers use `:memory:`), bots log in alone (`--account=`/`--character=`). 801 tests; smoke default and `-Party` pass first time (new accounts check), 0 corrections. Needs a hand check of the login screens (§4) |
 | 51 | 2026-10-15 | Persistence 3.3 by an agent on `persistence`: saving. `World/Saves` (`SaveService`) loads the chosen character on join through the normal rules (build, bag, gear back to the bag if unwearable, tradeskills; unknown items dropped and logged) and saves through `Persistence.save_characters`: every 60 s, 3 s after a character's first unsaved change (`SaveSchedule`, `data/saving.cfg`; `save_changed` signals from Builds/Loot/Tradeskills), on disconnect (new `Net.peer_leaving`) and at shutdown. Equips/crafts under way aren't saved (the state before them). Smoke test: a database file, `SUMMARY saves` check, then a restart phase (second server on the same file, Keeper logs in again: same `CharacterSave.fingerprint`, saved at that server's shutdown). 809 tests; smoke default ×2 pass, `-Party` passed on the third run (known luck checks: `party_members=0` quit timing, then "no Husk moved by force"), 0 corrections. Needs the saving hand check (§4) |
+| 52 | 2026-10-16 | Main fast-forwarded to `milestone-3`, then (after the developer's hand checks of the login screens and saving passed) to `persistence`; both pushed. Docs: Milestones 3 and 5 marked done here |
 
 ---
 
