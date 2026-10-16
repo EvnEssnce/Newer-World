@@ -45,6 +45,8 @@ const BOT_REACH := 0.6
 const BOT_WAIT_MS := 500
 ## Bot: asks at most this many times a cycle (a refused ask is tried again).
 const BOT_TRIES := 3
+## Bot: gives up on the run's first gather (bot_first_move) after this long (s).
+const BOT_FIRST_TIMEOUT := 6.0
 
 ## World/Players and World/Loot. Set by World before adding this node.
 var players: Node3D
@@ -86,6 +88,9 @@ var _bot_saw_lock := false
 var _bot_tries := 0
 ## Bot (--verbose): said this cycle that no node is near.
 var _bot_logged := false
+## Bot: the run's first gather (bot_first_move) is over, and when it began (ms).
+var _bot_first_over := false
+var _bot_first_msec := -1
 
 
 func _ready() -> void:
@@ -351,6 +356,43 @@ func bot_move(local: Player, phase: float, cycle: int) -> Variant:
 						local.global_position.distance_to(nodes[nearest].position) if nearest >= 0 else -1.0,
 						Time.get_ticks_msec() / 250])
 			return null
+	return _bot_walk_and_ask(local)
+
+
+## Bot (World._bot_input, right after joining, at any phase): the run's first
+## gather, from the nearest available node however far (the spawn circle is
+## next to them), so the gathering check and the Forge trip never hang on a node
+## being near during a circling phase. World presses nothing meanwhile. Over
+## once it gathered (or was interrupted), after BOT_TRIES asks or
+## BOT_FIRST_TIMEOUT s; then bot_move's once-a-cycle gathers go on as before.
+## Returns the move to use, or null once it's over (or while dead).
+func bot_first_move(local: Player) -> Variant:
+	if _bot_first_over:
+		return null
+	var now := Time.get_ticks_msec()
+	if _bot_first_msec < 0:
+		_bot_first_msec = now
+	if bot_busy(local):
+		return Vector2.ZERO
+	if (_bot_done or _bot_tries >= BOT_TRIES
+			or now - _bot_first_msec > BOT_FIRST_TIMEOUT * 1000.0):
+		_bot_first_over = true
+		_bot_node = -1
+		if LaunchArgs.has_flag("verbose"):
+			print("[client] gathering: first gather %s (frame %d)" % [
+					"done" if _bot_done else "gave up", now / 250])
+		return null
+	if local.state.dead:
+		return null
+	if _bot_node < 0 or not nodes[_bot_node].is_available():
+		_bot_node = _nearest_available(local.global_position, INF)
+		if _bot_node < 0:
+			return null
+	return _bot_walk_and_ask(local)
+
+
+## Bot: walks to _bot_node and asks to gather it once within reach and free to.
+func _bot_walk_and_ask(local: Player) -> Variant:
 	var node := nodes[_bot_node]
 	var to := node.position - local.global_position
 	var flat := Vector2(to.x, to.z)

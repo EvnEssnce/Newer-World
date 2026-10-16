@@ -134,6 +134,11 @@ var _bot_trip_msec := 0
 var _bot_trip_cycle := -100
 ## Bot: the first cycle a new trip may start in.
 var _bot_next_trip_cycle := -100
+## Bot: no trip starts before this cycle (set by World: one bot a cycle after
+## the other, so both never miss the same fight).
+var bot_first_trip_cycle := 0
+## Bot: trips that crafted (World then pushes the training dummy, next to the Forge).
+var bot_trips_crafted := 0
 var _bot_station := -1
 var _bot_recipe := ""
 var _bot_tries := 0
@@ -557,7 +562,7 @@ func bot_trip(local: Player, phase: float, cycle: int) -> Variant:
 	if not _bot_trip:
 		if (local.state.dead or local.state.is_equipping() or crafting()
 				or phase < BOT_TRIP_START.x or phase >= BOT_TRIP_START.y
-				or cycle < _bot_next_trip_cycle):
+				or cycle < maxi(_bot_next_trip_cycle, bot_first_trip_cycle)):
 			return null
 		_bot_pick(local)
 		if _bot_station < 0:
@@ -588,6 +593,7 @@ func bot_trip(local: Player, phase: float, cycle: int) -> Variant:
 	if _bot_asked_msec >= 0:
 		if _last_result == RESULT_FINISHED:
 			_bot_next_trip_cycle = _bot_trip_cycle + BOT_TRIP_EVERY
+			bot_trips_crafted += 1
 			_end_bot_trip("crafted")
 			return null
 		if _current != null:
