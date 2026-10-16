@@ -6,8 +6,9 @@ extends RefCounted
 ## server owns the real one (World/Progression) and saves it with the character
 ## (CharacterSave.progression).
 ##
-## The levels decide tree points (wing_points, weapon_points); nothing grants XP
-## or limits the trees by them yet (build order item 4).
+## The levels decide tree points (wing_points, weapon_points), which limit the
+## Wing and weapon trees (CharacterBuild.set_point_limits). XP comes from
+## World/Progression (kills, gathering).
 
 const START_LEVEL := 1
 
@@ -130,6 +131,23 @@ static func from_dict(data: Dictionary, progression_defs: ProgressionDefs) -> Pr
 			var track := _clamped(progression_defs.mastery, int(entry[0]), int(entry[1]))
 			if track != Vector2i(START_LEVEL, 0):
 				result._mastery[id] = track
+	return result
+
+
+## Mastery XP for one kill: `xp` split over the weapons in `by_weapon` (weapon id
+## -> damage dealt with it; "" = no weapon, a Wing ability) by their share of
+## all the damage, rounded; weapons whose share rounds to 0 are left out.
+static func mastery_split(by_weapon: Dictionary, xp: int) -> Dictionary[String, int]:
+	var result: Dictionary[String, int] = {}
+	var total := 0.0
+	for id: String in by_weapon:
+		total += maxf(0.0, by_weapon[id])
+	if xp <= 0 or total <= 0.0:
+		return result
+	for id: String in by_weapon:
+		var share := roundi(xp * maxf(0.0, by_weapon[id]) / total)
+		if not id.is_empty() and share > 0:
+			result[id] = share
 	return result
 
 

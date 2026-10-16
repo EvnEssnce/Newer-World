@@ -50,8 +50,10 @@ var attack_results: Dictionary[int, bool] = {}
 ## Server: the current swing misses (decided as it starts, from blind statuses).
 var swing_misses := false
 ## Peer ids of the players who damaged it since it (re)spawned or healed at
-## home: they each get a loot roll when it dies.
-var damaged_by: Dictionary[int, bool] = {}
+## home: they each get a loot roll and XP when it dies. Each maps weapon id
+## (the weapon out when the damage landed, "" for a Wing ability) -> damage
+## dealt with it (the mastery XP split).
+var damaged_by: Dictionary[int, Dictionary] = {}
 ## A knockback, pull or launch in progress (start_force).
 var force := ForcedMotion.new()
 ## Server: the player whose knockback is moving it and who has the Tempest
@@ -145,10 +147,12 @@ func server_step(targets: Dictionary, delta: float) -> void:
 
 ## Applies a player's hit (or damage over time): damage, threat for the
 ## attacker (a peer id; others are ignored) and stagger unless it's immune
-## (a stagger_immune status). Returns true if it killed the enemy.
-func take_hit(damage: float, stagger_ticks: int, attacker_id: int) -> bool:
+## (a stagger_immune status). weapon_id: the attacker's weapon to credit with
+## the damage (damaged_by). Returns true if it killed the enemy.
+func take_hit(damage: float, stagger_ticks: int, attacker_id: int, weapon_id := "") -> bool:
 	if damage > 0.0 and attacker_id > 0:
-		damaged_by[attacker_id] = true
+		var by_weapon: Dictionary = damaged_by.get_or_add(attacker_id, {})
+		by_weapon[weapon_id] = by_weapon.get(weapon_id, 0.0) + minf(damage, health)
 	health = maxf(0.0, health - damage)
 	_ticks_since_damage = 0
 	if health <= 0.0:

@@ -129,6 +129,12 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
 # Saves (World/Saves): everyone online every 8 s (60 s in the real data), so
 # periodic saves happen within the run too.
 $tune += '--tune=saving/save/interval=8.0'
+# Progression: every tree at its full points (the bots respec into capstones),
+# and XP curves 20x cheaper so the bots level up within the run (kills and
+# gathers) and the restart check covers a saved level.
+$tune += '--tune=testing/progression/full_points=true'
+$tune += '--tune=progression/character/xp_base=20.0'
+$tune += '--tune=progression/weapon_mastery/xp_base=10.0'
 
 $botFlags = @('--bot', '--verbose', "--class=$Class")
 if ($Party) { $botFlags += '--bot-party' }
@@ -435,8 +441,24 @@ if (-not $saveSummary) {
 } else {
     Write-Host "PASS saves: $($saveSummary.Line)" -ForegroundColor Green
 }
+# Progression (World/Progression): Husk kills gave every contributor character
+# and weapon mastery XP (kills_credited=, mastery_xp_granted=), gathers gave
+# character XP, someone levelled up, and the owners were sent "+N XP" lines.
+$progressSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY progression .*kills_credited=(\d+) gathers=(\d+) xp_granted=(\d+) mastery_xp_granted=(\d+) level_ups=(\d+) mastery_level_ups=(\d+) xp_lines=(\d+)'
+if (-not $progressSummary) {
+    Write-Host "FAIL progression: no summary" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$progressSummary.Matches[0].Groups[1].Value -lt 1 -or [int]$progressSummary.Matches[0].Groups[4].Value -lt 1) {
+    Write-Host "FAIL progression: no kill XP or no mastery XP ($($progressSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ([int]$progressSummary.Matches[0].Groups[5].Value -lt 1 -or [int]$progressSummary.Matches[0].Groups[7].Value -lt 1) {
+    Write-Host "FAIL progression: nobody levelled up or no XP feed lines ($($progressSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS progression: $($progressSummary.Line)" -ForegroundColor Green
+}
 # Restart: Keeper's last save before the first server stopped (bag, gear,
-# tradeskills and build, as a fingerprint) is what it came back with after the
+# tradeskills, levels and build, as a fingerprint; a level above 1) is what it came back with after the
 # restart, logged in to the stored account and character (none made anew).
 $lastSave = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^\[server\] saved Keeper \((leave|shutdown)\): (bag=(\d+).*) fp=(\w+)' | Select-Object -Last 1
 $reloaded = Select-String -Path (Join-Path $logDir 'server_restart.log') -Pattern '^\[server\] loaded Keeper: (.*) fp=(\w+)' | Select-Object -First 1
@@ -446,6 +468,9 @@ if (-not $lastSave -or -not $reloaded) {
     $failed = $true
 } elseif ([int]$lastSave.Matches[0].Groups[3].Value -lt 1) {
     Write-Host "FAIL restart: Keeper's bag was empty when saved, nothing to check ($($lastSave.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ($lastSave.Line -notmatch ' level=([2-9]|\d\d)') {
+    Write-Host "FAIL restart: Keeper was still level 1 when saved, no level to check ($($lastSave.Line))" -ForegroundColor Red
     $failed = $true
 } elseif ($lastSave.Matches[0].Groups[4].Value -ne $reloaded.Matches[0].Groups[2].Value) {
     Write-Host "FAIL restart: Keeper came back different. Saved: $($lastSave.Matches[0].Groups[2].Value) fp=$($lastSave.Matches[0].Groups[4].Value); loaded: $($reloaded.Line)" -ForegroundColor Red

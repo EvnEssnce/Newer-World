@@ -200,8 +200,15 @@ func is_tier_open(allocated: PackedStringArray, branch: String, tier: int) -> bo
 			and spent_in_branch(allocated, branch, tier) >= tier_requirements[tier - 1])
 
 
-## "" if the allocation follows the rules, else why not.
-func validate(allocated: PackedStringArray) -> String:
+## The points an allocation may spend under a limit from the character's
+## levels (CharacterBuild.point_limit; < 0 = no limit): never over `points`.
+func budget(limit: int = -1) -> int:
+	return points if limit < 0 else mini(points, limit)
+
+
+## "" if the allocation follows the rules, else why not. `limit`: the points
+## the character's levels give (< 0 = only the tree's own `points`).
+func validate(allocated: PackedStringArray, limit: int = -1) -> String:
 	if allocated.size() > MAX_NODES:
 		return "Too many nodes."
 	var seen := {}
@@ -220,24 +227,25 @@ func validate(allocated: PackedStringArray) -> String:
 		var missing := missing_requirements(allocated, id)
 		if not missing.is_empty():
 			return "%s requires %s." % [n.display_name, display_names(missing)]
-	if spent(allocated) > points:
-		return "Not enough points (%d of %d)." % [spent(allocated), points]
+	if spent(allocated) > budget(limit):
+		return "Not enough points (%d of %d)." % [spent(allocated), budget(limit)]
 	return ""
 
 
-func can_add(allocated: PackedStringArray, id: String) -> bool:
+func can_add(allocated: PackedStringArray, id: String, limit: int = -1) -> bool:
 	if id in allocated:
 		return false
 	var with := allocated.duplicate()
 	with.append(id)
-	return validate(with) == ""
+	return validate(with, limit) == ""
 
 
 ## The largest valid part of an allocation, keeping lower tiers first (in their
 ## listed order): e.g. after removing a node, drops whatever needed it (by tier
 ## gate or `requires`). Within a tier it goes round again until nothing more
 ## fits, so a node listed before a same-tier node it requires is kept too.
-func prune(allocated: PackedStringArray) -> PackedStringArray:
+## With a `limit` (points from levels) it also stops at that budget.
+func prune(allocated: PackedStringArray, limit: int = -1) -> PackedStringArray:
 	var kept := PackedStringArray()
 	for tier in range(1, tier_count() + 1):
 		var added := true
@@ -249,10 +257,36 @@ func prune(allocated: PackedStringArray) -> PackedStringArray:
 					continue
 				var with := kept.duplicate()
 				with.append(id)
-				if validate(with) == "":
+				if validate(with, limit) == "":
 					kept = with
 					added = true
 	return kept
+
+
+## An allocation and its slots cut down to `limit` points (a respec forced by
+## the character's levels: a save from a higher level or with full test
+## points, or a new character's default build). Unchanged if it already fits.
+## Nodes of slotted abilities go first within each tier, then the rest in
+## listed order; slots whose ability is no longer learned are emptied.
+## Returns [nodes, slots].
+func fit(allocated: PackedStringArray, slots: PackedStringArray, limit: int) -> Array[PackedStringArray]:
+	if validate(allocated, limit) == "":
+		return [allocated, slots]
+	var order := PackedStringArray()
+	for id in allocated:
+		var n := get_node(id)
+		if n and n.kind == KIND_ACTIVE and n.ability in slots:
+			order.append(id)
+	for id in allocated:
+		if not (id in order):
+			order.append(id)
+	var kept := prune(order, limit)
+	var unlocked := unlocked_abilities(kept)
+	var kept_slots := slots.duplicate()
+	for i in kept_slots.size():
+		if not (kept_slots[i] in unlocked):
+			kept_slots[i] = ""
+	return [kept, kept_slots]
 
 
 ## Removes a node and anything that needed it.

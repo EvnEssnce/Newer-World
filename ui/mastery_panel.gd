@@ -163,7 +163,14 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
-	row.add_child(_label("Points: %d / %d" % [tree.spent(nodes), tree.points], Color.WHITE))
+	var budget := tree.budget(_current_limit())
+	var points := _label("Points: %d / %d" % [tree.spent(nodes), budget], Color.WHITE)
+	if budget < tree.points:
+		points.text += " (of %d)" % tree.points
+		points.tooltip_text = "Your %s gives %d of this tree's %d points; levelling up gives more." % [
+				"character level" if _weapon_id == WINGS else "mastery level", budget, tree.points]
+		points.mouse_filter = Control.MOUSE_FILTER_STOP
+	row.add_child(points)
 	var reset := Button.new()
 	reset.text = "Unlearn all"
 	var empty_slots := PackedStringArray()
@@ -172,7 +179,9 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 	row.add_child(reset)
 	var defaults := Button.new()
 	defaults.text = "Default"
-	defaults.pressed.connect(_send.bind(tree.default_nodes, tree.default_slots))
+	# As much of the default as the points allow (MasteryTree.fit).
+	var fitted := tree.fit(tree.default_nodes, tree.default_slots, _current_limit())
+	defaults.pressed.connect(_send.bind(fitted[0], fitted[1]))
 	row.add_child(defaults)
 	return row
 
@@ -298,7 +307,7 @@ func _node_card(tree: MasteryTree, n: MasteryTree.MasteryNode, nodes: PackedStri
 		if not lost.is_empty():
 			button.tooltip_text += "\nUnlearning it also unlearns %s." % tree.display_names(lost)
 	else:
-		button.disabled = not tree.can_add(nodes, n.id)
+		button.disabled = not tree.can_add(nodes, n.id, _current_limit())
 		button.pressed.connect(_send_learn.bind(n.id))
 	card.add_child(button)
 	if not n.requires.is_empty():
@@ -404,6 +413,12 @@ func _current_nodes() -> PackedStringArray:
 func _current_slots() -> PackedStringArray:
 	var build := _builds.local_build
 	return build.wing_slots if _weapon_id == WINGS else build.get_slots(_weapon_id)
+
+
+## The points the character's levels give the shown tree (< 0 = its full budget).
+func _current_limit() -> int:
+	var build := _builds.local_build
+	return build.wing_point_limit if _weapon_id == WINGS else build.point_limit(_weapon_id)
 
 
 func _slot_keys() -> Array:

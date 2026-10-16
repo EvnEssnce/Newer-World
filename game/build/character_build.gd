@@ -22,6 +22,12 @@ var slots: Dictionary = {}
 var wing_tree: MasteryTree
 var wing_nodes := PackedStringArray()
 var wing_slots := PackedStringArray(["", ""])
+## Points the character's levels give each tree (CharacterBuild.set_point_limits):
+## weapon id -> points (missing = the tree's full budget), and the Wing tree's
+## (< 0 = its full budget). Never saved: the server sets them from Progression
+## on join and on every level-up; clients get them with the build.
+var point_limits: Dictionary[String, int] = {}
+var wing_point_limit := -1
 
 
 ## A new character's build: the class's default loadout and each tree's
@@ -91,13 +97,49 @@ func set_mastery(weapon_id: String, nodes: PackedStringArray, new_slots: PackedS
 	var tree: MasteryTree = trees.get(weapon_id)
 	if tree == null:
 		return "%s has no mastery tree." % weapon_id
-	var error := tree.validate(nodes)
+	var error := tree.validate(nodes, point_limit(weapon_id))
 	if error.is_empty():
 		error = tree.validate_slots(nodes, new_slots)
 	if error.is_empty():
 		allocated[weapon_id] = nodes.duplicate()
 		slots[weapon_id] = new_slots.duplicate()
 	return error
+
+
+## The points a weapon's tree may spend for this character (< 0 = the tree's
+## full budget).
+func point_limit(weapon_id: String) -> int:
+	return point_limits.get(weapon_id, -1)
+
+
+## Sets the points the levels give (weapon id -> points, the Wing tree's; an
+## empty dict and -1 = full budgets) and cuts every tree that now spends more
+## down to them (MasteryTree.fit: a free respec, slotted abilities kept first).
+## Returns a line per tree that was cut ("spear: 9 -> 3 points"), for the log.
+func set_point_limits(limits: Dictionary[String, int], wing_limit: int) -> PackedStringArray:
+	point_limits = limits.duplicate()
+	wing_point_limit = wing_limit
+	var cut := PackedStringArray()
+	for weapon_id: String in trees:
+		var tree: MasteryTree = trees[weapon_id]
+		var nodes := get_allocated(weapon_id)
+		if tree.validate(nodes, point_limit(weapon_id)) == "":
+			continue
+		var fitted := tree.fit(nodes, get_slots(weapon_id), point_limit(weapon_id))
+		cut.append("%s: %d -> %d points" % [weapon_id, tree.spent(nodes), tree.spent(fitted[0])])
+		allocated[weapon_id] = fitted[0]
+		slots[weapon_id] = fitted[1]
+	if wing_tree and wing_tree.validate(wing_nodes, wing_point_limit) != "":
+		var fitted := wing_tree.fit(wing_nodes, wing_slots, wing_point_limit)
+		cut.append("wings: %d -> %d points" % [wing_tree.spent(wing_nodes), wing_tree.spent(fitted[0])])
+		wing_nodes = fitted[0]
+		wing_slots = fitted[1]
+	return cut
+
+
+## The limits as sent to the owner with the build (to_dict(true)).
+func _limits_dict() -> Dictionary:
+	return {"weapons": point_limits, "wings": wing_point_limit}
 
 
 func get_allocated(weapon_id: String) -> PackedStringArray:
@@ -262,7 +304,7 @@ func wing_set_id() -> String:
 func set_wing_mastery(nodes: PackedStringArray, new_slots: PackedStringArray) -> String:
 	if wing_tree == null:
 		return "A %s has no Wing tree." % class_def.display_name
-	var error := wing_tree.validate(nodes)
+	var error := wing_tree.validate(nodes, wing_point_limit)
 	if error.is_empty():
 		error = wing_tree.validate_slots(nodes, new_slots)
 	if error.is_empty():
@@ -299,9 +341,14 @@ func wing_effect(effect: String) -> MasteryTree.MasteryNode:
 
 # --- Network ---
 
-func to_dict() -> Dictionary:
-	return {"class": class_def.id, "weapons": weapons, "allocated": allocated, "slots": slots,
+## with_limits: also the point limits (the owner's copy; saves leave them out,
+## they come from the levels).
+func to_dict(with_limits := false) -> Dictionary:
+	var data := {"class": class_def.id, "weapons": weapons, "allocated": allocated, "slots": slots,
 			"wing_nodes": wing_nodes, "wing_slots": wing_slots}
+	if with_limits:
+		data["limits"] = _limits_dict()
+	return data
 
 
 ## Puts a saved build (to_dict of the same class) on this one, through the same
@@ -356,4 +403,9 @@ static func from_dict(data: Dictionary) -> CharacterBuild:
 		b.slots[weapon_id] = PackedStringArray(data_slots[weapon_id])
 	b.wing_nodes = PackedStringArray(data.get("wing_nodes", b.wing_nodes))
 	b.wing_slots = PackedStringArray(data.get("wing_slots", b.wing_slots))
+	var limits: Dictionary = data.get("limits", {})
+	var weapon_limits: Dictionary = limits.get("weapons", {})
+	for weapon_id: String in weapon_limits:
+		b.point_limits[weapon_id] = int(weapon_limits[weapon_id])
+	b.wing_point_limit = int(limits.get("wings", -1))
 	return b

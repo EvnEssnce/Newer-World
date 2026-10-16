@@ -124,8 +124,8 @@ game/
   progression/progression_defs.gd, progression.gd  Character level and per-weapon mastery
                              level (data/progression.cfg: caps, XP curves, tree points per
                              level) and one character's levels/XP. Pure, unit tested.
-                             progression_system.gd: World/Progression (server holds each
-                             player's, saved with the character; no XP granted yet).
+                             progression_system.gd: World/Progression (XP from kills and
+                             gathers, owner updates and feed lines; see "Progression").
   crafting/craft_progress.gd The Forge panel's progress maths, cancel rules, XP line text. Pure.
   crafting/recipe_defs.gd    Recipes (data/recipes.cfg) and station kinds (data/stations.cfg);
                              crafting_rules.gd: can-craft checks and an atomic apply (a bag copy
@@ -195,7 +195,8 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      armor, equip time), party, status_effects, projectiles, zones, navigation, gathering
                      (node kinds), tradeskills (skills, XP curve, gathering effects),
                      recipes (refining/crafting recipes), stations (station kinds),
-                     testing (test-only switches: the in-game class change, tradeskill join_xp),
+                     testing (test-only switches: the in-game class change, tradeskill join_xp,
+                     full tree points),
                      accounts (name/password rules, max characters, hash iterations),
                      saving (periodic and after-change save delays), progression
                      (character/mastery level caps and XP curves, tree points per level) (.cfg).
@@ -360,21 +361,39 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   missing), character `--character=` (default "Bot" + the peer id as letters), made
   with `--class=`. `SUMMARY accounts logins= accounts_created= characters_created=
   plays= refused=` (the smoke test checks every bot made both and played).
+- **Progression** (`World/Progression`, `ProgressionSystem`, both sides; build order 4):
+  server only grants XP. A kill (`World._damage_enemy` → `on_enemy_killed`) gives every
+  player in `Enemy.damaged_by` the enemy file's `[progression] kill_xp`, and its
+  `mastery_xp` split by damage per weapon (`damaged_by[peer]` = weapon id → damage;
+  `World._credited_weapon`: the weapon out when it landed, "" during a Wing ability;
+  `Progression.mastery_split`); a gather (`gathered`) gives `[sources] gather_xp`.
+  `grant` → server → owner `_receive_progress(dict)`, `_receive_xp(xp, mastery)` ("+50 XP
+  +40 Spear" feed line), `_receive_level_up(weapon_id, from, to)` ("" = character);
+  `save_changed`; `points_changed` → `BuildService.on_points_changed`. Clients: `local`,
+  the HUD's XP bar (`Hud.setup_progression`). **Tree points from levels:**
+  `BuildService.set_points` (join, after restoring the save; class change; level-up)
+  puts `Progression.weapon_points`/`wing_points` into `CharacterBuild.set_point_limits`,
+  which cuts trees over them (`MasteryTree.fit`, logged); `validate`/`can_add`/`prune`
+  take the limit; the limits reach the owner in `_receive_build` (`to_dict(true)`), not
+  saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
+  `SUMMARY progression ... kills_credited= gathers= xp_granted= mastery_xp_granted=
+  level_ups= mastery_level_ups= xp_lines=`.
 - **Saving** (`World/Saves`, `SaveService`, server only, no RPCs; build order 3.3):
   `World._client_ready` loads the chosen character (`load_character`: Persistence +
   `drop_unknown_items`, logged) and rebuilds it through the normal paths:
-  `BuildService.setup_player(player, class, save)` (class default + `restore_build`;
-  refused parts logged, `SUMMARY saves refused_parts=`), `LootSystem.add_player(peer,
-  save)` (bag capacity from data/; saved gear the class can't wear or weapon items off
-  the loadout go back to the bag, past capacity if need be), full health with the gear,
-  `TradeskillSystem.add_player(peer, save)`, `ProgressionSystem.add_player(peer, save)`
-  (`CharacterSave.progression`, schema 2's `progression` column; levels clamped to the
-  current caps); then `track`. Writes go through
+  `ProgressionSystem.add_player(peer, save)` first (`CharacterSave.progression`, schema
+  2's `progression` column; levels clamped to the current caps; its levels give the
+  tree points), `BuildService.setup_player(player, class, save)` (class default +
+  `restore_build`, then `set_points`; refused parts logged, `SUMMARY saves
+  refused_parts=`), `LootSystem.add_player(peer, save)` (bag capacity from data/; saved
+  gear the class can't wear or weapon items off the loadout go back to the bag, past
+  capacity if need be), full health with the gear, `TradeskillSystem.add_player(peer,
+  save)`; then `track`. Writes go through
   `Persistence.save_characters` (one transaction) on the main thread, from
   `CharacterSave.capture` of the live objects: everyone every `[save] interval` s
   (data/saving.cfg), a character `after_change` s after its first unsaved change (the
   `save_changed(peer)` signals: `BuildService.send_build` without an error, every
-  `LootSystem._send_inventory`, every tradeskill XP gain; `SaveSchedule` holds the
+  `LootSystem._send_inventory`, every tradeskill or progression XP gain; `SaveSchedule` holds the
   rules), on disconnect (`Net.peer_leaving`, emitted just before `peer_left` so every
   system still has the peer's data) and at shutdown (`Main._save_before_quitting`:
   `--quit-after` or closing the window; a killed process loses at most `interval`).

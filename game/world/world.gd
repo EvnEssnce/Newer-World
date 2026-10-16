@@ -348,6 +348,11 @@ func _ready() -> void:
 	progression = ProgressionSystem.new()
 	progression.name = "Progression"
 	add_child(progression)
+	# Kills (World._damage_enemy) and gathers give XP; level-ups raise the tree
+	# points World/Builds allows (server).
+	gathering.gathered.connect(progression.on_gathered)
+	_builds.progression = progression
+	progression.points_changed.connect(_builds.on_points_changed)
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
@@ -372,6 +377,7 @@ func _ready() -> void:
 		_hud = HUD_SCENE.instantiate()
 		add_child(_hud)
 		_hud.setup_equipment(loot)
+		_hud.setup_progression(progression)
 		_mastery_panel = MasteryPanel.new()
 		_hud.add_child(_mastery_panel)
 		_mastery_panel.setup(_builds)
@@ -580,6 +586,7 @@ func _client_ready() -> void:
 	# The character's save (build, bag, gear, tradeskills) through the normal
 	# rules; a new character's is its class default. Null without a database.
 	var save: CharacterSave = saves.load_character(character["id"]) if saves else null
+	progression.add_player(peer_id, save)  # before the build: its levels give the tree points
 	var refused := _builds.setup_player(player, class_id, save)
 	if save and not refused.is_empty():
 		saves.note_refused(save, refused)
@@ -588,7 +595,6 @@ func _client_ready() -> void:
 	loot.add_player(peer_id, save)
 	player.health = player.max_health()  # saved gear can raise it
 	tradeskills.add_player(peer_id, save)
-	progression.add_player(peer_id, save)
 	gathering.add_player(peer_id)
 	if saves:
 		saves.track(peer_id, save)
@@ -2124,13 +2130,24 @@ func _kill_player(target: Player) -> void:
 ## alive_result, or HIT_DEFEATED if it died. Returns true if it died.
 func _damage_enemy(enemy: Enemy, damage: float, stagger_ticks: int, attacker_id: int,
 		alive_result: int) -> bool:
-	var killed := enemy.take_hit(damage, stagger_ticks, attacker_id)
+	var killed := enemy.take_hit(damage, stagger_ticks, attacker_id, _credited_weapon(attacker_id))
 	if killed:
 		enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
 		_enemy_kills += 1
 		loot.on_enemy_killed(enemy)
+		progression.on_enemy_killed(enemy)
 	_send_hit(attacker_id, enemy.enemy_id, damage, HIT_DEFEATED if killed else alive_result)
 	return killed
+
+
+## The weapon a player's damage counts for (weapon mastery XP): the one out,
+## or "" during a Wing ability or for a non-player. Damage over time and
+## projectiles count for the weapon out when they land.
+func _credited_weapon(attacker_id: int) -> String:
+	var attacker := _player_by_id(attacker_id)
+	if attacker == null or attacker.state.is_using_wing():
+		return ""
+	return attacker.state.weapon_id()
 
 
 ## Server: if the target is in a parry window (Riposte) and the attacker is in
@@ -2572,6 +2589,7 @@ func _add_save_service() -> void:
 	_builds.save_changed.connect(saves.mark_changed)
 	loot.save_changed.connect(saves.mark_changed)
 	tradeskills.save_changed.connect(saves.mark_changed)
+	progression.save_changed.connect(saves.mark_changed)
 
 
 ## Server: writes everyone online to the database now (Main, at shutdown).
@@ -3557,6 +3575,7 @@ func print_summary() -> void:
 	_projectiles.print_client_summary()
 	loot.print_client_summary()
 	tradeskills.print_client_summary()
+	progression.print_client_summary()
 	gathering.print_client_summary()
 	crafting.print_client_summary()
 	if _local_player:

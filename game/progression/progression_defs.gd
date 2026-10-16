@@ -37,10 +37,14 @@ static var _current_version := -1
 
 var character := LevelCurve.new()
 var mastery := LevelCurve.new()
-## Wing tree points per character level after the first.
+## Wing tree points at character level 1, and per level after the first.
+var wing_start_points := 0
 var wing_points_per_level := 1
-## A weapon tree's points per mastery level after the first.
+## A weapon tree's points at mastery level 1, and per mastery level after the first.
+var mastery_start_points := 0
 var mastery_points_per_level := 1
+## Character XP for each gather (any node kind).
+var gather_xp := 0
 
 
 ## The game's rules, loaded once (again when Tuning.version moves).
@@ -60,7 +64,10 @@ static func from_tuning() -> ProgressionDefs:
 			Tuning.get_value("progression", "weapon_mastery", "xp_base"),
 			Tuning.get_value("progression", "weapon_mastery", "xp_exponent"))
 	defs.wing_points_per_level = Tuning.get_value("progression", "character", "wing_points_per_level")
+	defs.wing_start_points = Tuning.get_value("progression", "character", "wing_start_points")
 	defs.mastery_points_per_level = Tuning.get_value("progression", "weapon_mastery", "points_per_level")
+	defs.mastery_start_points = Tuning.get_value("progression", "weapon_mastery", "start_points")
+	defs.gather_xp = Tuning.get_value("progression", "sources", "gather_xp")
 	for problem in defs.validate():
 		push_error("progression.cfg: " + problem)
 	return defs
@@ -68,12 +75,12 @@ static func from_tuning() -> ProgressionDefs:
 
 ## Wing tree points at a character level.
 func wing_points(character_level: int) -> int:
-	return maxi(0, character_level - 1) * wing_points_per_level
+	return wing_start_points + maxi(0, character_level - 1) * wing_points_per_level
 
 
 ## A weapon tree's points at a mastery level.
 func mastery_points(mastery_level: int) -> int:
-	return maxi(0, mastery_level - 1) * mastery_points_per_level
+	return mastery_start_points + maxi(0, mastery_level - 1) * mastery_points_per_level
 
 
 ## What's wrong with the rules ([] if nothing).
@@ -85,6 +92,8 @@ func validate() -> PackedStringArray:
 			problems.append("[%s] level_cap must be at least 1" % entry[0])
 		if curve.xp_base <= 0.0 or curve.xp_exponent < 0.0:
 			problems.append("[%s] xp_base must be above 0 and xp_exponent at least 0" % entry[0])
-	if wing_points_per_level < 0 or mastery_points_per_level < 0:
-		problems.append("points per level can't be negative")
+	if mini(mini(wing_points_per_level, mastery_points_per_level), mini(wing_start_points, mastery_start_points)) < 0:
+		problems.append("points can't be negative")
+	if gather_xp < 0:
+		problems.append("[sources] gather_xp can't be negative")
 	return problems

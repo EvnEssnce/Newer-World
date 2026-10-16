@@ -121,3 +121,29 @@ func test_validate() -> void:
 	defs.mastery.xp_base = 0.0
 	defs.wing_points_per_level = -1
 	assert_eq(defs.validate().size(), 3)
+
+
+func test_start_points_come_on_top() -> void:
+	defs.wing_start_points = 2
+	defs.mastery_start_points = 3
+	assert_eq(levels.wing_points(), 2)
+	assert_eq(levels.weapon_points("spear"), 3)
+	levels.add_mastery_xp("spear", 50)
+	assert_eq(levels.weapon_points("spear"), 5, "3 + 2 for level 2")
+
+
+func test_mastery_xp_is_split_by_damage() -> void:
+	assert_eq(Progression.mastery_split({"spear": 300.0, "sword": 100.0}, 40),
+			{"spear": 30, "sword": 10} as Dictionary[String, int])
+	assert_eq(Progression.mastery_split({"spear": 100.0, "": 100.0}, 40),
+			{"spear": 20} as Dictionary[String, int], "Wing damage counts for no weapon")
+	assert_eq(Progression.mastery_split({"spear": 999.0, "sword": 1.0}, 40),
+			{"spear": 40} as Dictionary[String, int], "a share that rounds to 0 is left out")
+	assert_eq(Progression.mastery_split({}, 40), {} as Dictionary[String, int])
+	assert_eq(Progression.mastery_split({"spear": 5.0}, 0), {} as Dictionary[String, int])
+
+
+func test_feed_lines() -> void:
+	assert_eq(ProgressionSystem.xp_line(50, {}), "+50 XP")
+	assert_eq(Hud.xp_text(3, 120, 1039), "Level 3   120 / 1039 XP")
+	assert_eq(Hud.xp_text(20, 0, 0), "Level 20 (max)")

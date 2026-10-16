@@ -55,6 +55,10 @@ var threat_decay_factor := 1.0
 var attack: AttackParams
 ## Loot table id (data/loot.cfg [table_<id>]) its killers roll, or "" for none.
 var loot_table := ""
+## Character XP each player who damaged it gets when it dies ([progression]).
+var kill_xp := 0
+## Weapon mastery XP each of them gets, split over the weapons that dealt their damage.
+var mastery_xp := 0
 
 static var _cache: Dictionary[String, EnemyParams] = {}
 static var _cache_version := -1
@@ -107,4 +111,6 @@ static func from_tuning(file: String) -> EnemyParams:
 
 	p.attack = AttackParams.from_tuning(file, "attack", tps)
 	p.loot_table = Tuning.get_optional(file, "loot", "table", "")
+	p.kill_xp = maxi(0, Tuning.get_optional(file, "progression", "kill_xp", 0))
+	p.mastery_xp = maxi(0, Tuning.get_optional(file, "progression", "mastery_xp", 0))
 	return p

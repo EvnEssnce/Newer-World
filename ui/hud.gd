@@ -47,6 +47,12 @@ var _blind_overlay: ColorRect
 var _health_label: Label
 ## Gear score, equip slot symbols and gear stat totals, top right.
 var _equipment_summary: EquipmentSummary
+## Character level and XP: a thin bar along the bottom edge of the screen
+## and a label left of the health bar (setup_progression; World/Progression's local copy).
+var _progression: ProgressionSystem
+var _xp_bar: ProgressBar
+var _xp_label: Label
+const XP_FILL := Color(0.55, 0.8, 0.45)
 ## Magazine readout left of the ability bar (Throwing Knives): pips, a count
 ## and a reload bar.
 var _ammo_box: VBoxContainer
@@ -91,6 +97,56 @@ func setup_equipment(loot: LootSystem) -> void:
 	_equipment_summary = EquipmentSummary.new()
 	add_child(_equipment_summary)
 	_equipment_summary.setup(loot)
+
+
+## The XP bar (client), filled from World/Progression's local copy each frame.
+func setup_progression(progression: ProgressionSystem) -> void:
+	_progression = progression
+	_xp_bar = ProgressBar.new()
+	_xp_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_xp_bar.offset_top = -4.0
+	_xp_bar.offset_bottom = 0.0
+	_xp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_xp_bar.show_percentage = false
+	_xp_bar.max_value = 1.0
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color(0.0, 0.0, 0.0, 0.5)
+	_xp_bar.add_theme_stylebox_override("background", background)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = XP_FILL
+	_xp_bar.add_theme_stylebox_override("fill", fill)
+	add_child(_xp_bar)
+	_xp_label = Label.new()
+	_xp_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_xp_label.offset_left = -520.0
+	_xp_label.offset_right = -160.0
+	_xp_label.offset_top = -88.0
+	_xp_label.offset_bottom = -68.0
+	_xp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_xp_label.add_theme_font_size_override("font_size", 14)
+	_xp_label.add_theme_color_override("font_color", XP_FILL.lightened(0.3))
+	_xp_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_xp_label.add_theme_constant_override("outline_size", 4)
+	_xp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	add_child(_xp_label)
+
+
+func _process(_delta: float) -> void:
+	if _progression == null or _progression.local == null:
+		return
+	var levels := _progression.local
+	var needed := levels.xp_needed()
+	_xp_bar.value = 1.0 if needed <= 0 else float(levels.xp()) / needed
+	var text := xp_text(levels.level(), levels.xp(), needed)
+	if _xp_label.text != text:
+		_xp_label.text = text
+
+
+## "Level 3   120 / 1039 XP", or "Level 20 (max)" at the cap.
+static func xp_text(level: int, xp: int, needed: int) -> String:
+	if needed <= 0:
+		return "Level %d (max)" % level
+	return "Level %d   %d / %d XP" % [level, xp, needed]
 
 
 func _build_health_label() -> void:
