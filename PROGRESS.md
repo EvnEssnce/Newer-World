@@ -88,9 +88,12 @@ tested and playtested). Each sub-item is roughly one session with one testable g
 1. **Playtest with real people** (developer first, then one session of fixes).
    - **Developer's setup** (`HOSTING.md`): install Tailscale, share the PC with a
      friend. Export templates are installed and `tools\export_client.ps1` works
-     (session 55); the exe hasn't been played as a client yet.
-   - **Play** with `tools\host_playtest.ps1`. Check the session 43 work (§4) and note
-     anything that felt laggy.
+     (session 55).
+   - **First playtest done (session 56):** one friend over Tailscale at ~104 ms ping;
+     not laggy or rough, performed very well. Their correction count wasn't checked.
+   - **Next playtest: 2–3 friends.** Ask each to read "Prediction corrections" in the
+     HUD's debug lines (next to Ping) before quitting; check the rest of the session 43
+     list (§4).
    - **Fix session** for what it finds. Candidates already known: a build check (a
      friend on older code gets odd failures, not a message), projectile lag
      compensation if leading shots feels bad.
@@ -196,11 +199,13 @@ Milestone 3, gathering and crafting (45–48); Milestone 5, persistence (49–51
 
 ### Needs a hand playtest
 
-**Session 43, with a friend over Tailscale (build order item 1):** the export runs on
-their PC and connects; hits land on what you see at their ping (compare with
+**Session 43, with friends over Tailscale (build order item 1):** first run (session
+56, one friend, ~104 ms): the export ran and connected, and play felt smooth, not laggy.
+Still to check at the 2–3 friend playtest: the HUD's correction count stays low for
+each friend; hits land on what you see at their ping (compare with
 `[lag_compensation] enabled=false` in `data/network.cfg`); no visible jerks after
-corrections; the HUD's correction count stays low; a tuning edit on your side reaches
-them after a server restart.
+corrections; a tuning edit on your side reaches them after a server restart; names on
+nameplates and party frames (session 53).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -392,6 +397,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 53 | 2026-10-16 | Two parallel agent sessions, merged clean into main. **Character names:** a server-sent peer → name table (`PlayerNames` in `AccountService`, reliable RPCs on play/leave, never in snapshots) for nameplates, party frames and party notices, "Player N" until a name arrives; `Net.is_peer_connected` shared with PartySystem. **Deterministic smoke checks** (bot-only, the game unchanged): a duel 3 s after launch (guard break, knockback, a Rebirth and a respawn), a training-dummy push after the first craft, a first gather on joining, staggered Forge trips, guard down against Husks until knocked back and a bleed has ticked, heavies wait for reach; branch runs default ×5, `-Party` ×2, Juggernaut, Paladin all passed first time. On merged main: 815 tests; smoke default and `-Party` pass first time, 0 corrections. Nameplates/party frames with friends: check in the playtest |
 | 54 | 2026-10-16 | Progression 4.1 on branch `progression`: `ProgressionDefs`/`Progression` (`game/progression/`, `data/progression.cfg`: character level and per-weapon mastery, caps 20, XP curves, tree points per level), saved with the character (`CharacterSave.progression`, migration 2 adds the `progression` column), `World/Progression` holds them on the server; no XP granted yet. 827 tests (12 new: curves, level-ups, caps, points, clamped saves, a schema-1 database migrating); smoke default and `-Party` pass first time, 0 corrections. Nothing to playtest yet |
 | 55 | 2026-10-16 | Export: templates installed by the developer; `export_client.ps1` now also zips the godot-sqlite DLL (exported beside the exe, left out of the zip before). The exported exe ran as a headless server (database opened, port listening). `build\export\NewerWorld.zip` made for friends |
+| 56 | 2026-10-16 | First playtest with a friend over Tailscale (~104 ms ping): no lag or roughness, performed very well. Corrections on their side not checked; next playtest with 2–3 friends |
 
 ---
 
