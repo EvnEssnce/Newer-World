@@ -52,6 +52,33 @@ const BOT_ABILITY_REACH := 2.5
 ## (meters), and within this fraction of the projectile's reach.
 const BOT_THROW_MIN := 3.0
 const BOT_THROW_REACH := 0.75
+## Bot fight turn: starts its heavy once the target is this close (m), or this
+## far into the turn (s), whichever comes first, so the heavy lands.
+const BOT_HEAVY_REACH := 2.2
+const BOT_HEAVY_BY := 0.7
+## Bot (not --bot-party): a duel from BOT_DUEL_START s after launch (the bots
+## have just joined, at full health, and the Husks are still walking over from
+## their camps): the bots target each other and nothing else. The lower peer
+## id swings for 2 s (heavies, starting once within BOT_HEAVY_REACH or by
+## BOT_DUEL_HEAVY_BY s, again until BOT_DUEL_HEAVY_LAST s if one was
+## interrupted, then lights) while the other only holds its guard toward it,
+## until BOT_DUEL_GUARD_END (long enough for a heavy started that late to land
+## on it). Then the other lowers its guard and the first heavies it whenever
+## it's alive and in reach: it dies, rises (a Rebirth: its first death, with
+## the starting Ember) and dies again (a respawn). The duel is over for the
+## first after two kills, for the other once it has respawned, and for both at
+## BOT_DUEL_END. So a guard hit, a knocked-back player, a Rebirth, a death and
+## a respawn happen in every run (the smoke test's server, force and ember
+## checks). It replaces the first ability phase and circling.
+const BOT_DUEL_START := 3.0
+const BOT_DUEL_GUARD_END := 5.8
+const BOT_DUEL_END := 10.0
+const BOT_DUEL_HEAVY_BY := 1.5
+const BOT_DUEL_HEAVY_LAST := 1.5
+## Bot: after its first Forge trip that crafted, it pushes the training dummy
+## (7 m from the Forge) once: a heavy, or a knockback ability, so an enemy is
+## moved by force in every run. Gives up after this long (s).
+const BOT_DUMMY_TIMEOUT := 6.0
 const ABILITY_BUTTONS := (PlayerState.BUTTON_ABILITY_1 | PlayerState.BUTTON_ABILITY_2
 		| PlayerState.BUTTON_ABILITY_3 | PlayerState.BUTTON_WING_1 | PlayerState.BUTTON_WING_2)
 ## Client: each ability/Wing key's input action and button bit (Q E R, Z C).
@@ -262,6 +289,29 @@ var _bot_first_ability_pressed := false
 ## (a press there would cancel the swing: animation canceling).
 var _bot_held_presses := 0
 var _bot_next_weapon_msec := 0
+## Bot fight turn: when (s, like _bot_input's t) its last heavy hold began, or -1.
+var _bot_heavy_at := -1.0
+## Bot: it has been moved by force / had a status from a Husk's hit since
+## joining (_bot_invites_husk_hit).
+var _bot_seen_forced := false
+var _bot_seen_husk_status := false
+## Bot: a damage-over-time tick (a bleed) has hurt it since joining.
+var _bot_seen_dot := false
+## Bot: it has died and come back by a respawn (not a Rebirth) since joining;
+## dead last tick, and whether that death is a Rebirth.
+var _bot_seen_respawn := false
+var _bot_was_dead := false
+var _bot_death_rebirths := false
+## Bot: other players it has killed (the duel's attacker stops after two).
+var _bot_player_kills := 0
+## Bot: the training dummy push (_bot_dummy_input): 0 = not yet, 1 = under way,
+## 2 = done. When it began (ms), and when its push began (ms, -1 = walking).
+var _bot_dummy_step := 0
+var _bot_dummy_msec := -1
+var _bot_dummy_push_msec := -1
+var _bot_dummy_swapped := false
+## Bot: how long its dummy push holds attack (ms; 0 for a knockback ability).
+var _bot_dummy_hold := 0
 var _verbose := false
 var _log_timer := 0.0
 var _last_screenshot_slot := -1
@@ -2690,8 +2740,12 @@ func held_aimed_attack() -> AttackParams:
 ## 0–4 s: fight. The target is the nearest living enemy within BOT_ENEMY_RANGE,
 ## or else the nearest other player. The fight has two 2 s turns; the bot with
 ## the lower peer id (compared with the nearest other player) attacks in the
-## first, the other in the second. On its turn a bot holds for a heavy, then taps
-## two lights; off its turn it holds block.
+## first, the other in the second. On its turn a bot holds for a heavy once
+## within reach (_bot_attack_turn), then taps two lights; off its turn it holds
+## block, except against a Husk until a Husk's hit has landed on it
+## (_bot_invites_husk_hit). From 3 s after launch the bots duel instead
+## (BOT_DUEL_START): they target each other, the first heavies into the
+## other's guard, then kills it twice (a Rebirth, then a respawn).
 ## 4–6 s: abilities, same target. Both bots hold block and each presses two
 ## different ability slots, about 1 s apart: the first bot at 4.0 and 5.0, the
 ## other at 4.5 and 5.5 (each first press waits up to 0.3 s for the target to
@@ -2710,12 +2764,16 @@ func held_aimed_attack() -> AttackParams:
 ## (BuildService.bot_weapons_for_cycle); X swaps to the other one for the
 ## circling, and the 7.6 request puts the next focus out.
 ## Fighting comes first because players spawn close together.
+## Errands that skip all of this: the first gather right after joining
+## (GatheringSystem.bot_first_move), Forge trips (CraftingSystem.bot_trip; the
+## second bot's a cycle after the first's) and the training dummy
+## push after the first craft (_bot_dummy_input).
 ## Returns [move, buttons, aim_yaw].
 func _bot_input() -> Array:
 	var t := Time.get_ticks_msec() / 1000.0
 	var phase := bot_phase()
 	var cycle := floori(t / 8.0)
-	if phase < 3.5:
+	if phase < 3.5 and _bot_dummy_step != 1:  # (the dummy push may swap)
 		_bot_sync_weapons(cycle)
 	var crossed := func(at: float) -> bool: return _bot_last_phase < at and phase >= at
 	var move := Vector2.ZERO
@@ -2723,12 +2781,30 @@ func _bot_input() -> Array:
 	var aim_yaw := 0.0
 	if phase < 4.0:
 		_bot_first_ability_pressed = false
+	_bot_note_husk_hits()
+	var other_player := _nearest_remote_player()
+	var first_turn := other_player == null or multiplayer.get_unique_id() < other_player.peer_id
+	var party := LaunchArgs.has_flag("bot-party")
+	var duel := (not party and t >= BOT_DUEL_START and t < BOT_DUEL_END and other_player != null
+			and (_bot_player_kills < 2 if first_turn else not _bot_seen_respawn))
+	# Forge trips (they start as a circling does) from cycle 1, the second bot's
+	# a cycle after the first's, so both never miss the same fight (nor the
+	# first fights, which the Husk kills for the loot checks need).
+	crafting.bot_first_trip_cycle = 1 if first_turn else 2
+	# Pushing the training dummy after the first craft (presses only that).
+	var dummy: Variant = _bot_dummy_input()
+	if dummy != null:
+		_bot_last_phase = phase
+		return dummy
 	# A trip to the Forge (it has materials; starts as the circling does, may run
 	# into the next fight phase): walks there, crafts with the panel open,
 	# presses nothing meanwhile (CraftingSystem.bot_trip).
 	var trip: Variant = null if gathering.bot_busy(_local_player) \
 			else crafting.bot_trip(_local_player, phase, cycle)
-	if phase >= 6.0:
+	# Else the run's first gather, right after joining (not during the duel).
+	if trip == null and not duel:
+		trip = gathering.bot_first_move(_local_player)
+	if phase >= 6.0 and not duel:
 		var circle_t := t + float(multiplayer.get_unique_id() % 100)
 		move = Vector2(cos(circle_t * 0.8), sin(circle_t * 0.8))
 		# Else gathers a node nearby (walks to it, stands while gathering).
@@ -2745,15 +2821,8 @@ func _bot_input() -> Array:
 			buttons |= PlayerState.BUTTON_JUMP
 		if crossed.call(7.4) or crossed.call(7.95):
 			buttons |= PlayerState.BUTTON_DODGE
-		if crossed.call(7.6):
-			var next := _builds.bot_weapons_for_cycle(cycle + 1)
-			if not next.is_empty():
-				_builds.bot_respec(next[0], cycle)
-				_builds.bot_request_weapons(next, _local_player.state.equipped)
-			_builds.bot_respec_wings(cycle + 1)
 	else:
-		var other_player := _nearest_remote_player()
-		var target: Node3D = _nearest_enemy(BOT_ENEMY_RANGE)
+		var target: Node3D = other_player if duel else _nearest_enemy(BOT_ENEMY_RANGE)
 		if target == null:
 			target = other_player
 		if target:
@@ -2767,10 +2836,24 @@ func _bot_input() -> Array:
 					maxf(flat.length(), aim.melee_min_reach))
 			if flat.length() > BOT_ATTACK_DISTANCE:
 				move = flat.normalized()
-			var first_turn := other_player == null or multiplayer.get_unique_id() < other_player.peer_id
 			var turn_start := 0.0 if first_turn else 2.0
 			var turn_time := phase - turn_start
-			if phase >= 4.0:
+			# Guard down against a Husk until one's hit has landed (see
+			# _bot_invites_husk_hit), from the duel on (not during it).
+			var inviting := (not duel and (party or t >= BOT_DUEL_START) and target is Enemy
+					and _bot_invites_husk_hit(target))
+			if duel:
+				# The lower peer id swings for 2 s, the other only guards; then
+				# the other lowers its guard and the first heavies it.
+				var duel_time := t - BOT_DUEL_START
+				if first_turn and duel_time < 2.0:
+					buttons |= _bot_attack_turn(t, duel_time, flat.length(), true,
+							crossed.call(BOT_DUEL_START + 1.35) or crossed.call(BOT_DUEL_START + 1.75))
+				elif t < BOT_DUEL_GUARD_END:
+					buttons |= PlayerState.BUTTON_BLOCK
+				elif first_turn:
+					buttons |= _bot_execute_input(t, flat.length(), not other_player.state.dead)
+			elif phase >= 4.0:
 				# Abilities: guard up between them (an ability drops it, holding block
 				# brings it back), alternating with the other bot every 0.5 s. The
 				# first waits up to 0.3 s for the target to be within reach.
@@ -2785,17 +2868,26 @@ func _bot_input() -> Array:
 			elif turn_time < 0.0 or turn_time >= 2.0:
 				# Guard up for the whole off turn: other players are drawn ~0.1 s in
 				# the past, too late to react to a light attack's windup.
-				buttons |= PlayerState.BUTTON_BLOCK
-			elif turn_time < 0.3:
-				buttons |= PlayerState.BUTTON_ATTACK  # held 0.3 s: heavy
-			elif crossed.call(turn_start + 1.35) or crossed.call(turn_start + 1.75):
-				buttons |= PlayerState.BUTTON_ATTACK  # one tick: light on release
-			if phase >= 4.0 or (turn_time >= 0.0 and turn_time < 2.0):
-				# Not on the off turn: that guard stays up.
-				buttons |= _bot_self_buff_input(flat.length(), t, cycle)
-			buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length())
-			if (buttons & ABILITY_BUTTONS) == 0:
-				buttons |= _bot_projectile_button(flat.length())
+				if not inviting:
+					buttons |= PlayerState.BUTTON_BLOCK
+			else:
+				buttons |= _bot_attack_turn(t, turn_time, flat.length(), false,
+						crossed.call(turn_start + 1.35) or crossed.call(turn_start + 1.75))
+			# The duel is only heavies, lights and a guard.
+			if not duel:
+				if phase >= 4.0 or (turn_time >= 0.0 and turn_time < 2.0):
+					# Not on the off turn: that guard stays up.
+					buttons |= _bot_self_buff_input(flat.length(), t, cycle)
+				buttons |= _bot_wing_input(cycle, phase, turn_time, flat.length(), inviting)
+				if (buttons & ABILITY_BUTTONS) == 0:
+					buttons |= _bot_projectile_button(flat.length())
+	# (Also after a duel that took the circling.)
+	if crossed.call(7.6):
+		var next := _builds.bot_weapons_for_cycle(cycle + 1)
+		if not next.is_empty():
+			_builds.bot_respec(next[0], cycle)
+			_builds.bot_request_weapons(next, _local_player.state.equipped)
+		_builds.bot_respec_wings(cycle + 1)
 	if trip != null:
 		move = trip
 		buttons = 0  # a jump or dodge at the station would cancel the craft
@@ -2812,6 +2904,150 @@ func _bot_input() -> Array:
 		_bot_held_presses = 0
 	_bot_last_phase = phase
 	return [move, buttons, aim_yaw]
+
+
+## Bot, on its fight turn: holds attack 0.3 s for a heavy once the target is
+## within BOT_HEAVY_REACH (or BOT_HEAVY_BY s into the turn), so the heavy lands
+## rather than whiffing on the way; then taps lights when `light` (1.35 and
+## 1.75 s into the turn). In the duel (BOT_DUEL_START) it waits longer for
+## reach, and starts another heavy if the first was interrupted (a Husk's
+## stagger) while there's still time for it to land on the guard. Returns the
+## buttons.
+func _bot_attack_turn(t: float, turn_time: float, distance: float, duel: bool,
+		light: bool) -> int:
+	var started := _bot_heavy_at >= t - turn_time  # this turn
+	var again := (duel and started and t - _bot_heavy_at >= 0.5
+			and turn_time < BOT_DUEL_HEAVY_LAST and not _local_player.state.is_attacking())
+	var heavy_by := BOT_DUEL_HEAVY_BY if duel else BOT_HEAVY_BY
+	if (not started and (distance <= BOT_HEAVY_REACH or turn_time >= heavy_by)) or again:
+		_bot_heavy_at = t
+		started = true
+	if not started:
+		return 0
+	if t - _bot_heavy_at < 0.3:
+		return PlayerState.BUTTON_ATTACK  # held 0.3 s: heavy
+	return PlayerState.BUTTON_ATTACK if light else 0  # one tick: light on release
+
+
+## Bot, the duel's attacker once the other's guard is down: holds attack 0.3 s
+## for a heavy whenever the other is alive, within BOT_HEAVY_REACH and it isn't
+## attacking already. Returns the buttons.
+func _bot_execute_input(t: float, distance: float, alive: bool) -> int:
+	if t - _bot_heavy_at < 0.3:
+		return PlayerState.BUTTON_ATTACK
+	if (alive and distance <= BOT_HEAVY_REACH and t - _bot_heavy_at >= 0.5
+			and not _local_player.state.is_attacking()):
+		_bot_heavy_at = t
+		return PlayerState.BUTTON_ATTACK
+	return 0
+
+
+## Bot, every tick: notes when it has been moved by force, when it carries
+## the status a Husk's swing applies (for a damage-over-time one, the smoke
+## test's bleed: when a tick has hurt it), whatever gave it (a duel guard
+## break, the other bot's Bloodlust count as well), and
+## when it has come back from a death by a respawn rather than a Rebirth.
+func _bot_note_husk_hits() -> void:
+	var state := _local_player.state
+	if state.dead:
+		if not _bot_was_dead:
+			_bot_death_rebirths = false
+		if state.rebirth_left > 0:
+			_bot_death_rebirths = true
+	elif _bot_was_dead and not _bot_death_rebirths:
+		_bot_seen_respawn = true
+	_bot_was_dead = state.dead
+	if state.force.is_active():
+		_bot_seen_forced = true
+	var husk := EnemyParams.for_kind("husk")
+	if husk and not husk.attack.applies_status.is_empty():
+		var defs := _local_player.params.statuses
+		var index := defs.index_of(husk.attack.applies_status)
+		# A damage-over-time status (the bleed) counts once a tick has hurt it:
+		# a death right after the hit (a second Husk) cuts it short.
+		var dot := defs.get_def(index).damage_per_interval > 0.0
+		if _bot_seen_dot if dot else state.statuses.has(index):
+			_bot_seen_husk_status = true
+
+
+## Bot: true until an enemy's hit has moved it by force (if that enemy's swing
+## pushes) and given it the swing's status (if it applies one). Until then the
+## bot keeps its guard down against that enemy on its off turn (and skips
+## guard Wings), so an unguarded Husk hit (forced movement and a status on a
+## predicted player, then a bleed tick in the smoke test) happens in every run,
+## party or not. Then it blocks as before.
+func _bot_invites_husk_hit(enemy: Enemy) -> bool:
+	var attack := enemy.params.attack
+	return ((attack.force != null and not _bot_seen_forced)
+			or (not attack.applies_status.is_empty() and not _bot_seen_husk_status))
+
+
+## Bot: after its first Forge trip that crafted, pushes the training dummy
+## once (it stands 7 m from the Forge; bots otherwise ignore it): walks to it,
+## then a heavy if the weapon out's heavy pushes, else a ready knockback
+## ability, else swaps once to the other weapon and tries that. Over once the
+## push has had time to land (1.5 s, not attacking), or after
+## BOT_DUMMY_TIMEOUT s. Returns [move, buttons, aim_yaw] while under way, else
+## null.
+func _bot_dummy_input() -> Variant:
+	if _bot_dummy_step == 2 or (_bot_dummy_step == 0 and crafting.bot_trips_crafted == 0):
+		return null
+	var now := Time.get_ticks_msec()
+	var state := _local_player.state
+	var dummy: Enemy = null
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.params.stationary and not enemy.dead:
+			dummy = enemy
+	if _bot_dummy_step == 0:
+		_bot_dummy_step = 1
+		_bot_dummy_msec = now
+		if _verbose:
+			print("[client] walking to the training dummy (frame %d)" % [now / 250])
+	if (dummy == null or now - _bot_dummy_msec > BOT_DUMMY_TIMEOUT * 1000.0
+			or (_bot_dummy_push_msec >= 0 and now - _bot_dummy_push_msec > 1500
+				and not state.is_attacking())):
+		_bot_dummy_step = 2
+		if _verbose:
+			print("[client] training dummy push %s (frame %d)" % [
+					"done" if _bot_dummy_push_msec >= 0 else "gave up", now / 250])
+		return null
+	var to := dummy.global_position - _local_player.global_position
+	var flat := Vector2(to.x, to.z)
+	var aim := _local_player.params.aim
+	var aim_yaw := PlayerState.yaw_for_direction(flat) + atan2(aim.shoulder_offset,
+			maxf(flat.length(), aim.melee_min_reach))
+	if _bot_dummy_push_msec >= 0:
+		# Holds attack long enough for a heavy, if that's the push.
+		var held := now - _bot_dummy_push_msec < _bot_dummy_hold
+		return [Vector2.ZERO, PlayerState.BUTTON_ATTACK if held else 0, aim_yaw]
+	if state.dead:
+		return [Vector2.ZERO, 0, aim_yaw]
+	if flat.length() > BOT_ATTACK_DISTANCE:
+		return [flat.normalized(), 0, aim_yaw]
+	if not state.can_act() or state.is_attacking() or state.is_swapping():
+		return [Vector2.ZERO, 0, aim_yaw]
+	var weapon := state.weapon(_local_player.params)
+	if _pushes(weapon.heavy_attack):
+		_bot_dummy_push_msec = now
+		# Past the heavy hold time (ms).
+		_bot_dummy_hold = roundi(weapon.heavy_hold_ticks * 1000.0 / Engine.physics_ticks_per_second) + 150
+		return [Vector2.ZERO, PlayerState.BUTTON_ATTACK, aim_yaw]
+	for slot in PlayerState.ABILITY_SLOTS:
+		var index := state.slot_ability(slot)
+		if _pushes(weapon.ability(index)) and state.cooldown_left(index) == 0:
+			_bot_dummy_push_msec = now
+			_bot_dummy_hold = 0
+			return [Vector2.ZERO, PlayerState.BUTTON_ABILITY_1 << slot, aim_yaw]
+	if not _bot_dummy_swapped:
+		_bot_dummy_swapped = true
+		return [Vector2.ZERO, PlayerState.BUTTON_SWAP, aim_yaw]
+	return [Vector2.ZERO, 0, aim_yaw]  # waits for a knockback ability's cooldown
+
+
+
+## True if attack moves what it hits without needing it staggered first.
+static func _pushes(attack: AttackParams) -> bool:
+	return attack != null and attack.force != null and not attack.force.needs_stagger
 
 
 ## One of the equipped weapon's filled ability slots. The farthest-knockback
@@ -2895,7 +3131,8 @@ func _bot_self_buff_input(distance: float, t: float, cycle: int) -> int:
 ## Rebirth is ready it only spends Ember above the Rebirth threshold, so it
 ## keeps a Rebirth for its next death (the decision the design asks players to
 ## make). turn_time: seconds into its attack turn (outside 0-2 = its block turn).
-func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float) -> int:
+func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float,
+		inviting: bool) -> int:
 	var state := _local_player.state
 	if state.is_attacking() or state.dead:
 		return 0
@@ -2909,7 +3146,8 @@ func _bot_wing_input(cycle: int, phase: float, turn_time: float, distance: float
 	if phase < 4.0 and turn_time >= 1.0 and turn_time < 2.0:
 		roles.append("burst")  # after its heavy (a press at once would replace it)
 	var off_time := turn_time + 2.0 if turn_time < 0.0 else turn_time - 2.0
-	if phase < 4.0 and off_time >= 0.0 and off_time < 0.3:
+	# (Not while inviting a Husk's hit: Unbowed would refuse its knockback.)
+	if phase < 4.0 and off_time >= 0.0 and off_time < 0.3 and not inviting:
 		if _local_player.health < _local_player.max_health() * 0.8:
 			roles.append("heal")
 		roles.append("guard")
@@ -3097,6 +3335,10 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_hit(attacker_id: int, target_id: int, damage: float, result: int) -> void:
 	var my_id := multiplayer.get_unique_id()
+	if _bot and result == HIT_DEFEATED and attacker_id == my_id and target_id > 0:
+		_bot_player_kills += 1
+	if _bot and result == HIT_STATUS_DAMAGE and target_id == my_id:
+		_bot_seen_dot = true
 	if result in [HIT_DAMAGED, HIT_CRITICAL, HIT_UNSHAKEN, HIT_DEFEATED, HIT_GUARD_BROKEN]:
 		if attacker_id == my_id:
 			_hits_landed += 1

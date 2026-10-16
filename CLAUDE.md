@@ -1080,7 +1080,7 @@ powershell -ExecutionPolicy Bypass -File tools\host_playtest.ps1         # serve
 powershell -ExecutionPolicy Bypass -File tools\export_client.ps1         # build\export\NewerWorld.zip for friends (needs export templates)
 powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1             # unit tests
 powershell -ExecutionPolicy Bypass -File tools\roll_loot.ps1             # what a loot table drops over 50,000 kills
-powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s, then ~10 s of restart: make an account and character and log in (a fresh database file), move, dodge, fight each other and Husks, block, die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players and Husks, Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, characters saved (periodic, after changes, on leaving), snapshots under one packet; then a second server on the same database file: the first bot (account smoke_keeper, character Keeper) logs in again and must come back exactly as last saved (fingerprint), and is saved as that server shuts down
+powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1            # 2 bots, 32 s, then ~10 s of restart: make an account and character and log in (a fresh database file), move, dodge, fight each other and Husks, block (the bots' duel), die, respawn, abilities, swap, respec, statuses (on a Husk), a bleed tick, Spear, knockback on players (the duel, Husks) and enemies (Husks, the training dummy), Ember gained and spent, Wing abilities, a Rebirth, projectiles thrown and one hitting, Husk loot dropped, picked up and equipped, characters saved (periodic, after changes, on leaving), snapshots under one packet; then a second server on the same database file: the first bot (account smoke_keeper, character Keeper) logs in again and must come back exactly as last saved (fingerprint), and is saved as that server shuts down
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Class assassin   # same, as Assassins (or -Class juggernaut / ranger / mage / paladin)
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Party     # same bots in a party: 0 hits, debuffs, forced moves or projectile hits on each other, Husk fights (and Ember, Wings, a Rebirth, projectile hits) still happen
 powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Bots 6    # more bots (not with -Party): same checks for each, and snapshots must still fit one packet
@@ -1117,7 +1117,9 @@ a `--bot`'s class when it makes its character; default `fighter`, unknown = defa
 `--menu-preview=login|characters|create` (show that start screen with sample data and
 never connect; with `--screenshot-dir` the start screens save as `menu_<N>.png`),
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
-Husk within 15 m, else the nearest player), then both use abilities (guard up between; a
+Husk within 15 m, else the nearest player; the heavy starts once within 2.2 m or 0.7 s
+into the turn, `World._bot_attack_turn`; after the duel, against a Husk the guard stays
+down until a Husk's hit has knocked it back and a bleed has ticked on it, `_bot_invites_husk_hit`), then both use abilities (guard up between; a
 knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free
 respec (odd cycles also learn new abilities like Rising Cut, or the capstones when there's
 nothing new, as for the War Hammer; even cycles learn the built
@@ -1143,7 +1145,20 @@ that fit (first in file order on even cycles, last on odd: Tempest Wings / Ancho
 Mantle of Renewal / Crushing Wingbeat), `BuildService.bot_respec_wings`.
 Projectiles: it slots projectile abilities right after status ones (every class weapon)
 and throws a ready one whenever its target is 3 m to 75% of the projectile's reach away
-before the circling phase; see `World._bot_projectile_button`),
+before the circling phase; see `World._bot_projectile_button`.
+Scheduled so the smoke checks never hang on luck: **the duel** (from 3 s after launch,
+instead of the first ability phase and circling: the bots have just joined at full
+health and the Husks are still on their way; not with `--bot-party`; `World.BOT_DUEL_*`):
+the bots target each other, nothing else pressed; the lower peer id heavies (once in
+reach) and taps lights into the other's raised guard (a guard break and a knocked-back
+player every run), then from 5.8 s the other lowers its guard and is killed twice (a
+Rebirth, its first death, then a respawn: `_bot_execute_input`); over after two kills /
+the respawn, at 10 s at the latest; **the first
+gather** right after joining, the nearest node however far
+(`GatheringSystem.bot_first_move`); **Forge trips** from cycle 1's circling (14 s), the
+higher peer id's a cycle later (`CraftingSystem.bot_first_trip_cycle`), so both never
+miss the same fight, nor the first Husk fights; after its first craft **it pushes the training dummy** 7 m from the Forge
+(a pushing heavy, else a knockback ability, else it swaps; `World._bot_dummy_input`)),
 `--bot-party` (with `--bot`: the lower peer id invites the nearest player, and the bot
 accepts any invite; it doesn't attack or use abilities (Wings included) until it's in a party, then
 still swings at its ally when no Husk is near, which the server ignores; see

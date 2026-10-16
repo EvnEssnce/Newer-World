@@ -103,15 +103,17 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # Every Husk kill drops something for each bot that damaged it (60% in the
     # real data), so the loot check doesn't hang on a few rolls.
     '--tune=loot/table_husk/drop_chance=1.0',
-    # Short gathers (2.5 / 1.5 s in the real data): the bot gathers once a cycle
-    # while circling and must be done before its swap, dodges and respec.
+    # Short gathers (2.5 / 1.5 s in the real data): the bot gathers right after
+    # joining (the nearest node), then once a cycle while circling, and must be
+    # done before its swap, dodges and respec.
     '--tune=gathering/node_ore/gather_time=0.3',
     '--tune=gathering/node_wood/gather_time=0.3',
     '--tune=gathering/node_fiber/gather_time=0.3',
     # Cheap, short refining (3-4 raw -> 1 refined, 2 s in the real data): once
     # it has gathered, the bot walks to the Forge (far from the Husk camp) as its
-    # circling starts, at most every other cycle, and refines all it can with
-    # the panel open (CraftingSystem.bot_trip).
+    # circling starts (from the second cycle; the second bot a cycle after the
+    # first), and refines all it can with the panel open
+    # (CraftingSystem.bot_trip), then pushes the training dummy next to it.
     '--tune=recipes/recipe_rustvein_ingot/inputs={\"rustvein_ore\":1}',
     '--tune=recipes/recipe_pine_plank/inputs={\"pine_log\":1}',
     '--tune=recipes/recipe_thistle_linen/inputs={\"thistle_fiber\":1}',
@@ -176,7 +178,11 @@ if (-not $accountSummary -or [int]$accountSummary.Matches[0].Groups[4].Value -lt
     Write-Host "PASS accounts: $($accountSummary.Line)" -ForegroundColor Green
 }
 # The bots fight (Husks when near, else each other) for the first 4 s of every 8 (then use abilities for 2 s);
-# the server must resolve real hits.
+# the server must resolve real hits. A hit on a guard comes from the bots' duel
+# (World.BOT_DUEL_START: 3-5.8 s after launch, before the Husks arrive, the
+# first heavies, then taps lights, into the other's raised guard), and from
+# Husk swings in the ability phase. Deaths: the duel ends with the first bot
+# killing the other twice, a Rebirth (its first death) then a respawn.
 $serverSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY server .*hits=(\d+) deaths=(\d+) respawns=(\d+) blocks=(\d+) guard_breaks=(\d+)'
 $enemySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemies count=(\d+) enemy_hits=(\d+) enemy_damaged=(\d+) enemy_kills=(\d+)'
 $partySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY party formed=(\d+) parties=(\d+) pvp_hits=(\d+) ally_hits_ignored=(\d+)'
@@ -259,8 +265,12 @@ if (-not $statusSummary) {
 } else {
     Write-Host "PASS statuses: $($statusSummary.Line)" -ForegroundColor Green
 }
-# Forced movement (Husk knockback on the bots, the bots' Low Sweep on Husks) and
-# the Spear: the bots equip it after the first cycle and use its abilities. In a party, no bot may move the other.
+# Forced movement and the Spear (the bots equip it after the first cycle and use
+# its abilities). Players: the duel's guard break, and Husk swings (each bot keeps
+# its guard down against Husks until a Husk's hit has moved it and a bleed has ticked on it,
+# World._bot_invites_husk_hit). Enemies: heavies and Low Sweep on Husks, and each
+# bot pushes the training dummy after its first craft (World._bot_dummy_input).
+# In a party, no bot may move the other.
 $forceSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY force players=(\d+) pvp=(\d+) enemies=(\d+) launches=(\d+)'
 $weaponSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY ability_uses_by_weapon'
 if (-not $forceSummary) {
@@ -270,7 +280,7 @@ if (-not $forceSummary) {
     Write-Host "FAIL force: no player was moved by force ($($forceSummary.Line))" -ForegroundColor Red
     $failed = $true
 } elseif ([int]$forceSummary.Matches[0].Groups[3].Value -lt 1) {
-    Write-Host "FAIL force: no Husk was moved by force ($($forceSummary.Line))" -ForegroundColor Red
+    Write-Host "FAIL force: no enemy (Husk or the training dummy) was moved by force ($($forceSummary.Line))" -ForegroundColor Red
     $failed = $true
 } elseif ($Party -and [int]$forceSummary.Matches[0].Groups[2].Value -ne 0) {
     Write-Host "FAIL force: party members moved each other ($($forceSummary.Line))" -ForegroundColor Red
