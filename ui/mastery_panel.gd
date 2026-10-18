@@ -163,12 +163,12 @@ func _header(build: CharacterBuild, tree: MasteryTree, nodes: PackedStringArray)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
-	# This tree's spend against its own budget; with a pool (the character's
-	# level), the points left to spend on any tree.
-	var points := _label("This tree: %d / %d" % [tree.spent(nodes), tree.points], Color.WHITE)
-	if build.point_pool >= 0:
-		points.text = "Points left: %d of %d   %s" % [build.points_left(), build.point_pool, points.text]
-		points.tooltip_text = "Your character level gives these points to spend on any tree: your Wings or any weapon's. Levelling up gives more. Each tree also has its own limit."
+	var budget := tree.budget(_current_limit())
+	var points := _label("Points: %d / %d" % [tree.spent(nodes), budget], Color.WHITE)
+	if budget < tree.points:
+		points.text += " (of %d)" % tree.points
+		points.tooltip_text = "Your %s gives %d of this tree's %d points; levelling up gives more." % [
+				"character level" if _weapon_id == WINGS else "mastery level", budget, tree.points]
 		points.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.add_child(points)
 	var reset := Button.new()
@@ -418,7 +418,7 @@ func _current_slots() -> PackedStringArray:
 ## The points the character's levels give the shown tree (< 0 = its full budget).
 func _current_limit() -> int:
 	var build := _builds.local_build
-	return build.point_limit(CharacterBuild.WING_TREE if _weapon_id == WINGS else _weapon_id)
+	return build.wing_point_limit if _weapon_id == WINGS else build.point_limit(_weapon_id)
 
 
 func _slot_keys() -> Array:

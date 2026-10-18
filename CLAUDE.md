@@ -122,8 +122,8 @@ game/
   tradeskills/tradeskill_system.gd  World/Tradeskills: XP from gathers (and crafting later),
                              owner updates, level-up feed lines.
   progression/progression_defs.gd, progression.gd  Character level and per-weapon mastery
-                             level (data/progression.cfg: caps, XP curves, the tree point
-                             pool per character level) and one character's levels/XP. Pure, unit tested.
+                             level (data/progression.cfg: caps, XP curves, tree points per
+                             level) and one character's levels/XP. Pure, unit tested.
                              progression_system.gd: World/Progression (XP from kills and
                              gathers, owner updates and feed lines; see "Progression").
   crafting/craft_progress.gd The Forge panel's progress maths, cancel rules, XP line text. Pure.
@@ -201,7 +201,7 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      accounts (name/password rules, max characters, hash iterations),
                      name_filter (words names can't contain),
                      saving (periodic and after-change save delays), progression
-                     (character/mastery level caps and XP curves, the tree point pool) (.cfg).
+                     (character/mastery level caps and XP curves, tree points per level) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
@@ -377,15 +377,12 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `grant` → server → owner `_receive_progress(dict)`, `_receive_xp(xp, mastery)` ("+50 XP
   +40 Spear" feed line), `_receive_level_up(weapon_id, from, to)` ("" = character);
   `save_changed`; `points_changed` → `BuildService.on_points_changed`. Clients: `local`,
-  the HUD's XP bar (`Hud.setup_progression`). **Tree points: one pool from the character level** (`[points]`: 12 at level 1,
-  +2.5 a level (2 and 3 in turn), 84 at the cap of 30 = the Wing tree's 24 + 30 (1.5
-  branches) in two weapons; mastery levels give none). Every tree spends from it, each
-  within its own budget. `BuildService.set_points` (join, after restoring the save; class
-  change; level-up) calls `CharacterBuild.set_point_pool`, which cuts a build over it
-  (one node per tree per round: Wings, the weapon out, the other equipped one, the rest;
-  slotted abilities first, `MasteryTree.fit_order`; logged); `point_limit(tree)` = what
-  the tree spends + `points_left()` is the limit `validate`/`can_add`/`prune` take; the
-  pool reaches the owner in `_receive_build` (`to_dict(true)`), not saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
+  the HUD's XP bar (`Hud.setup_progression`). **Tree points from levels:**
+  `BuildService.set_points` (join, after restoring the save; class change; level-up)
+  puts `Progression.weapon_points`/`wing_points` into `CharacterBuild.set_point_limits`,
+  which cuts trees over them (`MasteryTree.fit`, logged); `validate`/`can_add`/`prune`
+  take the limit; the limits reach the owner in `_receive_build` (`to_dict(true)`), not
+  saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
   `SUMMARY progression ... kills_credited= gathers= xp_granted= mastery_xp_granted=
   level_ups= mastery_level_ups= xp_lines=`.
 - **Saving** (`World/Saves`, `SaveService`, server only, no RPCs; build order 3.3):
@@ -649,8 +646,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   capstone aimed at one of its tree's abilities must require it); K shows "Requires X".
 - **Mastery** (`data/mastery_<weapon>.cfg`, rules in `data/mastery.cfg`): two
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
-  branch (`[0, 4, 8, 12]`; nodes cost 2 or 4); total ≤ `points` (30: 1.5 branches) and
-  the character's point pool (see "Progression"). Active nodes unlock abilities (a slot may only hold an
+  branch; total ≤ `points` and the points the character's levels give (see
+  "Progression"). Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
   low_health_damage, block_stamina, execute_damage, hold_the_line, hook_stagger,
   crit_staggered, ability_range, ramp_on_hit, heavy_shockwave, heavy_breaks_block,
@@ -881,7 +878,7 @@ charges are cross-class).
   Wings (a queued Wing press survives a swap). Weapon abilities could cost Ember too
   (`ember_cost`, 0 for all so far; the Mage will use it).
 - **Wing tree** (`data/mastery_wings_<class>.cfg`, `MasteryTree.for_wings`, 2 slots,
-  `[tree] points` = 24, from the shared pool): Fighter branches Bulwark and Fury. Same rules and free
+  `[tree] points` = 12; the character level gives them): Fighter branches Bulwark and Fury. Same rules and free
   respecs; K panel "Wings" tab. Its passives apply to every attack
   (`CharacterBuild.damage_multiplier`); a Wing ability gets only the Wing tree's.
   Capstones (server, `World`): **Mantle of Renewal** (`mantle_heal`: while Ember
@@ -894,7 +891,7 @@ charges are cross-class).
   window covers the second half and the landing; height cosmetic). Defaults: Z Ember Mantle,
   C Wingbeat Surge.
 - **Juggernaut Wings** (`data/wings_juggernaut.cfg`, tree branches Tempest Wings and
-  Anchor, 24 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
+  Anchor, 12 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
   3.5 m), Challenger's Roar (25, 15 s: 8 m radial, no damage, Taunted + Slow 3 s; a guard
   facing you blocks it), Meteor Drop (30, 16 s: 6 m eased-in leap, 4 m cosmetic height,
   3 m radial crash at the landing, 160 damage, launch 1.8 m), Unbowed (25, 20 s: self

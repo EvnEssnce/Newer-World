@@ -56,7 +56,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Built (Milestone 3): ore, wood and fiber nodes with charges and respawn timers; no tool items; hide waits for animals |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
-| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, one tree point pool from the character level; needs a hand playtest |
+| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
 | Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
 
 ---
@@ -75,7 +75,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
 crafted gear (Milestone 3) and accounts with saved characters (Milestone 5) are on main.
-838 unit tests; the smoke tests pass for every class with 0 prediction corrections.
+837 unit tests; the smoke tests pass for every class with 0 prediction corrections.
 
 ---
 
@@ -143,9 +143,9 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       isn't saved: the save is the state before it) on change and periodically; load on
       join; survive a server restart (the smoke test restarts the server on the same
       database file and checks the first bot comes back exactly as saved).
-4. **Progression:** character level and XP (kills, gathering), tree points from the
-   character level (session 58: one pool for every tree, cap 30), weapon mastery XP per
-   weapon (`design/classes.md` planned 1 point per mastery level, cap 20; replaced). Pure logic + tests; saved through the persistence module.
+4. **Progression:** character level and XP (kills, gathering), Wing tree points from
+   level, weapon mastery XP per weapon (1 point per level, cap 20, as in
+   `design/classes.md`). Pure logic + tests; saved through the persistence module.
    1. **Done (session 54, branch `progression`).** **Levels and saving:**
       `ProgressionDefs` + `Progression` (`game/progression/`, `data/progression.cfg`):
       character level (cap 20, XP 400 × L^1.5) and a mastery level per weapon type (cap
@@ -161,15 +161,15 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       feed lines and level-up lines; an XP bar along the bottom edge with "Level N
       X / Y XP" left of the health bar. Smoke checks XP, a level-up and Keeper's saved
       level surviving the restart (with 20x cheaper curves).
-   3. **Done (sessions 57–58, branch `progression`).** **Points from levels:** one pool
-      from the character level for every tree (session 58 feedback: 12 at level 1, 2
-      or 3 a level, 84 at the new cap of 30 = Wings 24 + 30 in two weapons; node costs
-      doubled). A build over the pool is cut when the character joins
-      (`CharacterBuild.set_point_pool`: one node per tree per round, slotted abilities
-      first; logged); level-ups grow it at once. K shows "Points left: N of M   This
-      tree: x / 30", greys out what doesn't fit, and Default sends as much of the
-      default as fits. `data/testing.cfg [progression] full_points` (off; the smoke test
-      turns it on).
+   3. **Done (session 57, branch `progression`).** **Points from levels:** a weapon tree
+      gets 3 points at mastery level 1 + 1 per level (full 19 at 17), the Wing tree 2 +
+      1 per character level (full 12 at 11). A build over that is cut when the
+      character joins (`MasteryTree.fit`: slotted abilities kept first; logged);
+      level-ups raise the limits at once. K shows "Points: 3 / 3 (of 19)", greys out
+      what doesn't fit, and Default sends as much of the default as fits.
+      `data/testing.cfg [progression] full_points` (off; the smoke test turns it on).
+      (Session 58 tried one shared pool from the character level instead; reverted the
+      same day: per-weapon mastery points were intended.)
    4. **Hand playtest** of 4.2–4.3, then merge `progression` to main.
 5. **Content for a zone (Milestone 6).**
    1. **More enemies and camps:** 2–3 new enemy kinds with their own loot tables and
@@ -219,11 +219,10 @@ corrections; a tuning edit on your side reaches them after a server restart; nam
 party frames (session 53; nameplates showed names in the session 56 playtest).
 
 **Progression (sessions 57–58, branch `progression`):** a new character's K panel shows
-"Points left: 0 of 12" with two abilities on each equipped weapon and in the Wings; Husk
-kills give "+50 XP  +40 <weapon>" feed lines and fill the XP bar at the bottom edge; a
-"Level 2: +2 tree points (K)" line, then 2 points to spend on any tree; leave and rejoin
-keeps the level. Whether 8 Husks per level and 12 starting points feel right. Turn
-`data/testing.cfg [progression] full_points` on to compare. Also: the keybinds list
+"Points: 3 / 3 (of 19)" and its Wings 2 / 2; Husk kills give "+50 XP  +40 <weapon>" feed
+lines and fill the XP bar at the bottom edge; a level-up line, then one more point in K;
+leave and rejoin keeps the level. Whether 8 Husks per level and the start points feel
+right. Turn `data/testing.cfg [progression] full_points` on to compare. Also: the keybinds list
 (bottom left, F1 hides it); deleting a character (two clicks); a blocked name refused.
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
@@ -267,23 +266,21 @@ Say "keep" or what to change.
 - **Charges and knives:** a spare charge lets you reuse something while its cooldown
   runs (a Wing spare doesn't restart it). Embedded knives have no visual.
 
-- **Progression (sessions 54, 57, 58):** character level cap **30** (weapon mastery cap
-  20); XP curves 400 × L^1.5 (character, ~756,000 XP to 30: about 15,000 Husks, so later
-  enemies must give more) and 200 × L^1.5 (each weapon, ~135,000 to 20). **Tree points
-  are one pool from the character level** (session 58 feedback): 12 at level 1, then 2
-  and 3 in turn (+2.5 a level), 84 at 30 = the Wing tree's 24 + 30 (1.5 branches) in each
-  of **two** weapons. Fighter, Juggernaut and Ranger have three weapons: their points
-  cover two at a time (free respecs move them). To make 2–3 points a level work, every
-  node cost was doubled (2 or 4), the tier gates too ([0, 4, 8, 12]); a weapon tree's
-  budget is 30, a Wing tree's 24. Branches cost 18–24 (not evened out). **Weapon mastery
-  levels give nothing now** (XP still earned and shown; something to hang on them
-  later). Level 1's 12 points go one node per tree per round (Wings, the weapon out, the
-  other one): two abilities each. Husk: 50 character XP and 40 mastery XP per kill, 15
-  XP per gather; the training dummy gives none. Every contributor gets the whole kill
-  XP (like loot); mastery XP is split by damage per weapon, and damage over time and
-  projectiles count for the weapon out when they land. A build over the pool is cut
-  automatically on join (no message beyond the K panel); existing characters come back
-  cut to their level's points. Unknown weapon ids in a save are kept.
+- **Progression (sessions 54, 57, 58):** character level cap **30** (session 58; weapon
+  mastery cap 20); XP curves 400 × L^1.5 (character, ~756,000 XP to 30: about 15,000
+  Husks, so later enemies must give more) and 200 × L^1.5 (each weapon, ~135,000 to 20).
+  A new character starts with **3 points per weapon tree and 2 Wing points**, then 1 a
+  mastery level (that weapon's tree) and 1 a character level (Wings): at level 1 each
+  weapon keeps at least one of its default abilities, usually two, and Wing abilities
+  stay slotted; the Wing tree is full at level 11 (levels 12–30 give nothing yet; Ember
+  cap upgrades could go there), a weapon tree at mastery 17. Husk: 50 character XP and
+  40 mastery XP per kill (8 kills to level 2), 15 XP per gather; the training dummy
+  gives none. Every contributor gets the whole kill XP (like loot); mastery XP is split
+  by damage per weapon, and damage over time and projectiles count for the weapon out
+  when they land. Only kills give mastery XP (not damage to players or the dummy). A
+  build over its points is cut automatically on join (no message beyond the K panel);
+  existing characters come back cut to their levels' points. Unknown weapon ids in a
+  save are kept (a renamed weapon starts over).
 - **Names (session 58):** a blocked-word list (`data/name_filter.cfg`) for account and
   character names: words refused anywhere, short ones only as the whole name, and an
   allowed list ("Peacock", "Dickens", "Annalise"). A refused name says only "That name
@@ -435,6 +432,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 56 | 2026-10-16 | First playtest with a friend over Tailscale (~104 ms ping): no lag or roughness, performed very well; character names showed on nameplates. Corrections on their side not checked; next playtest with 2–3 friends |
 | 57 | 2026-10-16 | Progression 4.2 and 4.3 on branch `progression`. **XP:** kills (`[progression] kill_xp`/`mastery_xp` in enemy files; `Enemy.damaged_by` holds damage per weapon, `Progression.mastery_split`) and gathers give XP through `ProgressionSystem.grant` (owner RPCs, feed lines, `save_changed`, `points_changed`); `Hud.setup_progression` draws the XP bar. **Points:** `MasteryTree` validate/can_add/prune take a points limit, `fit` cuts an allocation to it; `CharacterBuild.set_point_limits` (limits go to the owner with the build, not into saves); `BuildService.set_points` on join, class change and level-up; K panel shows the limit; `testing.cfg [progression] full_points`. 835 tests (8 new, one over every real class: abilities kept at level 1); smoke default and `-Party` pass first time (Keeper saved at level 3 and 4 and came back the same); one party run had 1 correction on one client, and a screenshot run had 1 (a rerun had 0). Checked the XP bar and K panel in screenshots |
 | 58 | 2026-10-18 | Feedback on 4.2–4.3, branch `progression`. **One point pool:** the character level (cap 30) gives 12 + 2.5 a level (`[points]`), shared by the Wing tree and every weapon tree (`CharacterBuild.set_point_pool`, `point_limit` = spent + left; `MasteryTree.fit_order`); mastery levels give none; every node cost and tier gate doubled, weapon tree budget 30, Wing 24, so level 30 fills Wings + 1.5 branches in two weapons (developer chose this over per-class rates). **HUD:** a 10 px XP bar; the controls line became a keybinds list bottom left (`KeybindsPanel`, keys from `InputActions`, F1 hides). **Characters:** Delete on the character list (two clicks; `_request_delete_character`, ownership checked). **Names:** `data/name_filter.cfg` + `AccountRules.blocked_name` (look-alikes, squeezed repeats, whole-only short words, an allowed list). 838 tests (pool sharing, level 1 and 30 on the real data, the filter); smoke default and `-Party` pass first time, 0 corrections; HUD, K panel and character list checked in screenshots |
+| 59 | 2026-10-18 | Reverted session 58's point pool at the developer's request (per-weapon mastery points were intended, not a bug): session 57's point rules, node costs and tree budgets are back (files restored from 69ffc3f); the character level cap stays 30. Kept from session 58: the XP bar, the keybinds list, character delete, the name filter. 837 tests; smoke default and `-Party` pass first time, 0 corrections |
 
 ---
 

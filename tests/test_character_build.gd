@@ -185,7 +185,7 @@ func test_loadout_with_replaces_or_swaps() -> void:
 	assert_eq(current, PackedStringArray(["sword", "axes"]), "input untouched")
 
 
-# --- Tree points from the character level (build order 4.3) ---
+# --- Tree points from levels (build order 4.3) ---
 
 func test_a_point_limit_lowers_the_budget() -> void:
 	var tree: MasteryTree = trees["sword"]
@@ -213,57 +213,46 @@ func test_fit_keeps_slotted_abilities_first() -> void:
 	assert_eq(tree.fit(nodes, slots, 3)[0], nodes, "unchanged when it fits")
 
 
-func test_a_small_pool_is_shared_out_one_node_per_tree_at_a_time() -> void:
+func test_point_limits_cut_trees_and_refuse_more() -> void:
 	var build := _build()
-	assert_eq(build.points_spent(), 3)
-	assert_eq(build.points_left(), -1, "no pool")
-	var cut := build.set_point_pool(2)
+	var cut := build.set_point_limits({"sword": 1} as Dictionary[String, int], -1)
 	assert_eq(cut, PackedStringArray(["sword: 2 -> 1 points"]))
-	assert_eq(build.get_allocated("sword"), PackedStringArray(["spin_node"]), "slot order first")
+	assert_eq(build.get_allocated("sword"), PackedStringArray(["spin_node"]))
 	assert_eq(build.get_slots("sword"), PackedStringArray(["spin", "", ""]))
-	assert_eq(build.get_allocated("axes"), PackedStringArray(["frenzy_node"]), "each tree gets a turn")
-	assert_eq(build.points_left(), 0)
-	assert_eq(build.point_limit("sword"), 1)
+	assert_eq(build.get_allocated("axes"), PackedStringArray(["frenzy_node"]), "no limit")
 	assert_true(build.set_mastery("sword", PackedStringArray(["spin_node", "charge_node"]),
-			PackedStringArray(["spin", "charge", ""])) != "", "the pool is spent")
+			PackedStringArray(["spin", "charge", ""])) != "", "over the limit")
+	assert_eq(build.set_point_limits({"sword": 2} as Dictionary[String, int], -1), PackedStringArray(),
+			"a higher limit cuts nothing")
+	assert_eq(build.set_mastery("sword", PackedStringArray(["spin_node", "charge_node"]),
+			PackedStringArray(["spin", "charge", ""])), "")
+	assert_eq(build.point_limit("axes"), -1)
 
 
-func test_a_bigger_pool_cuts_nothing_and_can_go_to_any_tree() -> void:
-	var build := _build()
-	assert_eq(build.set_point_pool(4), PackedStringArray())
-	assert_eq(build.points_left(), 1)
-	assert_eq(build.point_limit("axes"), 2, "what it spends + what's left")
-	assert_eq(build.set_mastery("axes", PackedStringArray(["frenzy_node", "leap_node"]),
-			PackedStringArray(["leap", "frenzy", ""])), "")
-	assert_eq(build.points_left(), 0)
-	assert_true(build.set_mastery("axes", PackedStringArray(), PackedStringArray(["", "", ""])) == "")
-	assert_eq(build.points_left(), 2, "a respec frees its points for any tree")
-
-
-func test_the_pool_reaches_the_client_but_not_saves() -> void:
+func test_limits_reach_the_client_but_not_saves() -> void:
 	var build := CharacterBuild.create_default(ClassDef.for_id("fighter"))
-	build.set_point_pool(500)
-	assert_false(build.to_dict().has("point_pool"))
+	build.set_point_limits({"spear": 4} as Dictionary[String, int], 3)
+	assert_false(build.to_dict().has("limits"))
 	var copy := CharacterBuild.from_dict(build.to_dict(true))
-	assert_eq(copy.point_pool, 500)
-	assert_eq(CharacterBuild.from_dict(build.to_dict()).point_pool, -1)
+	assert_eq(copy.point_limit("spear"), 4)
+	assert_eq(copy.point_limit("broadsword"), -1)
+	assert_eq(copy.wing_point_limit, 3)
 
 
-## The real data: a new character (level 1's pool) keeps at least one slotted
-## ability on both equipped weapons and in its Wing slots; and level 30's pool
-## fills the Wing tree and 1.5 branches (the tree budget) in two weapons.
-func test_real_pools_at_level_one_and_thirty() -> void:
+## The real data: a new character (level 1 everywhere, the real start points)
+## keeps at least one slotted ability on every weapon and in its Wing slots.
+func test_every_class_starts_with_abilities_at_level_one() -> void:
 	var defs := ProgressionDefs.from_tuning()
+	var levels := Progression.new(defs)
 	for class_id in ClassDef.all_ids():
 		var build := CharacterBuild.create_default(ClassDef.for_id(class_id))
-		build.set_point_pool(defs.points(1))
-		for weapon_id in build.weapons:
+		var limits: Dictionary[String, int] = {}
+		for weapon_id: String in build.trees:
+			limits[weapon_id] = levels.weapon_points(weapon_id)
+		build.set_point_limits(limits, levels.wing_points())
+		for weapon_id: String in build.trees:
 			assert_true(build.get_slots(weapon_id).count("") < PlayerState.ABILITY_SLOTS,
 					"%s %s keeps an ability" % [class_id, weapon_id])
 		if build.wing_tree:
 			assert_true(build.wing_slots.count("") < PlayerState.WING_SLOTS,
 					"%s Wings keep an ability" % class_id)
-			var full := build.wing_tree.points
-			for weapon_id in build.weapons:
-				full += (build.trees[weapon_id] as MasteryTree).points
-			assert_eq(defs.points(defs.character.level_cap), full, "%s at the cap" % class_id)

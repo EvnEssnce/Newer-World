@@ -6,9 +6,8 @@ extends RefCounted
 ## server owns the real one (World/Progression) and saves it with the character
 ## (CharacterSave.progression).
 ##
-## The character level decides the tree point pool (points), which the Wing and
-## weapon trees share (CharacterBuild.set_point_pool); mastery levels are
-## tracked but give nothing yet. XP comes from
+## The levels decide tree points (wing_points, weapon_points), which limit the
+## Wing and weapon trees (CharacterBuild.set_point_limits). XP comes from
 ## World/Progression (kills, gathering).
 
 const START_LEVEL := 1
@@ -51,9 +50,9 @@ func add_xp(amount: int) -> int:
 	return gained
 
 
-## The tree point pool this character level gives (every tree spends from it).
-func points() -> int:
-	return defs.points(_level)
+## Wing tree points this character level gives.
+func wing_points() -> int:
+	return defs.wing_points(_level)
 
 
 # --- Weapon mastery ---
@@ -82,6 +81,11 @@ func add_mastery_xp(weapon_id: String, amount: int) -> int:
 	if after != before:
 		_mastery[weapon_id] = after
 	return after.x - before.x
+
+
+## That weapon's mastery tree points at its mastery level.
+func weapon_points(weapon_id: String) -> int:
+	return defs.mastery_points(mastery_level(weapon_id))
 
 
 func _track(weapon_id: String) -> Vector2i:

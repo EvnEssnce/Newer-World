@@ -1,8 +1,8 @@
 class_name ProgressionDefs
 extends RefCounted
 ## The progression rules (data/progression.cfg): the character level and weapon
-## mastery level curves (cap, XP to the next level), the tree points each
-## character level gives and the XP sources' amounts. Pure data + math; tests build one by hand.
+## mastery level curves (cap, XP to the next level) and the tree points each
+## level gives. Pure data + math; tests build one by hand.
 
 
 ## One level track: a cap and an XP curve.
@@ -37,10 +37,12 @@ static var _current_version := -1
 
 var character := LevelCurve.new()
 var mastery := LevelCurve.new()
-## Tree points (one pool for the Wing tree and every weapon tree) at character
-## level 1, and per level after the first (fractional: 2.5 alternates 2 and 3).
-var start_points := 0
-var points_per_level := 1.0
+## Wing tree points at character level 1, and per level after the first.
+var wing_start_points := 0
+var wing_points_per_level := 1
+## A weapon tree's points at mastery level 1, and per mastery level after the first.
+var mastery_start_points := 0
+var mastery_points_per_level := 1
 ## Character XP for each gather (any node kind).
 var gather_xp := 0
 
@@ -61,18 +63,24 @@ static func from_tuning() -> ProgressionDefs:
 	defs.mastery = LevelCurve.new(Tuning.get_value("progression", "weapon_mastery", "level_cap"),
 			Tuning.get_value("progression", "weapon_mastery", "xp_base"),
 			Tuning.get_value("progression", "weapon_mastery", "xp_exponent"))
-	defs.start_points = Tuning.get_value("progression", "points", "start_points")
-	defs.points_per_level = Tuning.get_value("progression", "points", "points_per_level")
+	defs.wing_points_per_level = Tuning.get_value("progression", "character", "wing_points_per_level")
+	defs.wing_start_points = Tuning.get_value("progression", "character", "wing_start_points")
+	defs.mastery_points_per_level = Tuning.get_value("progression", "weapon_mastery", "points_per_level")
+	defs.mastery_start_points = Tuning.get_value("progression", "weapon_mastery", "start_points")
 	defs.gather_xp = Tuning.get_value("progression", "sources", "gather_xp")
 	for problem in defs.validate():
 		push_error("progression.cfg: " + problem)
 	return defs
 
 
-## The tree point pool at a character level: start_points + floor((level - 1)
-## x points_per_level) (a tiny epsilon keeps 2.5 x 2 = 5 from flooring to 4).
-func points(character_level: int) -> int:
-	return start_points + floori(maxi(0, character_level - 1) * points_per_level + 0.0001)
+## Wing tree points at a character level.
+func wing_points(character_level: int) -> int:
+	return wing_start_points + maxi(0, character_level - 1) * wing_points_per_level
+
+
+## A weapon tree's points at a mastery level.
+func mastery_points(mastery_level: int) -> int:
+	return mastery_start_points + maxi(0, mastery_level - 1) * mastery_points_per_level
 
 
 ## What's wrong with the rules ([] if nothing).
@@ -84,7 +92,7 @@ func validate() -> PackedStringArray:
 			problems.append("[%s] level_cap must be at least 1" % entry[0])
 		if curve.xp_base <= 0.0 or curve.xp_exponent < 0.0:
 			problems.append("[%s] xp_base must be above 0 and xp_exponent at least 0" % entry[0])
-	if start_points < 0 or points_per_level < 0.0:
+	if mini(mini(wing_points_per_level, mastery_points_per_level), mini(wing_start_points, mastery_start_points)) < 0:
 		problems.append("points can't be negative")
 	if gather_xp < 0:
 		problems.append("[sources] gather_xp can't be negative")

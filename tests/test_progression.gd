@@ -11,8 +11,8 @@ func before_each() -> void:
 	defs = ProgressionDefs.new()
 	defs.character = ProgressionDefs.LevelCurve.new(5, 100.0, 1.5)
 	defs.mastery = ProgressionDefs.LevelCurve.new(4, 50.0, 1.0)
-	defs.start_points = 0
-	defs.points_per_level = 1.0
+	defs.wing_points_per_level = 1
+	defs.mastery_points_per_level = 2
 	levels = Progression.new(defs)
 
 
@@ -31,7 +31,8 @@ func test_everything_starts_at_level_one() -> void:
 	assert_eq(levels.xp_needed(), 100)
 	assert_eq(levels.mastery_level("spear"), 1)
 	assert_eq(levels.mastery_xp("spear"), 0)
-	assert_eq(levels.points(), 0)
+	assert_eq(levels.wing_points(), 0)
+	assert_eq(levels.weapon_points("spear"), 0)
 	assert_eq(levels.mastered_weapons(), PackedStringArray())
 
 
@@ -73,12 +74,14 @@ func test_mastery_is_per_weapon() -> void:
 	assert_eq(levels.mastered_weapons(), PackedStringArray(["spear"]))
 
 
-func test_tree_points_come_from_the_character_level() -> void:
+func test_tree_points_come_from_levels() -> void:
 	levels.add_xp(100 + 283)
-	assert_eq(levels.points(), 2, "1 per level after the first")
+	assert_eq(levels.wing_points(), 2, "1 per level after the first")
 	levels.add_mastery_xp("spear", 50)
-	assert_eq(levels.points(), 2, "mastery levels give none")
-	assert_eq(defs.points(0), 0, "never negative")
+	assert_eq(levels.weapon_points("spear"), 2, "2 per mastery level after the first")
+	assert_eq(levels.weapon_points("sword"), 0)
+	assert_eq(defs.mastery_points(4), 6)
+	assert_eq(defs.wing_points(0), 0, "never negative")
 
 
 func test_dict_round_trip() -> void:
@@ -116,18 +119,17 @@ func test_validate() -> void:
 	assert_eq(defs.validate(), PackedStringArray())
 	defs.character.level_cap = 0
 	defs.mastery.xp_base = 0.0
-	defs.points_per_level = -1.0
+	defs.wing_points_per_level = -1
 	assert_eq(defs.validate().size(), 3)
 
 
-func test_start_points_and_fractional_points_per_level() -> void:
-	defs.start_points = 12
-	defs.points_per_level = 2.5
-	assert_eq(levels.points(), 12)
-	assert_eq(defs.points(2), 14, "+2")
-	assert_eq(defs.points(3), 17, "+3")
-	assert_eq(defs.points(4), 19, "+2")
-	assert_eq(defs.points(30), 84, "the real numbers at level 30")
+func test_start_points_come_on_top() -> void:
+	defs.wing_start_points = 2
+	defs.mastery_start_points = 3
+	assert_eq(levels.wing_points(), 2)
+	assert_eq(levels.weapon_points("spear"), 3)
+	levels.add_mastery_xp("spear", 50)
+	assert_eq(levels.weapon_points("spear"), 5, "3 + 2 for level 2")
 
 
 func test_mastery_xp_is_split_by_damage() -> void:
