@@ -28,6 +28,9 @@ var wing_slots := PackedStringArray(["", ""])
 ## on join and on every level-up; clients get them with the build.
 var point_limits: Dictionary[String, int] = {}
 var wing_point_limit := -1
+## Class bonus points (levels past a full Wing tree; BuildService.set_points),
+## for the K panel. Not saved: it comes from the level.
+var level_bonus_points := 0
 
 
 ## A new character's build: the class's default loadout and each tree's
@@ -348,6 +351,7 @@ func to_dict(with_limits := false) -> Dictionary:
 			"wing_nodes": wing_nodes, "wing_slots": wing_slots}
 	if with_limits:
 		data["limits"] = _limits_dict()
+		data["level_bonus"] = level_bonus_points
 	return data
 
 
@@ -408,4 +412,5 @@ static func from_dict(data: Dictionary) -> CharacterBuild:
 	for weapon_id: String in weapon_limits:
 		b.point_limits[weapon_id] = int(weapon_limits[weapon_id])
 	b.wing_point_limit = int(limits.get("wings", -1))
+	b.level_bonus_points = int(data.get("level_bonus", 0))
 	return b

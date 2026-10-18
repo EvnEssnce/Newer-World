@@ -123,6 +123,8 @@ func _refresh() -> void:
 		_content.add_child(_class_row(build))
 	_content.add_child(_weapon_row(build))
 	_content.add_child(_slot_row(tree, nodes, slots))
+	if _weapon_id == WINGS and not build.class_def.level_bonus_stat.is_empty():
+		_content.add_child(_label(_level_bonus_line(build), Color(1.0, 0.85, 0.45), true))
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 16)
 	for b in tree.branches.size():
@@ -331,6 +333,16 @@ func _node_card(tree: MasteryTree, n: MasteryTree.MasteryNode, nodes: PackedStri
 			slot_row.add_child(slot_button)
 		card.add_child(slot_row)
 	return card
+
+
+## The class bonus from levels past a full Wing tree (ClassDef.level_bonus_text).
+static func _level_bonus_line(build: CharacterBuild) -> String:
+	var class_def := build.class_def
+	if build.level_bonus_points > 0:
+		return "Class bonus (%d levels past a full Wing tree): %s." % [build.level_bonus_points,
+				class_def.level_bonus_text(build.level_bonus_points)]
+	return "Once the Wing tree is full (level 20), each level gives a class bonus: %s." % (
+			class_def.level_bonus_text(1))
 
 
 ## Shows the Wings tab (once the build arrives).

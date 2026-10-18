@@ -63,8 +63,10 @@ func setup_player(player: Player, class_id: String, save: CharacterSave = null) 
 
 ## Gives the player's build the tree points its levels give (World/Progression;
 ## every tree full with data/testing.cfg [progression] full_points or no
-## progression yet) and cuts trees that spend more (logged). Doesn't touch
-## the state or send anything. Returns how many trees were cut.
+## progression yet) and cuts trees that spend more (logged), and its level bonus:
+## Wing points past a full Wing tree (levels 21-30) as class bonus stats
+## (Player.set_level_bonus; with full_points too). Sends nothing. Returns how
+## many trees were cut.
 func set_points(player: Player) -> int:
 	var levels: Progression = progression.progression_of(player.peer_id) if progression else null
 	var limits: Dictionary[String, int] = {}
@@ -74,6 +76,10 @@ func set_points(player: Player) -> int:
 			limits[weapon_id] = levels.weapon_points(weapon_id)
 		wing_limit = levels.wing_points()
 	var cut := player.build.set_point_limits(limits, wing_limit)
+	var wing_tree := player.build.wing_tree
+	player.build.level_bonus_points = (maxi(0, levels.wing_points() - wing_tree.points)
+			if levels and wing_tree else 0)
+	player.set_level_bonus(player.build.level_bonus_points)
 	trees_cut += cut.size()
 	for line in cut:
 		print("[server] peer %d: tree cut to the points its levels give (%s)" % [player.peer_id, line])

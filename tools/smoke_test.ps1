@@ -93,6 +93,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
     # real 2.6 m reach when their guard goes up, so a long reach gives the poke
     # path (line_pokes= in the abilities summary) a chance to run. No check.
     '--tune=weapon_spear/ability_line_poke/range=6.0',
+    # Mage: Sapped lasts 30 s instead of 6, so a bot's light or heavy usually
+    # lands on a sapped Husk and heals it (counted in "SUMMARY mage mark_heals=",
+    # not checked).
+    '--tune=status_effects/status_sapped/duration=30.0',
     # A 1 s Rebirth (5 s in the real data) keeps a reborn bot in the fight, so
     # the other checks still get their hits, blocks and deaths.
     '--tune=ember/rebirth/duration=1.0',

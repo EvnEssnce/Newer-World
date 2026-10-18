@@ -383,6 +383,16 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   which cuts trees over them (`MasteryTree.fit`, logged); `validate`/`can_add`/`prune`
   take the limit; the limits reach the owner in `_receive_build` (`to_dict(true)`), not
   saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
+  **Level bonus** (levels 21-30): Wing points past the Wing tree's budget (22, full at
+  level 20) are class bonus points (`set_points` → `CharacterBuild.level_bonus_points`,
+  sent to the owner; `Player.set_level_bonus`), each worth the class file's
+  `[level_bonus] stat`/`per_point` (`ClassDef.level_bonus`, `level_bonus_text`):
+  server-only `max_health` (Juggernaut, `Player.max_health`), `damage` (Fighter,
+  `damage_multiplier`), `healing` (Paladin, `_heal_player`); sim (synced owner-only ints
+  in thousandths, `PlayerState.set_level_bonus`, a server event) `move_speed` (Assassin,
+  `bonus_move_multiplier` in `PlayerMovement`), `dodge_cost` (Ranger, `dodge_cost`),
+  `ember_cost` (Mage, `ember_cost_of`: every Ember cost check and spend goes through it).
+  K's Wings tab and the level-up line show it.
   `SUMMARY progression ... kills_credited= gathers= xp_granted= mastery_xp_granted=
   level_ups= mastery_level_ups= xp_lines=`.
 - **Saving** (`World/Saves`, `SaveService`, server only, no RPCs; build order 3.3):
@@ -459,9 +469,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   32 = `ember` (float); 33 = `wing_set` (class id, "" = no Wings); 34 = one
   `PackedInt32Array` (kept small for snapshot size): `[combat_ticks, rebirth_left,
   rebirth_cooldown, rebirth_charges, Z slot, C slot, equip_left, free_move_mask,
-  charge_mask, spare_charges, decoy_active, beam_pitch, Wing cooldowns by pool index without
+  charge_mask, spare_charges, decoy_active, beam_pitch, bonus_move_pm, bonus_dodge_cut_pm,
+  bonus_ember_cut_pm (the level bonus, owner-only), Wing cooldowns by pool index without
   trailing zeros]`
-  (`PACKED_WING_HEADER` = 12; new small ints can go in that header too; `beam_pitch` = the aim pitch in whole degrees while a beam runs, drawing-only: kept in `view_array()`, not compared in `matches()`); 35 =
+  (`PACKED_WING_HEADER` = 15; new small ints can go in that header too; `beam_pitch` = the aim pitch in whole degrees while a beam runs, drawing-only: kept in `view_array()`, not compared in `matches()`); 35 =
   `attack_speed_carry` (float, Rampage: see "Attack speed" under Status effects); 36 =
   ammo, a `PackedInt32Array` `[spent slot0, spent slot1, timer slot0, timer slot1,
   attack_ammo]` (Throwing Knives magazine; `attack_ammo` = knives a partial heavy took;
@@ -878,7 +889,9 @@ charges are cross-class).
   Wings (a queued Wing press survives a swap). Weapon abilities could cost Ember too
   (`ember_cost`, 0 for all so far; the Mage will use it).
 - **Wing tree** (`data/mastery_wings_<class>.cfg`, `MasteryTree.for_wings`, 2 slots,
-  `[tree] points` = 12; the character level gives them): Fighter branches Bulwark and Fury. Same rules and free
+  `[tree] points` = 22 = the whole tree (every branch 11); the character level gives
+  them: 3 at level 1 + 1 a level, so it's full at level 20, and levels 21-30 give a
+  class bonus stat instead, see "Progression"): Fighter branches Bulwark and Fury. Same rules and free
   respecs; K panel "Wings" tab. Its passives apply to every attack
   (`CharacterBuild.damage_multiplier`); a Wing ability gets only the Wing tree's.
   Capstones (server, `World`): **Mantle of Renewal** (`mantle_heal`: while Ember
@@ -891,7 +904,7 @@ charges are cross-class).
   window covers the second half and the landing; height cosmetic). Defaults: Z Ember Mantle,
   C Wingbeat Surge.
 - **Juggernaut Wings** (`data/wings_juggernaut.cfg`, tree branches Tempest Wings and
-  Anchor, 12 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
+  Anchor, 22 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
   3.5 m), Challenger's Roar (25, 15 s: 8 m radial, no damage, Taunted + Slow 3 s; a guard
   facing you blocks it), Meteor Drop (30, 16 s: 6 m eased-in leap, 4 m cosmetic height,
   3 m radial crash at the landing, 160 damage, launch 1.8 m), Unbowed (25, 20 s: self

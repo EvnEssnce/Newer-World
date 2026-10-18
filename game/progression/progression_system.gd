@@ -180,7 +180,15 @@ func _receive_xp(xp: int, mastery: Dictionary) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_level_up(weapon_id: String, from_level: int, to_level: int) -> void:
 	_level_ups_seen += 1
-	_show(level_up_line(weapon_id, from_level, to_level), LEVEL_UP_COLOR)
+	var text := level_up_line(weapon_id, from_level, to_level)
+	# Past a full Wing tree (level 20): the level's class bonus instead.
+	var builds := get_parent().get_node_or_null(^"Builds") as BuildService
+	var build: CharacterBuild = builds.local_build if builds else null
+	if (weapon_id.is_empty() and build and build.wing_tree
+			and defs.wing_points(to_level) > build.wing_tree.points):
+		text = "Level %d: %s (class bonus, K)" % [to_level, build.class_def.level_bonus_text(
+				mini(to_level - from_level, defs.wing_points(to_level) - build.wing_tree.points))]
+	_show(text, LEVEL_UP_COLOR)
 
 
 ## "+50 XP  +25 Spear  +15 Broadsword" (mastery after the character XP, by weapon

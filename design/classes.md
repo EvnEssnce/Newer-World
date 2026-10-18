@@ -382,11 +382,11 @@ Mid range. Healing and draining, with some damage of its own.
 
 | Ability | Effect | Tags |
 |---|---|---|
-| Mending Beam | Channeled heal on one ally. | ALLY |
-| Renewal Pulse | Healing burst around a target point. | ALLY, AREA |
+| Mending Beam | Channeled heal on one ally; heals you 75% as much. | ALLY |
+| Renewal Pulse | Healing burst around a target point; heals you 75% as much if you're outside it. | ALLY, AREA |
 | Siphon | Damage beam on an enemy that heals you. | |
 | Ward | Puts a damage-absorbing shield on an ally. | ALLY, STATUS |
-| Life Spore | Places an orb that heals the first ally to touch it. | SUMMON, ALLY |
+| Sapping Pulse | Damaging pulse around you that saps enemies: your next light or heavy attack on one hits harder and heals you. | AREA, STATUS |
 | Withering Touch | Close-range blast that reduces healing on the target. | STATUS |
 
 ### Mage Wings: magic power and crowd control
@@ -616,7 +616,7 @@ behind, bonus or not).
   throws (`Player.throw_counter`, a `HeavyCounter` by `attack_serial`); every 5th also
   fires Fan of Knives via `ProjectileSystem.server_fire_attack` (no cooldown used).
 - **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
-  Trickster, 12 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
+  Trickster, 22 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
   and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
   dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
   damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s, Trickster
@@ -671,7 +671,7 @@ piercing_heavies= parting_shots= hunted_hits=` (no smoke check).
   (Kindling tier 2: your next 3 rolls leave burning ground), Seeker Spark (Flashfire
   tier 2: `[projectile_seeker_spark]`, 14 m/s, turns 220°/s toward the nearest hostile
   in front within 16 m, Burn ×2).
-- **Ranger Wings** (Windrider / Parting Shot, 12 points): Gust Roll (15 Ember: rolls
+- **Ranger Wings** (Windrider / Parting Shot, 22 points): Gust Roll (15 Ember: rolls
   1.8× as fast for 5 s, so 1.8× as far: `dodge_speed_multiplier`), Tailwind (20:
   `move_multiplier` 1.3 haste + `dodge_cost_multiplier` 0.5, 6 s; `PlayerState.
   dodge_cost`), Backdraft (20: 4 m radial knockback 3 m), Updraft (25: a real jump,
@@ -711,10 +711,14 @@ ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
   `Player.last_heavy_hit_tick`, `World._mage_ability_started`).
 - **Gauntlet** (Lifeweaver / Siphon): light life bolt (35), heavy 8 m drain beam (90,
   `lifesteal` 0.3). Mending Beam (15: 10 m beam, 6 windows, `ally_heal` 30 per window,
-  `allies_only`), Renewal Pulse (25: zone `renewal_pulse`, 160 to your side in a 3 m
-  circle 6 m ahead), Siphon (10: 8 m beam, 5 windows of 30, `lifesteal` 0.5), Ward (20:
-  `ally_shield` 150 to you and allies in a 10 m beam, `allies_only`), Life Spore (15:
-  zone `life_spore`, an ally trap: heals the first ally to touch it 200), Withering
+  `allies_only`; you heal 75% of it per window, `self_heal` 22.5), Renewal Pulse (25: zone
+  `renewal_pulse`, 160 to your side in a 3 m circle 6 m ahead; 120 to you when you
+  aren't in it, zone `owner_heal`), Siphon (10: 8 m beam, 5 windows of 30, `lifesteal` 0.5), Ward (20:
+  `ally_shield` 150 to you and allies in a 10 m beam, `allies_only`), Sapping Pulse (15:
+  4 m radial, 50 damage, **Sapped** 6 s: a mark (`mark_attacks="light_heavy"`): your
+  next light or heavy hit on it, projectiles included, deals +40% and heals you half
+  of that hit, `World._marked_scale` / `_heal_from_mark`; replaced Life Spore in
+  session 60), Withering
   Touch (10: Withered, `healing_taken` −0.5). Capstones: **Overflowing Life**
   (`overheal_shield`: healing past max becomes Ward, `World._overheal_shield` in
   `_heal_player`) and **Shared Vitality** (`siphon_share`: lifesteal also heals allies
@@ -726,7 +730,7 @@ ally_supports= shields= absorbed= focus_refunds= aura_refunds=` (no checks).
   damage over time or zones) and removes the status when it's empty; a fully absorbed
   hit shows "Absorbed" (`HIT_ABSORBED` 9, wire only). `_heal_player` multiplies by the
   target's `healing_taken` and the healer's `healing_dealt` statuses.
-- **Mage Wings** (Ascendant / Binder, 12 points): Phoenix Aura (25: +20% damage and
+- **Mage Wings** (Ascendant / Binder, 22 points): Phoenix Aura (25: +20% damage and
   healing 6 s), Binding Embers (25: zone `binding_embers`, Root 2 s in a 3.5 m circle 8
   m ahead), Searing Glare (20: 10 m line, 40 damage, **Silenced** 3 s), Wingfall (20:
   120° 5 m cone, knockback 4 m). Defaults Z Phoenix Aura, C Binding Embers. Capstones:
@@ -777,7 +781,7 @@ deflections= reflections= shared_damage= kindled= judgments=` (no checks).
 - **Deflection** (`deflects`, `World.deflects` from `ProjectileSystem._hit_player`):
   while such an ability is in its windup or hit windows, a hostile projectile reaching
   the user stops (0-damage `HIT_BLOCKED`).
-- **Paladin Wings** (Aegis / Purifier, 12 points): Sheltering Wings (20 Ember: zone
+- **Paladin Wings** (Aegis / Purifier, 22 points): Sheltering Wings (20 Ember: zone
   `sheltering_wings`, a `solid` wall with `blocks_enemies=false`: projectiles stop,
   people pass, 4 s), Cleansing Flame (15: cleanses you and allies within 8 m),
   Guardian Wing (20: **Guardian Link** on allies in a 12 m line: `damage_share` 0.3 of

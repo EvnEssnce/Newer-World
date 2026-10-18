@@ -60,6 +60,12 @@ var next_hit_crits := false
 ## Marked: the applier's next melee hit on the owner deals this fraction more
 ## damage and uses the status up. 0 = none.
 var marked_bonus := 0.0
+## A mark's hits that use it: "melee" (any hit that isn't a thrown or recalled
+## knife: Marked) or "light_heavy" (the applier's light or heavy attack,
+## projectiles included, not abilities: Sapped).
+var mark_attacks := "melee"
+## A mark: the fraction of the hit that uses it that heals the applier (Sapped).
+var mark_heal := 0.0
 ## Per stack: fraction more damage the owner takes from whoever applied it
 ## (Hunter's Mark).
 var damage_taken_from_source := 0.0
@@ -174,6 +180,8 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.consume_on_hit = Tuning.get_optional(file, section, "consume_on_hit", false)
 	s.next_hit_crits = Tuning.get_optional(file, section, "next_hit_crits", false)
 	s.marked_bonus = Tuning.get_optional(file, section, "marked_bonus", 0.0)
+	s.mark_attacks = Tuning.get_optional(file, section, "mark_attacks", "melee")
+	s.mark_heal = Tuning.get_optional(file, section, "mark_heal", 0.0)
 	s.blind = clampf(Tuning.get_optional(file, section, "blind", 0.0), 0.0, 1.0)
 	s.roll_zone = Tuning.get_optional(file, section, "roll_zone", "")
 	s.veils = Tuning.get_optional(file, section, "veils", false)

@@ -162,6 +162,12 @@ var charge_mask := 0
 ## Which of those spare charges are ready now (same bits). A spare lets the thing
 ## be used again while its cooldown runs; it comes back when the cooldown is 0.
 var spare_charges := 0
+## Level bonus stats the sim needs (the class's [level_bonus], set by the
+## server: set_level_bonus), in thousandths: faster walking, cheaper rolls,
+## cheaper abilities (weapon and Wing).
+var bonus_move_pm := 0
+var bonus_dodge_cut_pm := 0
+var bonus_ember_cut_pm := 0
 ## The player's decoy (Ember Double) is out: set by the server as it's placed
 ## and ends (set_decoy_active, a server event). Abilities with needs_decoy
 ## (Shadow Swap) can only start while it's true.
@@ -694,9 +700,14 @@ func wing_cooldown_left(index: int) -> int:
 	return wing_cooldowns[index] if index >= 0 and index < wing_cooldowns.size() else 0
 
 
-## Enough Ember for an ability's ember_cost.
+## Enough Ember for an ability's cost (ember_cost_of).
 func can_afford(started: AbilityParams) -> bool:
-	return started != null and ember >= started.ember_cost
+	return started != null and ember >= ember_cost_of(started)
+
+
+## An ability's ember_cost for this player (less with a Mage's level bonus).
+func ember_cost_of(started: AbilityParams) -> float:
+	return started.ember_cost * (1.0 - bonus_ember_cut_pm / 1000.0)
 
 
 # --- Ember ---
@@ -958,7 +969,25 @@ func note_teleport() -> void:
 ## Stamina a roll costs now: [dodge] stamina_cost times the cheapest roll
 ## status (Tailwind).
 func dodge_cost(params: PlayerParams) -> float:
-	return params.dodge_stamina_cost * statuses.dodge_cost_multiplier(params.statuses)
+	return (params.dodge_stamina_cost * statuses.dodge_cost_multiplier(params.statuses)
+			* (1.0 - bonus_dodge_cut_pm / 1000.0))
+
+
+## Server: the class's level bonus stats the sim needs, in thousandths (faster
+## walking, cheaper rolls, cheaper abilities). A server event when it changes.
+func set_level_bonus(move_pm: int, dodge_cut_pm: int, ember_cut_pm: int) -> void:
+	if Vector3i(move_pm, dodge_cut_pm, ember_cut_pm) == Vector3i(bonus_move_pm,
+			bonus_dodge_cut_pm, bonus_ember_cut_pm):
+		return
+	bonus_move_pm = move_pm
+	bonus_dodge_cut_pm = dodge_cut_pm
+	bonus_ember_cut_pm = ember_cut_pm
+	server_events += 1
+
+
+## Walking speed multiplier from the level bonus (1 = none).
+func bonus_move_multiplier() -> float:
+	return 1.0 + bonus_move_pm / 1000.0
 
 
 ## Server: which weapon slots' light and heavy attacks don't slow walking
@@ -1273,7 +1302,7 @@ func _start_ability(index: int, aim_yaw: float, aim_pitch: float, params: Player
 			wing_cooldowns[index] = started.cooldown_ticks
 	else:
 		cooldowns[equipped * WeaponParams.MAX_ABILITIES + index] = started.cooldown_ticks
-	ember = maxf(0.0, ember - started.ember_cost)
+	ember = maxf(0.0, ember - ember_cost_of(started))
 	_apply_self_status(started, params)
 
 
@@ -1474,15 +1503,16 @@ static func from_array(data: Array) -> PlayerState:
 ## to_array() index 34, one PackedInt32Array to keep snapshots small:
 ## [combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges, Z slot,
 ## C slot, equip_left, free_move_mask, charge_mask, spare_charges,
-## decoy_active (0/1), beam_pitch, then Wing cooldowns by pool index, without
-## trailing zeros].
-const PACKED_WING_HEADER := 12
+## decoy_active (0/1), beam_pitch, bonus_move_pm, bonus_dodge_cut_pm,
+## bonus_ember_cut_pm, then Wing cooldowns by pool index, without trailing
+## zeros].
+const PACKED_WING_HEADER := 15
 
 
 func _pack_ember_wings() -> PackedInt32Array:
 	var packed := PackedInt32Array([combat_ticks, rebirth_left, rebirth_cooldown, rebirth_charges,
 			wing_slots[0], wing_slots[1], equip_left, free_move_mask, charge_mask, spare_charges,
-			1 if decoy_active else 0, beam_pitch])
+			1 if decoy_active else 0, beam_pitch, bonus_move_pm, bonus_dodge_cut_pm, bonus_ember_cut_pm])
 	var last := wing_cooldowns.size() - 1
 	while last >= 0 and wing_cooldowns[last] == 0:
 		last -= 1
@@ -1503,6 +1533,9 @@ func _unpack_ember_wings(packed: PackedInt32Array) -> void:
 	spare_charges = packed[9]
 	decoy_active = packed[10] != 0
 	beam_pitch = packed[11]
+	bonus_move_pm = packed[12]
+	bonus_dodge_cut_pm = packed[13]
+	bonus_ember_cut_pm = packed[14]
 	wing_cooldowns.fill(0)
 	for i in mini(packed.size() - PACKED_WING_HEADER, wing_cooldowns.size()):
 		wing_cooldowns[i] = packed[PACKED_WING_HEADER + i]
@@ -1547,6 +1580,9 @@ func view_array() -> Array:
 	view.charge_mask = 0
 	view.spare_charges = 0
 	view.decoy_active = false
+	view.bonus_move_pm = 0
+	view.bonus_dodge_cut_pm = 0
+	view.bonus_ember_cut_pm = 0
 	view._fill_ammo()
 	view.attack_ammo = 0
 	return view.to_array()
@@ -1585,6 +1621,8 @@ func matches(other: PlayerState) -> bool:
 			and equip_left == other.equip_left
 			and free_move_mask == other.free_move_mask
 			and charge_mask == other.charge_mask and spare_charges == other.spare_charges
+			and bonus_move_pm == other.bonus_move_pm and bonus_dodge_cut_pm == other.bonus_dodge_cut_pm
+			and bonus_ember_cut_pm == other.bonus_ember_cut_pm
 			and swap_buffer == other.swap_buffer
 			and ability == other.ability
 			and queued_ability_slot == other.queued_ability_slot

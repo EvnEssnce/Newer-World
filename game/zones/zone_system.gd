@@ -193,9 +193,13 @@ func server_step() -> void:
 		var pulse := zone.step()
 		if pulse:
 			_pulses += 1
+			var owner_inside := false
 			for target in _targets_in(zone):
 				world.zone_effect(zone, target)
 				_affected += 1
+				owner_inside = owner_inside or (target is Player and (target as Player).peer_id == zone.owner_id)
+			if zone.params.owner_heal > 0.0 and not owner_inside:
+				world.zone_owner_heal(zone)
 			_grow(zone)
 		elif zone.is_armed():
 			var first := _first_target_in(zone)

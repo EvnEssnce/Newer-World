@@ -72,6 +72,8 @@ func validate() -> String:
 			return "%s: dodge and gravity multipliers must be positive" % def.id
 		if def.forces_target and not def.is_debuff():
 			return "%s: forces_target (a taunt) must be a debuff" % def.id
+		if not (def.mark_attacks in ["melee", "light_heavy"]) or def.mark_heal < 0.0:
+			return "%s: mark_attacks must be \"melee\" or \"light_heavy\", mark_heal at least 0" % def.id
 		if def.attack_speed < 1.0 or def.attack_speed > 2.0:
 			return "%s: attack_speed must be between 1 and 2" % def.id
 		if def.cover_depth < 0.0 or def.cover_width < 0.0:

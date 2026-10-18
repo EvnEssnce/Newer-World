@@ -52,7 +52,7 @@ static func step(body: CharacterBody3D, state: PlayerState, move: Vector2, butto
 		var dash_speed := state.current_ability(params).dash_speed_at(state.attack_tick)
 		horizontal = Vector3(state.ability_dir.x, 0.0, state.ability_dir.y) * dash_speed
 	else:
-		var speed := params.move_speed * state.status_move_multiplier(params)
+		var speed := params.move_speed * state.status_move_multiplier(params) * state.bonus_move_multiplier()
 		var attack := state.current_attack(params)
 		if attack and not state.moves_freely():
 			speed *= attack.move_multiplier

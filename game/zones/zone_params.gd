@@ -36,6 +36,9 @@ var affects := AFFECTS_HOSTILE
 ## Per pulse (or trigger): damage, healing, and a status.
 var damage := 0.0
 var heal := 0.0
+## Per pulse, healing for the owner when it isn't standing in the zone (a heal
+## ability also heals its caster: Renewal Pulse).
+var owner_heal := 0.0
 var applies_status := ""
 var status_stacks := 1
 var status_duration_ticks := -1
@@ -104,6 +107,7 @@ static func from_tuning(kind: String, tps: float) -> ZoneParams:
 	p.affects = Tuning.get_optional(f, s, "affects", AFFECTS_HOSTILE)
 	p.damage = Tuning.get_optional(f, s, "damage", 0.0)
 	p.heal = Tuning.get_optional(f, s, "heal", 0.0)
+	p.owner_heal = Tuning.get_optional(f, s, "owner_heal", 0.0)
 	p.applies_status = Tuning.get_optional(f, s, "applies_status", "")
 	p.status_stacks = Tuning.get_optional(f, s, "status_stacks", 1)
 	var duration: float = Tuning.get_optional(f, s, "status_duration", -1.0)

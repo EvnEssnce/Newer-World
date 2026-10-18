@@ -142,6 +142,12 @@ var health := 0.0
 var bonus_max_health := 0.0
 ## Server: what this player's equipped gear adds up to (LootSystem sets it).
 var gear := Equipment.Stats.new()
+## Server: the class's level bonus (set_level_bonus, from BuildService.set_points):
+## its points and the parts only the server uses (the sim's are in PlayerState).
+var level_bonus_points := 0
+var level_bonus_health := 0.0
+var level_bonus_damage := 0.0
+var level_bonus_healing := 0.0
 ## Counted once per real simulation step (not on replays); for the smoke test.
 var dodges := 0
 var air_dodges := 0
@@ -440,7 +446,25 @@ func reset_class_state() -> void:
 
 ## Base max health plus gear's.
 func max_health() -> float:
-	return params.max_health + bonus_max_health
+	return params.max_health + bonus_max_health + level_bonus_health
+
+
+## Server: `points` level bonus points (levels past a full Wing tree) of the
+## class's [level_bonus] stat (ClassDef.level_bonus): max health, damage and
+## healing here; walking speed, roll and Ember costs in PlayerState (a server
+## event). Raising max health doesn't heal.
+func set_level_bonus(points: int) -> void:
+	level_bonus_points = points
+	var class_def: ClassDef = build.class_def if build else null
+	var amount := class_def.level_bonus(points) if class_def else 0.0
+	var stat := class_def.level_bonus_stat if class_def else ""
+	level_bonus_health = amount if stat == "max_health" else 0.0
+	level_bonus_damage = amount if stat == "damage" else 0.0
+	level_bonus_healing = amount if stat == "healing" else 0.0
+	state.set_level_bonus(roundi(amount * 1000.0) if stat == "move_speed" else 0,
+			roundi(amount * 1000.0) if stat == "dodge_cost" else 0,
+			roundi(amount * 1000.0) if stat == "ember_cost" else 0)
+	health = minf(health, max_health())
 
 
 ## Server: this player's snapshot entry for other clients: what drawing it
@@ -460,7 +484,7 @@ func damage_multiplier(attack: AttackParams) -> float:
 	var weapon_id := "" if state.is_using_wing() else state.weapon_id()
 	var power := gear.wing_power if state.is_using_wing() else gear.weapon_power_for(weapon_id)
 	return (build.damage_multiplier(weapon_id, kind[0], kind[1], health / max_health())
-			* power * (1.0 + gear.bonus("damage_pct")))
+			* power * (1.0 + gear.bonus("damage_pct")) * (1.0 + level_bonus_damage))
 
 
 ## Server: the gear score this player's hits count as against armor: the

@@ -204,6 +204,11 @@ var _feint_reads := 0
 ## Throwing Knives (server): Marked hits used, free Fans of Knives (Flurry),
 ## heals cut by poison (Venom).
 var _marked_hits := 0
+## Server: a healing mark (Sapped) used by the hit being worked out: the fraction
+## of its damage that heals the marker (_marked_scale -> _heal_from_mark).
+var _mark_heal_due := 0.0
+## Hits that used a healing mark (SUMMARY mage mark_heals=).
+var _mark_heals := 0
 var _flurry_fans := 0
 var _heal_cuts := 0
 ## Ranger (server): Ignites that detonated stacks (and stacks used), loaded
@@ -739,6 +744,7 @@ func strike_enemy(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float,
 	var stagger := _with_hook_stagger(attacker_id, enemy,
 			_with_surge_stagger(attacker_id, attack.stagger_ticks))
 	_lifesteal(attacker_id, attack, damage)
+	_heal_from_mark(attacker_id, damage)
 	if _damage_enemy(enemy, damage, stagger, attacker_id,
 			HIT_CRITICAL if crit > 1.0 else HIT_DAMAGED):
 		return true
@@ -915,6 +921,7 @@ func resolve_strike(attacker_id: int, attacker_pos: Vector3, attacker_yaw: float
 		_mantle_heal(target, base_damage, result != HIT_DAMAGED)
 	if result == HIT_DAMAGED or result == HIT_DEFEATED:
 		_lifesteal(attacker_id, attack, damage + absorbed)
+	_heal_from_mark(attacker_id, damage + absorbed)
 	return result
 
 
@@ -1264,25 +1271,46 @@ func _feint_read(attacker: Player, attack: AttackParams) -> void:
 
 # --- Assassin: Throwing Knives mechanics (server only) ---
 
-## Marked Blade: a melee hit (not a projectile: its attack has no
-## `projectile`) from the player who marked the target (a mark status,
-## StatusEffects.mark_from) deals 1 + marked_bonus as much and uses the mark
-## up. target_player: the target if it's a player (removing a status is then
-## a server event), null for an enemy. Else 1.
+## Marked Blade / Sapping Pulse: a hit from the player who marked the target (a
+## mark status, StatusEffects.mark_from) deals 1 + marked_bonus as much and uses
+## the mark up. Which hits use it is the mark's mark_attacks: "melee" (not a
+## thrown or recalled knife: Marked) or "light_heavy" (a light or heavy attack,
+## projectiles included: Sapped). A mark with mark_heal leaves that fraction of
+## the hit's damage to heal the marker (_mark_heal_due, _heal_from_mark).
+## target_player: the target if it's a player (removing a status is then a
+## server event), null for an enemy. Else 1.
 func _marked_scale(attacker_id: int, attack: AttackParams, statuses: StatusEffects,
 		defs: StatusDefs, target_player: Player) -> float:
-	if attacker_id <= 0 or not attack.projectile.is_empty() or not attack.recalls.is_empty():
-		return 1.0  # knives (Recall's included) don't use the mark
+	_mark_heal_due = 0.0
+	if attacker_id <= 0:
+		return 1.0
 	var index := statuses.mark_from(defs, attacker_id)
 	if index < 0:
 		return 1.0
-	var bonus := defs.get_def(index).marked_bonus
+	var def := defs.get_def(index)
+	if def.mark_attacks == "light_heavy":
+		if attack is AbilityParams:
+			return 1.0
+	elif not attack.projectile.is_empty() or not attack.recalls.is_empty():
+		return 1.0  # knives (Recall's included) don't use the mark
 	if target_player:
 		target_player.state.remove_status(index)
 	else:
 		statuses.remove(index)
 	_marked_hits += 1
-	return 1.0 + bonus
+	_mark_heal_due = def.mark_heal
+	return 1.0 + def.marked_bonus
+
+
+## After a hit that used a healing mark (Sapped): heals the marker that
+## fraction of the damage dealt.
+func _heal_from_mark(attacker_id: int, damage: float) -> void:
+	var fraction := _mark_heal_due
+	_mark_heal_due = 0.0
+	var attacker := _player_by_id(attacker_id)
+	if fraction > 0.0 and damage > 0.0 and attacker:
+		_heal_player(attacker, damage * fraction, attacker_id)
+		_mark_heals += 1
 
 
 ## Venom capstone ("heal_cut"): healing on a target carrying a status
@@ -1538,7 +1566,7 @@ func _mage_ability_started(player: Player, started: AbilityParams) -> void:
 		var focus := player.build.weapon_effect(player.state.weapon_id(), "focus_refund")
 		if (focus and player.last_heavy_hit_tick >= 0
 				and _tick - player.last_heavy_hit_tick <= focus.threshold * Engine.physics_ticks_per_second):
-			player.state.gain_ember(player.params, started.ember_cost, false)
+			player.state.gain_ember(player.params, player.state.ember_cost_of(started), false)
 			_focus_refunds += 1
 	var aura := player.build.wing_effect("aura_refund")
 	if aura and player.state.is_using_wing() and started.id == aura.applies_to:
@@ -1774,6 +1802,14 @@ func zone_effect(zone: Zone, target: Node3D) -> void:
 	if (bind and bind.applies_to == p.id and p.affects == ZoneParams.AFFECTS_HOSTILE
 			and not (player and player.state.dead)):
 		_give_status(zone.owner_id, target, StatusDefs.current().index_of(bind.status), 1, -1)
+
+
+## A heal zone's pulse that didn't reach its owner heals the owner its
+## owner_heal (Renewal Pulse: a heal ability heals its caster too). Server.
+func zone_owner_heal(zone: Zone) -> void:
+	var owner := _player_by_id(zone.owner_id)
+	if owner:
+		_heal_player(owner, zone.params.owner_heal, zone.owner_id)
 
 
 ## Conflagration capstone ("zone_grow", applies_to = a status): the owner's
@@ -2103,8 +2139,8 @@ func _print_juggernaut_summary() -> void:
 	print("SUMMARY paladin heal_pulses=%d cleanses=%d blessings=%d deflections=%d reflections=%d shared_damage=%d kindled=%d judgments=%d" % [
 			_heal_pulses, _cleanses, _blessings, _deflections, _reflections, roundi(_shared_damage),
 			_kindled, _judgments])
-	print("SUMMARY mage ally_supports=%d shields=%d absorbed=%d focus_refunds=%d aura_refunds=%d" % [
-			_ally_supports, _shields, roundi(_absorbed), _focus_refunds, _aura_refunds])
+	print("SUMMARY mage ally_supports=%d shields=%d absorbed=%d focus_refunds=%d aura_refunds=%d mark_heals=%d" % [
+			_ally_supports, _shields, roundi(_absorbed), _focus_refunds, _aura_refunds, _mark_heals])
 	print("SUMMARY ranger ignites=%d ignited_stacks=%d loaded_shots=%d piercing_heavies=%d parting_shots=%d hunted_hits=%d" % [
 			_ignites, _ignited_stacks, _loaded_shots, _piercing_heavies, _parting_shots, _hunted_hits])
 	print("SUMMARY assassin backstabs=%d primed_crits=%d feint_reads=%d marked_hits=%d flurry_fans=%d heal_cuts=%d embedded=%d recalled=%d" % [
@@ -2420,6 +2456,7 @@ func _heal_player(target: Player, amount: float, healer_id: int) -> float:
 	var source := _player_by_id(healer_id)
 	if source:
 		amount *= source.state.statuses.healing_multiplier(source.params.statuses, true)  # Aura
+		amount *= 1.0 + source.level_bonus_healing  # the Paladin's level bonus
 	var healed := minf(amount, target.max_health() - target.health)
 	_overheal_shield(source, target, amount - maxf(healed, 0.0))
 	if healed <= 0.0:
@@ -2451,7 +2488,7 @@ func _apply_player_status_heal(player: Player) -> void:
 func _on_wing_started(player: Player) -> void:
 	var wing := player.state.current_ability(player.params)
 	_wing_uses += 1
-	_ember_spent += wing.ember_cost
+	_ember_spent += player.state.ember_cost_of(wing)
 	if _verbose:
 		print("[server] peer %d uses wing %s (ember %.0f left)" % [player.peer_id, wing.id,
 				player.state.ember])
@@ -3226,7 +3263,7 @@ func _bot_wing_slot(ability_id: String) -> int:
 				or not state.ability_ready_for(wing, params)):
 			continue  # (ability_ready_for: Shadow Swap waits for its decoy)
 		var keep := state.rebirth_ember_needed(params) if state.can_rebirth(params) else 0.0
-		if state.ember - wing.ember_cost >= keep:
+		if state.ember - state.ember_cost_of(wing) >= keep:
 			return slot
 	return -1
 
@@ -3478,7 +3515,7 @@ func _update_wing_hud() -> void:
 			continue
 		var left := state.wing_cooldown_left(index)
 		_hud.set_wing(slot, wing.display_name, left / float(maxi(1, wing.cooldown_ticks)), left / tps,
-				wing.ember_cost, state.can_afford(wing))
+				state.ember_cost_of(wing), state.can_afford(wing))
 	var rebirth := ""
 	if state.is_rebirthing():
 		rebirth = "Rebirthing..."
