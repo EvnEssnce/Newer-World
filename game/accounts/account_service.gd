@@ -12,7 +12,8 @@ extends Node
 ## character_of(peer) for the class to spawn with.
 ##
 ## Client → server, reliable: _request_login(account, password, create),
-## _request_create_character(name, class_id), _request_play(character_id).
+## _request_create_character(name, class_id), _request_play(character_id),
+## _request_delete_character(character_id).
 ## Server → that client: _receive_login(error, account, characters),
 ## _receive_characters(error, characters), _receive_play(error). A character
 ## entry is {id, name, class_id}. Logging out = disconnecting.
@@ -31,7 +32,7 @@ extends Node
 
 ## Client: the login screen's result. characters: [{id, name, class_id}].
 signal login_finished(error: String, account_name: String, characters: Array)
-## Client: the character list after making one (or why it wasn't made).
+## Client: the character list after making or deleting one (or why not).
 signal characters_changed(error: String, characters: Array)
 ## Client: "" = the chosen character is ready, enter the world.
 signal play_finished(error: String)
@@ -63,6 +64,7 @@ var _hash_jobs: Array[Dictionary] = []
 var _logins := 0
 var _accounts_created := 0
 var _characters_created := 0
+var _characters_deleted := 0
 var _plays := 0
 var _refused := 0
 
@@ -110,8 +112,8 @@ static func player_name(from: Node, peer: int) -> String:
 
 
 func print_summary() -> void:
-	print("SUMMARY accounts logins=%d accounts_created=%d characters_created=%d plays=%d refused=%d" % [
-			_logins, _accounts_created, _characters_created, _plays, _refused])
+	print("SUMMARY accounts logins=%d accounts_created=%d characters_created=%d plays=%d refused=%d characters_deleted=%d" % [
+			_logins, _accounts_created, _characters_created, _plays, _refused, _characters_deleted])
 
 
 # --- Server: requests ---
@@ -253,6 +255,35 @@ func _request_create_character(character_name: String, class_id: String) -> void
 	_receive_characters.rpc_id(peer, error, characters)
 
 
+## Client → server: delete one of the account's characters, for good (its
+## save goes with it). Only from the character list (not while playing one).
+## Answered with _receive_characters (the list without it, or why not).
+@rpc("any_peer", "call_remote", "reliable")
+func _request_delete_character(character_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := multiplayer.get_remote_sender_id()
+	var session: Session = _sessions.get(peer)
+	if session == null or session.account_id == 0 or session.character_id != 0:
+		return
+	var characters := _characters(session)
+	var error := "That character isn't yours."
+	for entry in characters:
+		if entry["id"] != character_id:
+			continue
+		if persistence.delete_character(character_id):
+			error = ""
+			_characters_deleted += 1
+			characters = _characters(session)
+			print("[server] account %s deleted %s" % [session.account_name, entry["name"]])
+		else:
+			error = persistence.last_error
+		break
+	if not error.is_empty():
+		_refused += 1
+	_receive_characters.rpc_id(peer, error, characters)
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func _request_play(character_id: int) -> void:
 	if not multiplayer.is_server():
@@ -302,6 +333,10 @@ func create_character(character_name: String, class_id: String) -> void:
 
 func play(character_id: int) -> void:
 	_request_play.rpc_id(1, character_id)
+
+
+func delete_character(character_id: int) -> void:
+	_request_delete_character.rpc_id(1, character_id)
 
 
 @rpc("authority", "call_remote", "reliable")

@@ -23,7 +23,7 @@ var loot: LootSystem
 ## World/Progression: the levels that give each tree its points. Set by World;
 ## null = full points.
 var progression: ProgressionSystem
-## Trees cut down to the points the levels give (set_points: saves from a
+## Trees cut down to the pool the level gives (set_points: saves from a
 ## higher level or made with full test points, default builds).
 var trees_cut := 0
 ## Build changes applied / refused (for the smoke test summary).
@@ -61,26 +61,21 @@ func setup_player(player: Player, class_id: String, save: CharacterSave = null) 
 	return refused
 
 
-## Gives the player's build the tree points its levels give (World/Progression;
-## every tree full with data/testing.cfg [progression] full_points or no
-## progression yet) and cuts trees that spend more (logged). Doesn't touch
+## Gives the player's build the point pool its character level gives
+## (World/Progression; no pool with data/testing.cfg [progression] full_points
+## or no progression yet) and cuts a build that spends more (logged). Doesn't touch
 ## the state or send anything. Returns how many trees were cut.
 func set_points(player: Player) -> int:
 	var levels: Progression = progression.progression_of(player.peer_id) if progression else null
-	var limits: Dictionary[String, int] = {}
-	var wing_limit := -1
-	if levels and not ProgressionSystem.full_points():
-		for weapon_id: String in player.build.trees:
-			limits[weapon_id] = levels.weapon_points(weapon_id)
-		wing_limit = levels.wing_points()
-	var cut := player.build.set_point_limits(limits, wing_limit)
+	var pool := levels.points() if levels and not ProgressionSystem.full_points() else -1
+	var cut := player.build.set_point_pool(pool)
 	trees_cut += cut.size()
 	for line in cut:
 		print("[server] peer %d: tree cut to the points its levels give (%s)" % [player.peer_id, line])
 	return cut.size()
 
 
-## World/Progression's points_changed: a level-up raised `peer`'s points. Server.
+## World/Progression's points_changed: a character level-up grew `peer`'s pool. Server.
 func on_points_changed(peer: int) -> void:
 	var player := _players().get_node_or_null(str(peer)) as Player
 	if player == null or player.build == null:

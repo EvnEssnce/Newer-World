@@ -272,6 +272,18 @@ func prune(allocated: PackedStringArray, limit: int = -1) -> PackedStringArray:
 func fit(allocated: PackedStringArray, slots: PackedStringArray, limit: int) -> Array[PackedStringArray]:
 	if validate(allocated, limit) == "":
 		return [allocated, slots]
+	var kept := prune(fit_order(allocated, slots), limit)
+	var unlocked := unlocked_abilities(kept)
+	var kept_slots := slots.duplicate()
+	for i in kept_slots.size():
+		if not (kept_slots[i] in unlocked):
+			kept_slots[i] = ""
+	return [kept, kept_slots]
+
+
+## The order fit keeps an allocation's nodes in: the nodes of slotted abilities
+## first, then the rest as listed (CharacterBuild.set_point_pool too).
+func fit_order(allocated: PackedStringArray, slots: PackedStringArray) -> PackedStringArray:
 	var order := PackedStringArray()
 	for id in allocated:
 		var n := get_node(id)
@@ -280,13 +292,7 @@ func fit(allocated: PackedStringArray, slots: PackedStringArray, limit: int) -> 
 	for id in allocated:
 		if not (id in order):
 			order.append(id)
-	var kept := prune(order, limit)
-	var unlocked := unlocked_abilities(kept)
-	var kept_slots := slots.duplicate()
-	for i in kept_slots.size():
-		if not (kept_slots[i] in unlocked):
-			kept_slots[i] = ""
-	return [kept, kept_slots]
+	return order
 
 
 ## Removes a node and anything that needed it.

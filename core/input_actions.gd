@@ -25,6 +25,8 @@ const KEY_BINDINGS: Dictionary[StringName, Array] = {
 	# Tradeskills panel (TradeskillSystem).
 	&"toggle_tradeskills": [KEY_P],
 	&"toggle_hitboxes": [KEY_F3],
+	# The keybinds list on the HUD (KeybindsPanel).
+	&"toggle_keybinds": [KEY_F1],
 	# Party (PartySystem). Invite/kick target the player nearest the crosshair.
 	&"party_invite": [KEY_T],
 	&"party_accept": [KEY_Y],

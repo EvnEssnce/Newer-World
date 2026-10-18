@@ -8,7 +8,8 @@ extends Node
 ## player in Enemy.damaged_by gets the enemy's kill_xp, and its mastery_xp
 ## split over the weapons that dealt their damage, Progression.mastery_split)
 ## and gathering (on_gathered, connected to World/Gathering's `gathered`).
-## points_changed tells World/Builds when a level-up raised a tree's points.
+## points_changed tells World/Builds when a character level-up grew the tree
+## point pool (mastery levels give no points).
 ## Clients send nothing here.
 ##
 ## Server -> owner, reliable: _receive_progress(Progression.to_dict()) on join
@@ -128,7 +129,7 @@ func grant(peer: int, xp: int, mastery: Dictionary[String, int]) -> void:
 	_level_ups += gained
 	_mastery_level_ups += mastery_ups.size()
 	save_changed.emit(peer)
-	if gained > 0 or not mastery_ups.is_empty():
+	if gained > 0:
 		points_changed.emit(peer)
 	if not _connected(peer):
 		return
@@ -180,7 +181,8 @@ func _receive_xp(xp: int, mastery: Dictionary) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _receive_level_up(weapon_id: String, from_level: int, to_level: int) -> void:
 	_level_ups_seen += 1
-	_show(level_up_line(weapon_id, from_level, to_level), LEVEL_UP_COLOR)
+	var gained := defs.points(to_level) - defs.points(from_level) if weapon_id.is_empty() else 0
+	_show(level_up_line(weapon_id, to_level, gained), LEVEL_UP_COLOR)
 
 
 ## "+50 XP  +25 Spear  +15 Broadsword" (mastery after the character XP, by weapon
@@ -196,11 +198,12 @@ static func xp_line(xp: int, mastery: Dictionary) -> String:
 	return "  ".join(parts)
 
 
-## "Level 3" / "Spear mastery 4"; the line says which trees got points.
-static func level_up_line(weapon_id: String, _from_level: int, to_level: int) -> String:
+## "Level 3: +3 tree points (K)" (points_gained: what the pool grew by) or
+## "Spear mastery 4".
+static func level_up_line(weapon_id: String, to_level: int, points_gained: int) -> String:
 	if weapon_id.is_empty():
-		return "Level %d: Wing tree points (K)" % to_level
-	return "%s mastery %d: tree points (K)" % [weapon_name(weapon_id), to_level]
+		return "Level %d: +%d tree points (K)" % [to_level, points_gained]
+	return "%s mastery %d" % [weapon_name(weapon_id), to_level]
 
 
 static func weapon_name(weapon_id: String) -> String:

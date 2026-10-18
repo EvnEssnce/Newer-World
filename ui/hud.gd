@@ -1,8 +1,8 @@
 class_name Hud
 extends CanvasLayer
 ## In-game overlay: health, stamina and Ember bars (Ember with a Rebirth marker
-## and line), ability bar, Wing slots, current weapon, connection stats and
-## controls. The ability bar, Wing slots, Ember bar and crosshair (Crosshair)
+## and line), ability bar, Wing slots, current weapon, connection stats, the XP
+## bar and the keybinds list (KeybindsPanel). The ability bar, Wing slots, Ember bar and crosshair (Crosshair)
 ## are built in code.
 
 const SLOT_KEYS := ["Q", "E", "R"]
@@ -50,9 +50,13 @@ var _equipment_summary: EquipmentSummary
 ## Character level and XP: a thin bar along the bottom edge of the screen
 ## and a label left of the health bar (setup_progression; World/Progression's local copy).
 var _progression: ProgressionSystem
+## The key list, bottom left (F1 hides it).
+var _keybinds: KeybindsPanel
 var _xp_bar: ProgressBar
 var _xp_label: Label
 const XP_FILL := Color(0.55, 0.8, 0.45)
+## The XP bar's height along the bottom edge (pixels).
+const XP_BAR_HEIGHT := 10.0
 ## Magazine readout left of the ability bar (Throwing Knives): pips, a count
 ## and a reload bar.
 var _ammo_box: VBoxContainer
@@ -65,6 +69,8 @@ const AMMO_EMPTY := Color(0.3, 0.3, 0.33, 0.8)
 
 func _ready() -> void:
 	_build_ability_bar()
+	_keybinds = KeybindsPanel.new()
+	add_child(_keybinds)
 	_build_wing_bar()
 	_build_ember_bar()
 	_build_status_row()
@@ -104,7 +110,7 @@ func setup_progression(progression: ProgressionSystem) -> void:
 	_progression = progression
 	_xp_bar = ProgressBar.new()
 	_xp_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_xp_bar.offset_top = -4.0
+	_xp_bar.offset_top = -XP_BAR_HEIGHT
 	_xp_bar.offset_bottom = 0.0
 	_xp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_xp_bar.show_percentage = false
@@ -129,6 +135,11 @@ func setup_progression(progression: ProgressionSystem) -> void:
 	_xp_label.add_theme_constant_override("outline_size", 4)
 	_xp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_xp_label)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not event.is_echo() and event.is_action_pressed(&"toggle_keybinds"):
+		_keybinds.visible = not _keybinds.visible
 
 
 func _process(_delta: float) -> void:

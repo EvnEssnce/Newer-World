@@ -11,6 +11,8 @@ signal connect_requested(address: String)
 signal login_requested(account_name: String, password: String, create: bool)
 signal create_requested(character_name: String, class_id: String)
 signal play_requested(character_id: int)
+## Delete a character (after the second click on Delete).
+signal delete_requested(character_id: int)
 ## Back from the login or character screen: disconnect.
 signal logout_requested
 
@@ -28,6 +30,12 @@ var _characters: ItemList
 var _empty_label: Label
 var _play_button: Button
 var _new_button: Button
+## Delete: the first click arms it for the selected character, the second deletes.
+var _delete_button: Button
+var _delete_armed_id := 0
+var _character_names: Array[String] = []
+## The status line to show when the server accepts the last request.
+var _success_text := ""
 var _character_name: LineEdit
 var _class_picker: OptionButton
 var _class_ids := PackedStringArray()
@@ -90,11 +98,14 @@ func show_characters(account_name: String, characters: Array, status: String = "
 		_remember_account(account_name)
 	_characters.clear()
 	_character_ids.clear()
+	_character_names.clear()
+	_delete_armed_id = 0
 	for entry: Dictionary in characters:
 		var class_def := ClassDef.for_id(str(entry["class_id"]))
 		var class_name_text := class_def.display_name if class_def else str(entry["class_id"])
 		_characters.add_item("%s   %s" % [entry["name"], class_name_text])
 		_character_ids.append(int(entry["id"]))
+		_character_names.append(str(entry["name"]))
 	_character_count = characters.size()
 	if _character_count > 0:
 		_characters.select(_character_count - 1 if _page == "create" else 0)
@@ -156,16 +167,19 @@ func _build_characters_page() -> void:
 	_characters = ItemList.new()
 	_characters.custom_minimum_size = Vector2(PAGE_WIDTH, 160)
 	_characters.item_activated.connect(func(_index: int) -> void: _request_play())
-	_characters.item_selected.connect(func(_index: int) -> void: _update_character_buttons())
+	_characters.item_selected.connect(func(_index: int) -> void:
+		_delete_armed_id = 0
+		_update_character_buttons())
 	page.add_child(_characters)
 	_empty_label = _label("No characters yet. Make one to play.")
 	page.add_child(_empty_label)
 	_play_button = _button("Play", _request_play)
 	_new_button = _button("New character", func() -> void: show_create())
+	_delete_button = _button("Delete", _request_delete)
 	var log_out := _button("Log out", func() -> void: logout_requested.emit())
 	page.add_child(_row([_play_button, _new_button]))
-	page.add_child(log_out)
-	_controls["characters"] = [_characters, _play_button, _new_button, log_out]
+	page.add_child(_row([_delete_button, log_out]))
+	_controls["characters"] = [_characters, _play_button, _new_button, _delete_button, log_out]
 
 
 func _build_create_page() -> void:
@@ -211,6 +225,10 @@ func _show_page(page_name: String) -> void:
 
 func _update_character_buttons() -> void:
 	_play_button.disabled = _characters.get_selected_items().is_empty()
+	_delete_button.disabled = _play_button.disabled
+	var selected := _characters.get_selected_items()
+	var armed := _delete_armed_id != 0 and not selected.is_empty()
+	_delete_button.text = "Delete %s for good?" % _character_names[selected[0]] if armed else "Delete"
 	var rules := AccountRules.from_tuning()
 	_new_button.disabled = not rules.character_count_error(_character_count).is_empty()
 
@@ -246,8 +264,31 @@ func _request_create() -> void:
 	if not error.is_empty():
 		set_status(error)
 		return
+	_success_text = "Character made."
 	set_status("Making %s..." % character_name, true)
 	create_requested.emit(character_name, _class_ids[_class_picker.selected])
+
+
+## First click: asks again on the button. Second click on the same character:
+## asks the server to delete it.
+func _request_delete() -> void:
+	var selected := _characters.get_selected_items()
+	if selected.is_empty():
+		return
+	var id := _character_ids[selected[0]]
+	if _delete_armed_id != id:
+		_delete_armed_id = id
+		_update_character_buttons()
+		return
+	_delete_armed_id = 0
+	_success_text = "%s was deleted." % _character_names[selected[0]]
+	set_status("Deleting %s..." % _character_names[selected[0]], true)
+	delete_requested.emit(id)
+
+
+## What to say when the server accepts the last create or delete request.
+func success_text() -> String:
+	return _success_text
 
 
 func _request_play() -> void:

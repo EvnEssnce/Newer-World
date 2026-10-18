@@ -124,6 +124,33 @@ func test_character_names() -> void:
 	assert_eq(rules.character_name_error("Ash_"), "")
 
 
+func test_blocked_words_in_names() -> void:
+	rules.blocked_contains = PackedStringArray(["dung", "rot", "piss"])
+	rules.blocked_whole = PackedStringArray(["bum"])
+	rules.allowed_words = PackedStringArray(["carrot"])
+	rules.character_name_max = 16
+	rules.account_name_max = 16
+	assert_eq(rules.character_name_error("Dungeater"), AccountRules.BLOCKED_NAME)
+	assert_eq(rules.character_name_error("BigDUNG"), AccountRules.BLOCKED_NAME, "any case, anywhere")
+	assert_eq(rules.character_name_error("Duuuunng"), AccountRules.BLOCKED_NAME, "repeats squeezed")
+	assert_eq(rules.account_name_error("d_u_n_g"), AccountRules.BLOCKED_NAME, "non-letters dropped")
+	assert_eq(rules.account_name_error("dun9_lord"), AccountRules.BLOCKED_NAME, "look-alikes")
+	assert_eq(rules.character_name_error("Bum"), AccountRules.BLOCKED_NAME, "a whole word")
+	assert_eq(rules.character_name_error("Bumble"), "", "whole words only as the whole name")
+	assert_eq(rules.character_name_error("Carrotte"), "", "allowed words cut out first")
+	assert_eq(rules.character_name_error("Carrotrot"), AccountRules.BLOCKED_NAME)
+	assert_eq(rules.character_name_error("Pisa"), "", "a short word isn't squeezed into others")
+	assert_eq(rules.character_name_error("Ashwyn"), "")
+
+
+func test_the_real_name_filter() -> void:
+	var real := AccountRules.from_tuning()
+	assert_true(real.blocked_contains.size() > 10)
+	for name in ["Fuuuckface", "Sh1tlord", "Assassin", "Peacock", "Dickens", "Annalise", "Ashton"]:
+		var blocked := real.blocked_name(name)
+		assert_eq(blocked, name in ["Fuuuckface", "Sh1tlord"], name)
+
+
 func test_passwords() -> void:
 	assert_eq(rules.password_error("abcdef"), "")
 	assert_eq(rules.password_error("any chars ok"), "", "spaces and anything else are allowed")

@@ -102,6 +102,7 @@ func _show_menu(status: String) -> void:
 	_menu.login_requested.connect(_accounts.login)
 	_menu.create_requested.connect(_accounts.create_character)
 	_menu.play_requested.connect(_accounts.play)
+	_menu.delete_requested.connect(_accounts.delete_character)
 	_menu.logout_requested.connect(_log_out)
 
 
@@ -168,7 +169,7 @@ func _on_characters_changed(error: String, characters: Array) -> void:
 	if _menu == null:
 		return
 	if error.is_empty():
-		_menu.show_characters("", characters, "Character made.")
+		_menu.show_characters("", characters, _menu.success_text())
 	elif _menu.is_on_create_page():
 		_menu.set_status(error)
 	else:

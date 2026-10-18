@@ -122,8 +122,8 @@ game/
   tradeskills/tradeskill_system.gd  World/Tradeskills: XP from gathers (and crafting later),
                              owner updates, level-up feed lines.
   progression/progression_defs.gd, progression.gd  Character level and per-weapon mastery
-                             level (data/progression.cfg: caps, XP curves, tree points per
-                             level) and one character's levels/XP. Pure, unit tested.
+                             level (data/progression.cfg: caps, XP curves, the tree point
+                             pool per character level) and one character's levels/XP. Pure, unit tested.
                              progression_system.gd: World/Progression (XP from kills and
                              gathers, owner updates and feed lines; see "Progression").
   crafting/craft_progress.gd The Forge panel's progress maths, cancel rules, XP line text. Pure.
@@ -170,7 +170,8 @@ ui/                  connect_menu (client start screens: address, login/create a
                      in code), crosshair (screen-centre ticks + dot,
                      hidden under modal panels), hud (health/stamina/Ember bars with a
                      current/max health number, ability bar, Wing slots, weapon line, status
-                     row, Rebirth banner, debug info),
+                     row, Rebirth banner, debug info, the XP bar along the bottom edge),
+                     keybinds_panel (F1: the key list, bottom left, from InputActions),
                      equipment_summary (top-right gear box: average gear score, a drawn symbol
                      per equip slot tinted by rarity, gear stat totals from
                      `Equipment.Stats.summary_lines`; added by `Hud.setup_equipment(loot)`,
@@ -198,8 +199,9 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      testing (test-only switches: the in-game class change, tradeskill join_xp,
                      full tree points),
                      accounts (name/password rules, max characters, hash iterations),
+                     name_filter (words names can't contain),
                      saving (periodic and after-change save delays), progression
-                     (character/mastery level caps and XP curves, tree points per level) (.cfg).
+                     (character/mastery level caps and XP curves, the tree point pool) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
@@ -336,7 +338,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   quits if it can't). A client, once connected and holding the server's tuning, logs
   in, and only makes its World after choosing a character. Reliable RPCs: client →
   server `_request_login(account, password, create)`, `_request_create_character(name,
-  class_id)`, `_request_play(character_id)`; server → that client `_receive_login(error,
+  class_id)`, `_request_play(character_id)`, `_request_delete_character(character_id)` (one
+  of the account's, not while playing; answered with `_receive_characters`); server → that client `_receive_login(error,
   account, characters)`, `_receive_characters(error, characters)` (entries `{id, name,
   class_id}`), `_receive_play(error)`. **Names** (`AccountService.names`, a
   `PlayerNames`, peer id → character name, both sides; never in snapshots, so it
@@ -360,7 +363,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   logs in alone (`start_bot`): account `--account=` (default `bot_<peer id>`, made if
   missing), character `--character=` (default "Bot" + the peer id as letters), made
   with `--class=`. `SUMMARY accounts logins= accounts_created= characters_created=
-  plays= refused=` (the smoke test checks every bot made both and played).
+  plays= refused= characters_deleted=` (the smoke test checks every bot made both and played).
+  **Name filter** (`data/name_filter.cfg`, `AccountRules.blocked_name`, account and character
+  names): lower-cased, look-alike digits/symbols as letters, non-letters dropped, `allowed`
+  words cut out; refused if it contains a `contains` word (also with repeats squeezed, for
+  words of 4+ letters once squeezed) or is exactly a `whole` word: "That name isn't allowed."
 - **Progression** (`World/Progression`, `ProgressionSystem`, both sides; build order 4):
   server only grants XP. A kill (`World._damage_enemy` → `on_enemy_killed`) gives every
   player in `Enemy.damaged_by` the enemy file's `[progression] kill_xp`, and its
@@ -370,12 +377,15 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `grant` → server → owner `_receive_progress(dict)`, `_receive_xp(xp, mastery)` ("+50 XP
   +40 Spear" feed line), `_receive_level_up(weapon_id, from, to)` ("" = character);
   `save_changed`; `points_changed` → `BuildService.on_points_changed`. Clients: `local`,
-  the HUD's XP bar (`Hud.setup_progression`). **Tree points from levels:**
-  `BuildService.set_points` (join, after restoring the save; class change; level-up)
-  puts `Progression.weapon_points`/`wing_points` into `CharacterBuild.set_point_limits`,
-  which cuts trees over them (`MasteryTree.fit`, logged); `validate`/`can_add`/`prune`
-  take the limit; the limits reach the owner in `_receive_build` (`to_dict(true)`), not
-  saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
+  the HUD's XP bar (`Hud.setup_progression`). **Tree points: one pool from the character level** (`[points]`: 12 at level 1,
+  +2.5 a level (2 and 3 in turn), 84 at the cap of 30 = the Wing tree's 24 + 30 (1.5
+  branches) in two weapons; mastery levels give none). Every tree spends from it, each
+  within its own budget. `BuildService.set_points` (join, after restoring the save; class
+  change; level-up) calls `CharacterBuild.set_point_pool`, which cuts a build over it
+  (one node per tree per round: Wings, the weapon out, the other equipped one, the rest;
+  slotted abilities first, `MasteryTree.fit_order`; logged); `point_limit(tree)` = what
+  the tree spends + `points_left()` is the limit `validate`/`can_add`/`prune` take; the
+  pool reaches the owner in `_receive_build` (`to_dict(true)`), not saves. `data/testing.cfg [progression] full_points` = no limits (the smoke test).
   `SUMMARY progression ... kills_credited= gathers= xp_granted= mastery_xp_granted=
   level_ups= mastery_level_ups= xp_lines=`.
 - **Saving** (`World/Saves`, `SaveService`, server only, no RPCs; build order 3.3):
@@ -639,7 +649,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   capstone aimed at one of its tree's abilities must require it); K shows "Requires X".
 - **Mastery** (`data/mastery_<weapon>.cfg`, rules in `data/mastery.cfg`): two
   branches; a node of tier T needs `tier_requirements[T-1]` points in lower tiers of its
-  branch; total ≤ `points`. Active nodes unlock abilities (a slot may only hold an
+  branch (`[0, 4, 8, 12]`; nodes cost 2 or 4); total ≤ `points` (30: 1.5 branches) and
+  the character's point pool (see "Progression"). Active nodes unlock abilities (a slot may only hold an
   unlocked one); passive/upgrade nodes are server-side modifiers (`effect` = damage,
   low_health_damage, block_stamina, execute_damage, hold_the_line, hook_stagger,
   crit_staggered, ability_range, ramp_on_hit, heavy_shockwave, heavy_breaks_block,
@@ -870,7 +881,7 @@ charges are cross-class).
   Wings (a queued Wing press survives a swap). Weapon abilities could cost Ember too
   (`ember_cost`, 0 for all so far; the Mage will use it).
 - **Wing tree** (`data/mastery_wings_<class>.cfg`, `MasteryTree.for_wings`, 2 slots,
-  `[tree] points` = 12 for now): Fighter branches Bulwark and Fury. Same rules and free
+  `[tree] points` = 24, from the shared pool): Fighter branches Bulwark and Fury. Same rules and free
   respecs; K panel "Wings" tab. Its passives apply to every attack
   (`CharacterBuild.damage_multiplier`); a Wing ability gets only the Wing tree's.
   Capstones (server, `World`): **Mantle of Renewal** (`mantle_heal`: while Ember
@@ -883,7 +894,7 @@ charges are cross-class).
   window covers the second half and the landing; height cosmetic). Defaults: Z Ember Mantle,
   C Wingbeat Surge.
 - **Juggernaut Wings** (`data/wings_juggernaut.cfg`, tree branches Tempest Wings and
-  Anchor, 12 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
+  Anchor, 24 points): Gale Burst (20 Ember, 12 s: 4 m radial, 60 damage, knockback
   3.5 m), Challenger's Roar (25, 15 s: 8 m radial, no damage, Taunted + Slow 3 s; a guard
   facing you blocks it), Meteor Drop (30, 16 s: 6 m eased-in leap, 4 m cosmetic height,
   3 m radial crash at the landing, 160 damage, launch 1.8 m), Unbowed (25, 20 s: self
@@ -977,7 +988,8 @@ click = block, Q/E/R abilities, Z/C Wing abilities, X swap weapon, K mastery pan
 or Esc closes it), T/Y/N/L/Delete party (see below), F interact (pick up your loot in
 reach, else gather a node, else use a station: nearest the crosshair within each), P
 tradeskills, I
-inventory (I or Esc closes it), F3 hitboxes, Esc frees the mouse. Aimed area abilities
+inventory (I or Esc closes it), F3 hitboxes, F1 shows/hides the keybinds list (bottom
+left, `KeybindsPanel`: keys read from `InputActions`), Esc frees the mouse. Aimed area abilities
 (their zone lands at the crosshair) cast when their key is **released**; holding shows
 the marker; right click or Esc cancels (`AimHold`).
 Panels that need the mouse join the `modal_ui` group: while one is visible, clicks and
