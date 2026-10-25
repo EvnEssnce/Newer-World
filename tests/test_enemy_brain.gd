@@ -1,6 +1,6 @@
 extends TestCase
-## EnemyBrain: aggro, chase, swing, cooldown, stagger, leash, wander, and a
-## stationary enemy (the training dummy).
+## EnemyBrain: aggro, chase, swing, cooldown, stagger, leash, wander, a
+## stationary enemy (the training dummy), camp pulls and alerts, keep_distance.
 ## Fixed params, not data/enemy_husk.cfg. The camp is at the origin.
 
 const DELTA := 1.0 / 60.0
@@ -248,3 +248,70 @@ func test_always_aware_is_never_unaware() -> void:
 	assert_eq(brain.target_id, 0, "a dummy never targets anyone")
 	assert_false(brain.is_unaware_of(1, params), "so only rear-arc hits backstab it")
 	assert_false(brain.is_unaware_of(2, params))
+
+
+func test_pulled_once_when_it_starts_fighting() -> void:
+	_step(HOME, {1: Vector3(9, 0, 0)})
+	assert_false(brain.take_pulled(), "still idle")
+	_step(HOME, {1: Vector3(5, 0, 0)})
+	assert_true(brain.take_pulled(), "noticed a player")
+	assert_false(brain.take_pulled(), "cleared once taken")
+	_step(HOME, {1: Vector3(5, 0, 0)})
+	assert_false(brain.take_pulled(), "already fighting")
+
+
+func test_a_hit_from_idle_pulls_it() -> void:
+	brain.add_threat(1, 50.0, params)
+	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
+	assert_true(brain.take_pulled())
+
+
+func test_alert_makes_an_idle_campmate_chase() -> void:
+	assert_true(brain.alert(3, params))
+	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
+	assert_eq(brain.target_id, 3)
+	assert_true(brain.threat.has(3))
+	assert_true(brain.take_pulled(), "a joined fight counts as pulled too")
+	var velocity := _step(HOME, {3: Vector3(15, 0, 0)})
+	assert_true(velocity.x > 0.0, "chases them even outside its aggro range")
+
+
+func test_alert_ignored_unless_idle() -> void:
+	_step(HOME, {1: Vector3(5, 0, 0)})
+	assert_false(brain.alert(2, params), "already fighting someone")
+	assert_eq(brain.target_id, 1)
+	brain.mode = EnemyBrain.Mode.RETURN
+	assert_false(brain.alert(2, params), "walking home")
+	assert_false(EnemyBrain.new().alert(0, params), "nobody to fight")
+
+
+func test_keep_distance_backs_away_between_swings() -> void:
+	params.keep_distance = 4.0
+	params.retreat_speed = 2.0
+	var target := {1: Vector3(1.5, 0, 0)}
+	_step(HOME, target)  # notices, in reach: swings at once
+	assert_eq(brain.mode, EnemyBrain.Mode.ATTACK)
+	for i in params.attack.total_ticks():
+		_step(HOME, target)
+	assert_eq(brain.mode, EnemyBrain.Mode.CHASE)
+	assert_true(brain.cooldown_ticks > 0)
+	var velocity := _step(HOME, target)
+	assert_true(velocity.is_equal_approx(Vector2(-2, 0)), "backs away at retreat_speed")
+	assert_almost(brain.yaw, PlayerState.yaw_for_direction(Vector2(1, 0)), 0.001, "still faces it")
+	assert_true(_step(HOME, {1: Vector3(5, 0, 0)}).x > 0.0,
+			"past keep_distance: walks back in (it circles the edge until its next swing)")
+
+
+func test_keep_distance_still_swings_when_ready() -> void:
+	params.keep_distance = 4.0
+	params.retreat_speed = 2.0
+	_step(HOME, {1: Vector3(1.0, 0, 0)})
+	assert_eq(brain.mode, EnemyBrain.Mode.ATTACK, "cooldown 0: swings even up close")
+
+
+func test_no_keep_distance_stands_its_ground() -> void:
+	var target := {1: Vector3(1.5, 0, 0)}
+	_step(HOME, target)
+	for i in params.attack.total_ticks():
+		_step(HOME, target)
+	assert_true(_step(HOME, target).is_zero_approx(), "waits in reach for its cooldown")

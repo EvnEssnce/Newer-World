@@ -3,6 +3,8 @@ extends RefCounted
 ## One enemy type's tuning in simulation units (ticks, m/s, radians), from
 ## data/enemy_<kind>.cfg. Tests build their own.
 
+## Shown over it (its label). [stats] name, optional; default: the kind, capitalized.
+var display_name := ""
 var max_health := 0.0
 var move_speed := 0.0
 var wander_speed := 0.0
@@ -29,6 +31,13 @@ var stationary := false
 ## Counts as aware of every player: only hits from its rear arc backstab it,
 ## never the "unaware enemy" rule (training dummy, which never targets anyone).
 var always_aware := false
+## Between swings (while its attack cooldown runs) it backs away from its target
+## when nearer than this (m): hit-and-run and casters. 0 = stands its ground.
+var keep_distance := 0.0
+## Speed while backing away (m/s).
+var retreat_speed := 0.0
+## A projectile attack aims at this height above its target's feet (m).
+var aim_height := 1.0
 
 # Navigation ([navigation]; see EnemyPath). Kinds without the section walk straight.
 ## Walks around obstacles on the navigation mesh (EnemyNavigation).
@@ -72,12 +81,15 @@ static func for_kind(kind: String) -> EnemyParams:
 		_cache.clear()
 	if not _cache.has(kind):
 		_cache[kind] = from_tuning("enemy_" + kind)
+		if _cache[kind].display_name.is_empty():
+			_cache[kind].display_name = kind.capitalize()
 	return _cache[kind]
 
 
 static func from_tuning(file: String) -> EnemyParams:
 	var tps := float(Engine.physics_ticks_per_second)
 	var p := EnemyParams.new()
+	p.display_name = Tuning.get_optional(file, "stats", "name", "")
 	p.max_health = Tuning.get_value(file, "stats", "max_health")
 	p.move_speed = Tuning.get_value(file, "stats", "move_speed")
 	p.wander_speed = Tuning.get_value(file, "stats", "wander_speed")
@@ -96,6 +108,9 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.wander_pause_ticks = roundi(Tuning.get_value(file, "ai", "wander_pause") * tps)
 	p.stationary = Tuning.get_value(file, "ai", "stationary")
 	p.always_aware = Tuning.get_optional(file, "ai", "always_aware", false)
+	p.keep_distance = maxf(0.0, Tuning.get_optional(file, "ai", "keep_distance", 0.0))
+	p.retreat_speed = Tuning.get_optional(file, "ai", "retreat_speed", p.move_speed)
+	p.aim_height = Tuning.get_optional(file, "ai", "aim_height", 1.0)
 	p.paths = Tuning.get_optional(file, "navigation", "enabled", false) and not p.stationary
 	if p.paths:
 		p.repath_ticks = maxi(1, roundi(Tuning.get_value(file, "navigation", "repath_interval") * tps))

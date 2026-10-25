@@ -7,26 +7,23 @@ extends CharacterBody3D
 
 ## Server only: emitted after each tick in which its swing's hitbox is live.
 signal attack_stepped(enemy: Enemy)
+## Server only: its swing reached its projectile release tick (an [attack]
+## with `projectile`): World throws it at the target.
+signal projectile_released(enemy: Enemy)
 
 ## Must match the capsule in enemy.tscn. Used by player hit detection.
 const BODY_RADIUS := 0.5
 const BODY_HEIGHT := 2.2
 const MAX_SNAPSHOTS := 30
 
-# Placeholder visuals (cosmetic only; replaced by real models later).
-const BASE_COLOR := Color(0.42, 0.3, 0.48)
-## A stationary enemy (the training dummy): straw-colored, no club.
-const DUMMY_COLOR := Color(0.78, 0.66, 0.4)
+# Placeholder visuals (cosmetic only; replaced by real models later). The
+# kind's parts and colors are its EnemyLook (game/enemy/looks/<kind>_look.gd).
 ## The windup telegraph: the body glows toward this color as the swing winds up.
 const TELEGRAPH_COLOR := Color(1.0, 0.15, 0.05)
 const HIT_COLOR := Color(1.0, 1.0, 1.0)
 const DEAD_COLOR := Color(0.25, 0.25, 0.27)
 const HIT_FLASH_MS := 150
 const STAGGER_TILT := 0.4
-## Club pitch at rest, raised at the end of the windup, and at the end of the strike.
-const CLUB_IDLE := -0.6
-const CLUB_WOUND := 1.9
-const CLUB_STRUCK := -1.5
 
 ## Negative, so it never collides with a peer id. Also its node name.
 var enemy_id := 0
@@ -35,6 +32,9 @@ var kind := "husk"
 var params: EnemyParams
 ## Its camp: where it wanders, returns to and respawns.
 var home := Vector3.ZERO
+## Server: the camp it fights with (its marker's metadata/camp; "" = alone).
+## When one member starts fighting, World alerts the rest.
+var camp := ""
 ## Server-authoritative; clients copy it from snapshots.
 var health := 0.0
 var dead := false
@@ -77,6 +77,7 @@ var status_damage := 0.0
 var _snapshots: Array[Array] = []  # [server_time, pos, yaw, mode, attack_tick, dead]
 var _status_text := ""
 var _material: StandardMaterial3D
+var _look: EnemyLook
 var _hitbox_material: StandardMaterial3D
 var _hit_flash_until := 0
 ## The local player's damage on it (the dummy's readout; params.reset_ticks > 0).
@@ -101,13 +102,23 @@ func _ready() -> void:
 		_name_label.visible = false
 		return
 	_material = StandardMaterial3D.new()
-	_material.albedo_color = BASE_COLOR
-	($Model/BodyPivot/Body as MeshInstance3D).material_override = _material
+	var body := $Model/BodyPivot/Body as MeshInstance3D
+	body.material_override = _material
+	_look = EnemyLook.for_kind(kind)
+	_look.model = _model
+	_look.body_pivot = _body_pivot
+	_look.body = body
+	_look.club_pivot = _club_pivot
+	_look.eyes = $Model/BodyPivot/Eyes
+	_look.params = params
+	_club_pivot.visible = false
+	_look.build()
+	_material.albedo_color = _look.base_color()
+	_name_label.position.y = _look.label_height()
 	_hitbox_material = StandardMaterial3D.new()
 	_hitbox_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_hitbox_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hitbox_debug.material_override = _hitbox_material
-	_club_pivot.visible = not params.stationary
 	if params.reset_ticks > 0:
 		_meter = DamageMeter.new(params.reset_ticks / float(Engine.physics_ticks_per_second))
 	_update_label()
@@ -128,6 +139,8 @@ func server_step(targets: Dictionary, delta: float) -> void:
 		attack_results.clear()
 		# Blinded (Dazzled, Flare): this swing may miss everyone.
 		swing_misses = randf() < statuses.blind_amount(status_defs)
+	if params.attack.releases_projectile_at(brain.attack_tick):
+		projectile_released.emit(self)
 	desired = _apply_status_movement(desired)
 	velocity.x = desired.x
 	velocity.z = desired.y
@@ -266,9 +279,11 @@ func _apply_force_step() -> void:
 		velocity.y = launch
 
 
+## Yaw as a 32-bit float and health rounded up to whole points (clients only
+## draw them: ~10 bytes less per enemy in every snapshot).
 func get_snapshot() -> Array:
-	return [enemy_id, kind, global_position, brain.yaw, brain.mode, brain.attack_tick, health, dead,
-			statuses.to_packed()]
+	return [enemy_id, kind, global_position, PackedFloat32Array([brain.yaw])[0], brain.mode,
+			brain.attack_tick, ceilf(health), dead, statuses.to_packed()]
 
 
 # --- Client ---
@@ -350,7 +365,7 @@ func set_statuses(data: PackedInt32Array) -> void:
 
 func _update_label() -> void:
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
-	_name_label.text = "%s\n%s" % [kind.capitalize(), status]
+	_name_label.text = "%s\n%s" % [params.display_name, status]
 	if not _status_text.is_empty():
 		_name_label.text += "\n" + _status_text
 	if not _meter_text.is_empty():
@@ -370,24 +385,22 @@ func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
 	var attack := params.attack
 	var windup := float(attack.windup_ticks)
 	var strike_end := windup + attack.active_ticks
-	var club := CLUB_IDLE
 	var telegraph := 0.0
-	if attack_tick >= 0.0 and not dead:
-		if attack_tick < windup:
-			telegraph = attack_tick / maxf(windup, 1.0)
-			club = lerpf(CLUB_IDLE, CLUB_WOUND, telegraph)
-		elif attack_tick < strike_end:
-			club = lerpf(CLUB_WOUND, CLUB_STRUCK, (attack_tick - windup) / attack.active_ticks)
-		else:
-			club = lerpf(CLUB_STRUCK, CLUB_IDLE,
-					(attack_tick - strike_end) / maxf(attack.recovery_ticks, 1.0))
-	_club_pivot.rotation.x = club
+	if not dead:
+		telegraph = _look.windup_fraction(attack_tick)
+		_look.pose(attack_tick)
 
 	_hitbox_debug.visible = Player.show_hitboxes and attack_tick >= 0.0 and not dead
 	if _hitbox_debug.visible:
-		(_hitbox_debug.mesh as BoxMesh).size = Vector3(
-				attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
-		_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
+		if attack.shape == AttackParams.SHAPE_RADIAL:  # the square around its circle
+			(_hitbox_debug.mesh as BoxMesh).size = Vector3(
+					attack.hitbox_range * 2.0, attack.hitbox_height, attack.hitbox_range * 2.0)
+			_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, 0.0)
+		else:
+			(_hitbox_debug.mesh as BoxMesh).size = Vector3(
+					attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
+			_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
+		_hitbox_debug.visible = attack.shape != AttackParams.SHAPE_NONE
 		var active := attack_tick >= windup and attack_tick < strike_end
 		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
 
@@ -396,5 +409,4 @@ func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
 	elif Time.get_ticks_msec() < _hit_flash_until:
 		_material.albedo_color = HIT_COLOR
 	else:
-		var base: Color = DUMMY_COLOR if params.stationary else BASE_COLOR
-		_material.albedo_color = base.lerp(TELEGRAPH_COLOR, telegraph)
+		_material.albedo_color = _look.base_color().lerp(TELEGRAPH_COLOR, telegraph)

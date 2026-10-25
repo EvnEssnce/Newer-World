@@ -18,6 +18,11 @@ extends RefCounted
 ## Walking (wander, chase, return) goes through `path` (EnemyPath) when set:
 ## the brain picks the goal, the path the way around crates and walls. A swing
 ## starts only when the path to the target is direct.
+##
+## Camps: an enemy that starts fighting (IDLE -> CHASE) sets `pulled`; World
+## then alerts the rest of its camp (`alert`), so a camp fights together.
+## keep_distance > 0 (hit-and-run kinds, casters): while its attack cooldown
+## runs it backs away from a target nearer than that, facing it.
 
 enum Mode { IDLE, CHASE, ATTACK, STAGGERED, RETURN }
 
@@ -41,6 +46,9 @@ var threat := ThreatTable.new()
 var forced_target := 0
 ## Times it changed from one target to another (counted for the server summary).
 var target_switches := 0
+## Set when it starts fighting (IDLE -> CHASE): World alerts its camp and
+## clears it (take_pulled).
+var pulled := false
 ## Walks around obstacles (EnemyPath) when set; null = straight at the goal
 ## (tests, the training dummy, kinds with [navigation] enabled=false).
 var path: EnemyPath = null
@@ -59,7 +67,7 @@ func step(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParams,
 	match mode:
 		Mode.IDLE:
 			if _retarget(params) != 0:
-				mode = Mode.CHASE
+				_start_chase()
 				return _chase(pos, home, targets, params, delta)
 			return _wander(pos, home, params, delta, rng)
 		Mode.CHASE:
@@ -83,7 +91,23 @@ func add_threat(peer_id: int, amount: float, params: EnemyParams) -> void:
 	if mode == Mode.RETURN or not threat.add(peer_id, amount):
 		return
 	if mode == Mode.IDLE and _retarget(params) != 0:
-		mode = Mode.CHASE
+		_start_chase()
+
+
+## A campmate started fighting peer_id: an idle enemy joins in (proximity
+## threat on them, then it chases). Returns true if it joined.
+func alert(peer_id: int, params: EnemyParams) -> bool:
+	if mode != Mode.IDLE or peer_id <= 0:
+		return false
+	add_threat(peer_id, maxf(params.threat_proximity, 0.001), params)
+	return mode == Mode.CHASE
+
+
+## True once after it started fighting (then cleared).
+func take_pulled() -> bool:
+	var was := pulled
+	pulled = false
+	return was
 
 
 ## A taunt by peer_id: its threat goes to the top (ThreatTable.taunt). The
@@ -93,7 +117,7 @@ func taunt(peer_id: int, params: EnemyParams) -> bool:
 	if mode == Mode.RETURN or not threat.taunt(peer_id, params.threat_switch_ratio):
 		return false
 	if mode == Mode.IDLE:
-		mode = Mode.CHASE
+		_start_chase()
 		_set_target(peer_id)
 	return true
 
@@ -146,6 +170,11 @@ func _retarget(params: EnemyParams) -> int:
 	return target_id
 
 
+func _start_chase() -> void:
+	mode = Mode.CHASE
+	pulled = true
+
+
 func _set_target(peer_id: int) -> void:
 	if peer_id != target_id and peer_id != 0 and target_id != 0:
 		target_switches += 1
@@ -192,6 +221,8 @@ func _chase(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParam
 		threat.clear()
 		return _return(pos, home, params, delta)
 	var to := _flat(targets[target_id] - pos)
+	if cooldown_ticks > 0 and to.length() < params.keep_distance:
+		return _back_away(to, params, delta)
 	var route := _route(pos, targets[target_id])
 	# In reach but something in between (a wall or crate corner): keep walking
 	# around it instead of swinging through it.
@@ -202,6 +233,15 @@ func _chase(pos: Vector3, home: Vector3, targets: Dictionary, params: EnemyParam
 		mode = Mode.ATTACK
 		attack_tick = 0
 	return Vector2.ZERO
+
+
+## Hit-and-run / casters between swings: backs straight away from the target
+## (a wall behind it just stops it), still facing it.
+func _back_away(to: Vector2, params: EnemyParams, delta: float) -> Vector2:
+	_turn_toward(to, params, delta)
+	if to.is_zero_approx():
+		return Vector2.ZERO
+	return -to.normalized() * params.retreat_speed
 
 
 func _attack(pos: Vector3, targets: Dictionary, params: EnemyParams, delta: float) -> Vector2:

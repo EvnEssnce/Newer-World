@@ -116,6 +116,12 @@ var _deaths := 0
 var _respawns := 0
 var _blocks := 0
 var _guard_breaks := 0
+## Enemy kills by kind (enemy id kind -> count), for the summary.
+var _kills_by_kind: Dictionary[String, int] = {}
+## Campmates that joined a fight because one of their camp was pulled.
+var _camp_alerts := 0
+## Where each living player stands as enemies see it (_enemy_targets), this tick.
+var _enemy_view: Dictionary = {}
 ## Enemy swings that connected with a player (including blocked ones).
 var _enemy_hits := 0
 ## Player hits on enemies.
@@ -441,7 +447,7 @@ func _server_tick(delta: float) -> void:
 		_check_wall_stun(player)
 		_apply_player_status_damage(player)
 		_apply_player_status_heal(player)
-	var targets := _enemy_targets()
+	_enemy_view = _enemy_targets()
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead:
 			if _tick >= enemy.respawn_at_tick:
@@ -449,9 +455,12 @@ func _server_tick(delta: float) -> void:
 				if _verbose:
 					print("[server] enemy %d respawned" % enemy.enemy_id)
 		else:
-			enemy.server_step(targets, delta)
+			enemy.server_step(_enemy_view, delta)
 			_check_wall_stun(enemy)
 			_apply_enemy_status_damage(enemy)
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.brain.take_pulled() and not enemy.dead:
+			_alert_camp(enemy)
 	for player: Player in _players.get_children():
 		_hold_the_line(player)
 	_projectiles.server_step(delta)
@@ -2170,6 +2179,7 @@ func _damage_enemy(enemy: Enemy, damage: float, stagger_ticks: int, attacker_id:
 	if killed:
 		enemy.respawn_at_tick = _tick + enemy.params.respawn_ticks
 		_enemy_kills += 1
+		_kills_by_kind[enemy.kind] = _kills_by_kind.get(enemy.kind, 0) + 1
 		loot.on_enemy_killed(enemy)
 		progression.on_enemy_killed(enemy)
 	_send_hit(attacker_id, enemy.enemy_id, damage, HIT_DEFEATED if killed else alive_result)
@@ -2285,9 +2295,37 @@ func _spawn_enemies() -> void:
 		enemy.home = marker.position
 		enemy.position = marker.position
 		enemy.navigation = enemy_navigation
+		enemy.camp = marker.get_meta("camp", "")
 		enemy.attack_stepped.connect(_on_enemy_attack_stepped)
+		enemy.projectile_released.connect(_on_enemy_projectile)
 		_enemies.add_child(enemy)
 		next_id -= 1
+
+
+## Server: `enemy` just started fighting (it was pulled): the idle members of
+## its camp join in against its target (EnemyBrain.alert). Kinds and camps
+## come from the EnemySpawns markers (metadata/kind, metadata/camp).
+func _alert_camp(enemy: Enemy) -> void:
+	if enemy.camp.is_empty() or enemy.brain.target_id <= 0:
+		return
+	for mate: Enemy in _enemies.get_children():
+		if mate != enemy and not mate.dead and mate.camp == enemy.camp \
+				and mate.brain.alert(enemy.brain.target_id, mate.params):
+			_camp_alerts += 1
+
+
+## Server: an enemy's swing reached its projectile release: thrown from its
+## hands at its target's body (params.aim_height over the feet, where enemies
+## see the target: a decoy counts), or straight ahead if it has none. A
+## blinded swing that misses (swing_misses) throws nothing.
+func _on_enemy_projectile(enemy: Enemy) -> void:
+	if enemy.swing_misses:
+		return
+	var yaw := enemy.brain.yaw
+	var aim: Vector3 = enemy.global_position + Vector3(-sin(yaw), 0.0, -cos(yaw)) * 10.0
+	if _enemy_view.has(enemy.brain.target_id):
+		aim = _enemy_view[enemy.brain.target_id]
+	_projectiles.server_fire_enemy(enemy, enemy.params.attack, aim + Vector3.UP * enemy.params.aim_height)
 
 
 ## Server: brings a dead player back at a random spawn point with full health.
@@ -3309,6 +3347,16 @@ func _bot_sync_weapons(cycle: int) -> void:
 		_bot_next_weapon_msec = now + 500
 
 
+## "crag:1,husk:2" (sorted by kind; "none" when empty), for SUMMARY lines.
+static func _kind_counts(counts: Dictionary[String, int]) -> String:
+	var kinds := counts.keys()
+	kinds.sort()
+	var parts: PackedStringArray = []
+	for kind: String in kinds:
+		parts.append("%s:%d" % [kind, counts[kind]])
+	return ",".join(parts) if not parts.is_empty() else "none"
+
+
 ## Skips the training dummy (stationary), so bots fight Husks and each other.
 func _nearest_enemy(max_distance: float) -> Enemy:
 	var nearest: Enemy
@@ -3579,6 +3627,11 @@ func print_summary() -> void:
 		print("SUMMARY enemies count=%d enemy_hits=%d enemy_damaged=%d enemy_kills=%d target_switches=%d taunts=%d heal_threat=%d" % [
 				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills, switches,
 				_taunts, _heal_threat])
+		var spawned: Dictionary[String, int] = {}
+		for enemy: Enemy in _enemies.get_children():
+			spawned[enemy.kind] = spawned.get(enemy.kind, 0) + 1
+		print("SUMMARY enemy_kinds spawned=%s kills=%s camp_alerts=%d %s" % [_kind_counts(spawned),
+				_kind_counts(_kills_by_kind), _camp_alerts, _projectiles.enemy_summary()])
 		enemy_navigation.print_summary()
 		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d shield_wall_covers=%d" % [
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored,

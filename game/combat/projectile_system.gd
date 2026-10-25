@@ -70,6 +70,10 @@ var _embedded: Dictionary[int, EmbeddedKnives] = {}
 var embedded_count := 0
 var recalled_count := 0
 var _bounces := 0
+## Enemy throws (owner = an enemy id < 0) and their hits on players: counted
+## apart from players' (SUMMARY enemy_kinds), so the players' checks stay theirs.
+var _enemy_fired := 0
+var _enemy_hits := 0
 var _redirects := 0
 # Client
 var _flying: Array[Flying] = []
@@ -171,6 +175,35 @@ func server_fire_from(player: Player, attack: AttackParams, origin: Vector3, yaw
 				world.server_tick())
 
 
+## Server: an enemy's `attack` reached its release: its projectile(s) fly from
+## its hands toward `aim_at` (World._on_enemy_projectile), fanned like a
+## player's. Owned by the enemy's id (< 0): they hit players only (never
+## enemies), with the attack's damage x its damage-dealt statuses.
+func server_fire_enemy(enemy: Enemy, attack: AttackParams, aim_at: Vector3) -> void:
+	var p := ProjectileParams.get_kind(attack.projectile) if attack else null
+	if p == null:
+		return
+	var yaw := enemy.brain.yaw
+	var from := Projectile.release_point(p, enemy.global_position, yaw)
+	var aimed := (aim_at - from).normalized()
+	var scale := enemy.statuses.damage_dealt_multiplier(enemy.status_defs)
+	for i in attack.projectile_count:
+		var proj := Projectile.new(p, from, Projectile.launch_velocity_along(p, aimed,
+				spread_offset(i, attack.projectile_count, attack.projectile_spread), yaw))
+		proj.id = _next_id
+		_next_id += 1
+		proj.owner_id = enemy.enemy_id
+		proj.attack = attack
+		proj.damage_scale = scale
+		_active.append(proj)
+		_enemy_fired += 1
+		for peer_id in world._connected_player_ids():
+			_receive_spawn.rpc_id(peer_id, proj.id, p.id, proj.owner_id, from, proj.velocity,
+					world.server_tick())
+		if world.is_verbose():
+			print("[server] enemy %d throws %s #%d" % [enemy.enemy_id, p.id, proj.id])
+
+
 ## The unit direction from `from` (a release point) toward `player`'s aim point
 ## (World.aim_point), the same on the server and in the thrower's cosmetic copy.
 func aimed_direction(player: Player, from: Vector3) -> Vector3:
@@ -257,7 +290,7 @@ func _collide(proj: Projectile) -> void:
 		if s >= 0.0 and s <= limit:
 			candidates.append([s, target])
 	for enemy: Enemy in enemies.get_children():
-		if enemy.dead or not proj.can_hit(enemy.enemy_id):
+		if proj.owner_id < 0 or enemy.dead or not proj.can_hit(enemy.enemy_id):
 			continue
 		var s := Projectile.sweep_capsule(a, b, radius, enemy.global_position,
 				Enemy.BODY_RADIUS, Enemy.BODY_HEIGHT)
@@ -309,6 +342,15 @@ func _resolve_player_hit(proj: Projectile, target: Player, at: Vector3) -> bool:
 			_ally_ignored += 1
 	if result < 0:
 		return true  # an ally: flies on
+	if proj.owner_id < 0:  # an enemy's
+		if result == World.HIT_EVADED:
+			return true
+		_enemy_hits += 1
+		if result == World.HIT_DAMAGED:
+			var no_on_hit: Array[Vector2i] = []
+			world._give_hit_statuses(proj.owner_id, proj.attack, no_on_hit, target)
+		return proj.register_hit(target.peer_id,
+				result == World.HIT_BLOCKED or result == World.HIT_PARRIED)
 	world.note_projectile_hit(proj.attack is AbilityParams, true)
 	if result == World.HIT_EVADED:
 		return true
@@ -519,6 +561,11 @@ func _send_event(proj: Projectile, type: int) -> void:
 		print("[server] projectile #%d ended (%d) at %s" % [proj.id, type, proj.position])
 	for peer_id in world._connected_player_ids():
 		_receive_event.rpc_id(peer_id, proj.id, type, proj.age, proj.position)
+
+
+## "enemy_projectiles=N enemy_projectile_hits=N" for World's SUMMARY enemy_kinds.
+func enemy_summary() -> String:
+	return "enemy_projectiles=%d enemy_projectile_hits=%d" % [_enemy_fired, _enemy_hits]
 
 
 func print_summary() -> void:
