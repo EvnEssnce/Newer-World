@@ -315,3 +315,21 @@ func test_no_keep_distance_stands_its_ground() -> void:
 	for i in params.attack.total_ticks():
 		_step(HOME, target)
 	assert_true(_step(HOME, target).is_zero_approx(), "waits in reach for its cooldown")
+
+
+func test_stagger_in_the_windup_leaves_no_cooldown() -> void:
+	var target := {1: Vector3(1.5, 0, 0)}
+	_step(HOME, target)
+	_step(HOME, target)
+	brain.stagger(2)
+	assert_eq(brain.cooldown_ticks, 0, "cancelled before it came down: may swing again at once")
+
+
+func test_stagger_after_the_swing_came_down_starts_the_cooldown() -> void:
+	var target := {1: Vector3(1.5, 0, 0)}
+	_step(HOME, target)
+	for i in params.attack.windup_ticks + 1:
+		_step(HOME, target)
+	brain.stagger(2)
+	assert_eq(brain.cooldown_ticks, params.attack_cooldown_ticks,
+			"no free swing from staggering its recovery")

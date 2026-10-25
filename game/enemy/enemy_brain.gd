@@ -32,6 +32,10 @@ var target_id := 0
 ## Ticks since the current swing started, or -1 when not swinging.
 var attack_tick := -1
 var cooldown_ticks := 0
+## The cooldown a stagger leaves once the current swing has come down (its hit
+## window or projectile release reached); 0 before that (a stagger in the
+## windup cancels the swing with no cooldown).
+var _interrupt_cooldown := 0
 var stagger_ticks := 0
 ## Facing around Y. 0 faces -Z.
 var yaw := 0.0
@@ -126,7 +130,10 @@ func taunt(peer_id: int, params: EnemyParams) -> bool:
 func stagger(ticks: int) -> void:
 	if ticks <= 0:
 		return
+	if attack_tick >= 0:
+		cooldown_ticks = maxi(cooldown_ticks, _interrupt_cooldown)
 	attack_tick = -1
+	_interrupt_cooldown = 0
 	mode = Mode.STAGGERED
 	stagger_ticks = maxi(stagger_ticks, ticks)
 
@@ -246,10 +253,16 @@ func _back_away(to: Vector2, params: EnemyParams, delta: float) -> Vector2:
 
 func _attack(pos: Vector3, targets: Dictionary, params: EnemyParams, delta: float) -> Vector2:
 	attack_tick += 1
+	var comes_down := params.attack.windup_ticks
+	if not params.attack.projectile.is_empty():
+		comes_down = mini(comes_down, params.attack.projectile_tick)
+	if attack_tick >= comes_down:
+		_interrupt_cooldown = params.attack_cooldown_ticks
 	if attack_tick >= params.attack.total_ticks():
 		mode = Mode.CHASE
 		attack_tick = -1
 		cooldown_ticks = params.attack_cooldown_ticks
+		_interrupt_cooldown = 0
 		return Vector2.ZERO
 	if not targets.has(target_id):
 		return Vector2.ZERO
