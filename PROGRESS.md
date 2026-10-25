@@ -57,7 +57,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
-| Zone | Mob camps, node spawns, a town with crafting stations | Test map only |
+| Zone | Mob camps, node spawns, a town with crafting stations | Test map only; three enemy camps on it (session 62, branch `milestone-6`) |
 
 ---
 
@@ -76,7 +76,8 @@ All six classes are built and have had a hand playtest; four rounds of playtest 
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
 crafted gear (Milestone 3), accounts with saved characters (Milestone 5) and
 progression (levels, mastery, points from levels; awaiting its hand playtest) are on main.
-846 unit tests; the smoke tests pass for every class with 0 prediction corrections.
+846 unit tests on main; the smoke tests pass for every class with 0 prediction corrections.
+Branch `milestone-6` (session 62) adds three camp enemy kinds (884 tests), awaiting a hand playtest.
 
 ---
 
@@ -175,8 +176,13 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    4. **Hand playtest** of 4.2–4.3 and session 60 (§4). `progression` was
       fast-forwarded into main in session 61, before this playtest.
 5. **Content for a zone (Milestone 6).**
-   1. **More enemies and camps:** 2–3 new enemy kinds with their own loot tables and
-      gear score ranges (everything drops GS 101–140 today), placed as camps.
+   1. **Built (session 62, branch `milestone-6`; awaiting the hand playtest).** **More
+      enemies and camps:** Thornling (fast pack skirmisher, bleeding bites, hit-and-run),
+      Cinder Seer (ranged caster, a dodgeable ember orb, keeps its distance) and Cragmaw
+      (lone bruiser, a slow guard-breaking cone slam with knockback); loot GS 110–150,
+      120–160 and 135–175 (2 items); XP 40/70/220 per kill; camps east, west and
+      north-east of the test map (`design/enemies.md`). Shared: per-kind looks, camp
+      alerts, keep distance, enemy projectiles.
    2. **The zone:** a small map from CC0 packs: mob camps, gathering node spawns, a
       town with crafting stations, spawn points.
 6. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations in
@@ -232,6 +238,15 @@ level 21+ character, or trust the feed line); Mending Beam healing you while it 
 ally, Renewal Pulse healing you from outside; Sapping Pulse, then a light or heavy on a
 sapped Husk: a bigger number and a green heal (the smoke bots never followed up in
 time, so this path is untested).
+
+**Enemy camps (session 62, branch `milestone-6`):** walk to each camp: **Thornlings**
+east at (24, 0) (two lunge in, bite, Bleed, back off and circle; pulling one brings
+both), **Cinder Seers** west at (-24, -6) (an orb after a 0.8 s red windup: can you
+sidestep it at 13 m? a guard blocks it; Burn on a hit; they back away when you close
+in), the **Cragmaw** north-east at (21, -23) (a 1.2 s windup, a cone slam that breaks a
+guard and knocks you 3 m; circle behind it during the windup and it misses; barely
+staggers). Do the looks read (and the Thornling lying on its side when dead)? Loot
+and XP feel right for the effort (Cragmaw: 2400 health, always 2 items)? F3 boxes.
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -302,6 +317,18 @@ Say "keep" or what to change.
   allowed list ("Peacock", "Dickens", "Annalise"). A refused name says only "That name
   isn't allowed." Deleting a character takes two clicks on Delete and can't be undone.
 
+- **Enemy camps (session 62):** names Thornling, Cinder Seer, Cragmaw (ids `thorn`,
+  `seer`, `crag`); 2 + 2 + 1 placed (snapshot room: `-Bots 6` max 1277 of 1360 bytes,
+  so one or two more enemies at most before interest management). GS bands 110–150 /
+  120–160 / 135–175 (above crafted gear's 100–140; same item pool as the Husk, the Seer
+  leaning to casters and Wing Enhancements); drop 45% / 60% / 100% ×2; kill XP 40 / 70
+  / 220, mastery 30 / 55 / 160; respawn 12 / 15 / 45 s. Aggro 9 / 10 / 7 m so nobody
+  walking by is pulled; a camp fights together (pulling one alerts the rest, not other
+  camps or Husks). Seer orbs hit players only, blockable and parryable, never other
+  enemies; a blinded Seer's cast fizzles. Every kind still hits and is hit with the
+  Husk's capsule (the bigger Cragmaw too). A stagger during a swing's recovery now
+  starts that enemy's cooldown (the Husk too).
+
 **Decided for Milestone 3 (session 45):**
 - **Gathering key: F**, the same as loot pickup (one interact key; the prompt says
   which it will do).
@@ -338,8 +365,11 @@ Gameplay:
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
 
 Networking:
-- Snapshots fit one packet up to about 7 players in view (6 bots: max ~1,130 of 1,360
-  bytes); more needs interest management ("network headroom" above).
+- Snapshots fit one packet up to about 6 players in view with the 8 enemies (6 bots:
+  max 1,277 of 1,360 bytes, session 62); more players or camps need interest
+  management ("network headroom" above).
+- Enemy looks: only the body capsule shows the red windup telegraph and the white hit
+  flash, not a look's own parts (the Cragmaw heats its fists itself).
 - Lag compensation covers melee, beams and ally support only: projectiles, zones, shock
   rings and the beam's aim raycast use current positions. It favours the attacker: at
   high ping a target can be hit just after reaching cover (capped at `max_rewind`
@@ -453,6 +483,8 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 59 | 2026-10-18 | Reverted session 58's point pool at the developer's request (per-weapon mastery points were intended, not a bug): session 57's point rules, node costs and tree budgets are back (files restored from 69ffc3f); the character level cap stays 30. Kept from session 58: the XP bar, the keybinds list, character delete, the name filter. 837 tests; smoke default and `-Party` pass first time, 0 corrections |
 | 60 | 2026-10-18 | Wing trees cost 22 (all branches 11) with 3 Wing points at level 1, so they fill exactly at level 20; levels 21–30 give class bonus points (`[level_bonus]` in class files, `ClassDef.level_bonus`, `Player.set_level_bonus`; move speed, dodge and Ember cost as owner-only synced ints in `PlayerState`, header 12 → 15). Mage: Mending Beam `self_heal` 22.5, Renewal Pulse zone `owner_heal` 120, Sapping Pulse replaces Life Spore (status `sapped`: `mark_attacks="light_heavy"`, `mark_heal` 0.5; `_marked_scale` + `_heal_from_mark`; `SUMMARY mage mark_heals=`). 841 tests (level bonus, synced fields, real Wing trees at 20); smoke default, `-Party` and `-Class mage` pass, 0 corrections; mark heals didn't happen in two Mage runs (bots didn't follow up on a sapped Husk), so that path needs a hand check |
 | 61 | 2026-10-25 | Main fast-forwarded to `progression` (sessions 54–60) at the developer's request, before the progression hand playtest. **Code version check:** `CodeVersion` (a hash of the code files, not data/; an export packs `code_version.txt`, written by `tools/write_code_version.gd` in `export_client.ps1`) and `VersionCheck` (`/root/Main/VersionCheck`, two RPCs that never change): a client says its version on connect, the server sends the tuning only on a match (and only then allows login), else refuses with a message naming both versions; a silent connection (a pre-check build) is dropped after `[server] version_timeout` 10 s. The connect page shows "Game version X". 846 tests (5 new); on Linux with PowerShell 7: smoke default passes (version checks: 2 accepted, the `--fake-version` client refused), `-Party` passes everything but the known Linux `party_members=0` quit timing (also on the unchanged code, 2 of 2 runs); a pre-check build against the new server was dropped after 10 s with no errors; the refusal screen checked in a screenshot. Hand check: export, change a script, host, and connect the old exe (message) |
+
+| 62 | 2026-10-25 | Build order 5.1 on branch `milestone-6` (from main d7768d1): **three camp enemy kinds**. Shared engine first (main session): `EnemyLook` (looks per kind in `game/enemy/looks/`, Husk and dummy moved there; `dead_pose`), camp alerts (`metadata/camp`, `EnemyBrain.pulled`/`alert`), `[ai] keep_distance`/`retreat_speed`, enemy projectiles (`ProjectileSystem.server_fire_enemy`, players only), `[stats] name`, a ~10-byte smaller enemy snapshot entry, `EnemyParams.validate`, `SUMMARY enemy_kinds`, loot tables. Then three parallel agents (worktrees), one kind each (cfg, look, tests), merged clean: **Thornling**, **Cinder Seer** (+ `projectile_cinder_orb`), **Cragmaw**; camps placed east/west/north-east, after the dummy (ids unchanged). From the agents' notes: a stagger after a swing came down starts the cooldown; F3 boxes and hit numbers fit scaled looks. 884 tests; on Linux with PowerShell 7 smoke default ×3 pass (new checks: every kind spawned; the Seers, tuned to 45 m aggro in the smoke test only, throw: 4–9 orbs a run), `-Party` passes everything but the known `party_members=0` quit timing (2 runs), `-Bots 6` passes (server quit 8 s later, the known 4-core issue) with max snapshot 1277 bytes. Needs the camp hand playtest (§4) |
 
 ---
 

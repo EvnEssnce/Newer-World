@@ -42,6 +42,9 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
+    # The Cinder Seers (west camp) notice the bots from across the map and follow
+    # them, so enemy projectiles are thrown every run (the bots never visit camps).
+    '--tune=enemy_seer/ai/aggro_range=45', '--tune=enemy_seer/ai/leash_range=60',
     # Husks at 400 health: low enough that they die (loot), high enough that
     # most heavies land on a live one (a killing blow doesn't knock back).
     '--tune=enemy_husk/ai/aggro_range=40', '--tune=enemy_husk/stats/max_health=400',
@@ -258,12 +261,16 @@ if (-not $enemySummary -or [int]$enemySummary.Matches[0].Groups[1].Value -lt 1) 
     Write-Host "PASS enemies: $($enemySummary.Line)" -ForegroundColor Green
 }
 # Every enemy kind placed on the map spawned (the camps: build order 5.1). The
-# bots never visit the camps, so their fights aren't checked here (unit tests).
+# bots never visit the camps; the Seers come to them (aggro tuned up above), so
+# enemy projectiles are checked too.
 $kindSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemy_kinds spawned=(\S+)'
 $missingKinds = @('husk', 'dummy', 'thorn', 'seer', 'crag') | Where-Object {
     -not ($kindSummary -and $kindSummary.Matches[0].Groups[1].Value -match "(^|,)${_}:[1-9]") }
 if ($missingKinds) {
     Write-Host "FAIL enemy kinds: never spawned: $($missingKinds -join ', ') ($($kindSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ($kindSummary.Line -notmatch ' enemy_projectiles=([1-9]\d*)') {
+    Write-Host "FAIL enemy kinds: no Cinder Seer threw a projectile ($($kindSummary.Line))" -ForegroundColor Red
     $failed = $true
 } else {
     Write-Host "PASS enemy kinds: $($kindSummary.Line)" -ForegroundColor Green

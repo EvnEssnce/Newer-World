@@ -507,10 +507,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   `needs_decoy`.
   Append new fields at the end. **Snapshot size** (`SUMMARY net` on the server; the
   smoke test fails a snapshot over 1360 bytes, ENet's 1392-byte MTU less the RPC
-  header): own entry ~200–240 bytes, each other player ~145–175, each Husk ~50–60;
-  2 players + 2 Husks ~440–530 bytes, 4 players ~810, 6 players ~1,130 (Godot's Variant
-  encoding was ~1.4 KB for 2 players). About 7 players in view fit one packet;
-  interest management (only nearby players/enemies) is next for more.
+  header): own entry ~200–240 bytes, each other player ~145–175, each enemy ~40–45;
+  with the 8 enemies of session 62: 2 players ~610–680 bytes, 6 players ~1,280 (Godot's
+  Variant encoding was ~1.4 KB for 2 players). About 6 players in view fit one packet
+  now; interest management (only nearby players/enemies) is next for more.
   Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
   statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`: a dodge's window, or an ability's
@@ -975,7 +975,8 @@ charges are cross-class).
   table (`data/loot.cfg` `table_thorn` GS 110–150, `table_seer` 120–160, `table_crag`
   135–175, 2 items) and `[progression]` XP. `[stats] name` is the label's name
   (default: the kind capitalized). Every enemy is in every snapshot (no interest
-  management): 8 now; `-Bots 6` measured the max snapshot before adding more.
+  management): 8 now; `-Bots 6` measured 1277 of 1360 bytes with them (session 62),
+  room for one or two more before interest management.
 - **Camps**: a marker's `metadata/camp` (a name). When an enemy starts fighting
   (IDLE → CHASE: `EnemyBrain.pulled`, cleared by `take_pulled`), `World._alert_camp`
   has its idle campmates `alert` (proximity threat on the same player, then chase).
@@ -996,8 +997,12 @@ charges are cross-class).
   (`build()` adds parts, `base_color()`, `pose(attack_tick)`, `label_height()`; helpers
   `windup_fraction`/`strike_fraction`/`recovery_fraction`, `add_box`, `material`).
   `Enemy` still colors the capsule (telegraph, hit flash, dead) and tilts/lays the body.
-  Cosmetic only: every kind hits and is hit with the same capsule (`BODY_RADIUS`,
-  `BODY_HEIGHT`), even the bigger Cragmaw.
+  `dead_pose()` lays it down (the Thornling rolls on its side). The F3 box and hit
+  numbers follow a scaled model. Cosmetic only: every kind hits and is hit with the
+  same capsule (`BODY_RADIUS`, `BODY_HEIGHT`), even the bigger Cragmaw.
+- A stagger after a swing has come down (its hit window or projectile release)
+  starts the attack cooldown, so staggering a recovery gives no free recast; one in
+  the windup cancels with no cooldown (`EnemyBrain._interrupt_cooldown`).
 - Enemy snapshot entries send yaw as a 32-bit float and health rounded up (drawing only).
 - Optional `[ai] always_aware` (true on the training dummy): the enemy is never
   "unaware" for backstabs, so only rear-arc hits backstab it
@@ -1032,6 +1037,8 @@ charges are cross-class).
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
+- The smoke test tunes the Seers' aggro to 45 m (leash 60) so they come to the bots
+  and throw (checks `enemy_projectiles` ≥ 1); the other camps stay out of its fights.
 - **Training dummy** (`data/enemy_dummy.cfg`, marker `TrainingDummy` at z = +18, the far
   side from the Husks): `[ai] stationary=true` makes `EnemyBrain.step` only count down
   staggers (never moves, turns, swings or keeps threat); hits, statuses and forced movement
