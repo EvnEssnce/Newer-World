@@ -95,9 +95,13 @@ game/
   build/character_build.gd   Class + equipped weapons + per-weapon tree allocation and slots
                              + Wing tree allocation and Z/C slots.
   enemy/enemy.gd/.tscn       One enemy: server runs its brain, health, death; clients interpolate.
-  enemy/enemy_brain.gd       Enemy AI state machine. Pure logic, unit tested.
+  enemy/enemy_look.gd        EnemyLook: a kind's placeholder model built in code and its swing pose
+                             (client); one per kind in enemy/looks/<kind>_look.gd (husk, dummy,
+                             thorn, seer, crag), Husk's if missing.
+  enemy/enemy_brain.gd       Enemy AI state machine (camp alerts, keep distance). Pure logic, unit tested.
   enemy/threat_table.gd      Threat per player, target choice, taunts. Pure logic, unit tested.
-  enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg.
+  enemy/enemy_params.gd      Enemy tuning from data/enemy_<kind>.cfg; validate() (a test runs it on
+                             every kind).
   enemy/damage_meter.gd      Damage/DPS of one fight (the training dummy's readout). Unit tested.
   enemy/enemy_path.gd        EnemyPath: following a nav path, re-path rules. Pure, unit tested.
   enemy/enemy_navigation.gd  World/EnemyNav (server): navmesh baked at startup from layer 1,
@@ -188,6 +192,7 @@ ui/                  connect_menu (client start screens: address, login/create a
                      `InventoryPanel.bag_view`), comparisons with affixes
                      (`Item.stat_changes`), hover tooltips).
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
+                     enemy_thorn, enemy_seer, enemy_crag (the camp kinds, design/enemies.md),
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
                      Ranger: longbow, crossbow, firebolts; Mage: great_staff, gauntlet;
@@ -206,6 +211,7 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      saving (periodic and after-change save delays), progression
                      (character/mastery level caps and XP curves, tree points per level) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
+                     enemies.md: the enemy kinds and camps (build order 5.1).
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
                      binaries only (`gdsqlite.gdextension` lists them). Other platforms: copy
@@ -960,7 +966,39 @@ charges are cross-class).
 - Placed by `Marker3D`s under `World/EnemySpawns` (level data; `metadata/kind` picks
   `data/enemy_<kind>.cfg`). The server spawns one `Enemy` per marker at startup with a
   negative id (`-1`, `-2`, ...), which is also its node name under `World/Enemies` and
-  how hit events address it (peer ids are always positive).
+  how hit events address it (peer ids are always positive). New markers go last, so
+  existing ids don't move.
+- **Kinds** (session 62, `design/enemies.md`): Husk (2, near (0, -15)), training dummy,
+  and three camps far from the spawn, the Husks, the gather nodes and the Forge:
+  **Thornling** (`thorn`, 2 east at (24, 0)), **Cinder Seer** (`seer`, 2 west at
+  (-24, -6)), **Cragmaw** (`crag`, 1 north-east at (21, -23)). Each has its own loot
+  table (`data/loot.cfg` `table_thorn` GS 110–150, `table_seer` 120–160, `table_crag`
+  135–175, 2 items) and `[progression]` XP. `[stats] name` is the label's name
+  (default: the kind capitalized). Every enemy is in every snapshot (no interest
+  management): 8 now; `-Bots 6` measured the max snapshot before adding more.
+- **Camps**: a marker's `metadata/camp` (a name). When an enemy starts fighting
+  (IDLE → CHASE: `EnemyBrain.pulled`, cleared by `take_pulled`), `World._alert_camp`
+  has its idle campmates `alert` (proximity threat on the same player, then chase).
+  Husks have no camp. `SUMMARY enemy_kinds spawned=<kind:n,...> kills=<kind:n,...>
+  camp_alerts= enemy_projectiles= enemy_projectile_hits=` (the smoke test checks
+  every kind spawned).
+- **Keep distance** (`[ai] keep_distance` m, `retreat_speed` m/s; optional): while its
+  attack cooldown runs, an enemy nearer its target than that backs straight away,
+  facing it (`EnemyBrain._back_away`): the Thornling's hit-and-run, the Seer's spacing.
+  Past it a melee kind walks back in, so it circles the edge until its next swing.
+- **Enemy projectiles**: an `[attack]` with `projectile` (and `shape="none"`): on its
+  release tick `Enemy.projectile_released` → `World._on_enemy_projectile` →
+  `ProjectileSystem.server_fire_enemy`, aimed at where the target stands as enemies
+  see it (a decoy counts) + `[ai] aim_height`. Owned by the enemy id (< 0): hits
+  players only, through `resolve_strike` (block, parry, i-frames, statuses), counted
+  apart from players' throws (`enemy_projectiles=`). A blinded swing throws nothing.
+- **Looks** (client): `EnemyLook.for_kind(kind)` loads `game/enemy/looks/<kind>_look.gd`
+  (`build()` adds parts, `base_color()`, `pose(attack_tick)`, `label_height()`; helpers
+  `windup_fraction`/`strike_fraction`/`recovery_fraction`, `add_box`, `material`).
+  `Enemy` still colors the capsule (telegraph, hit flash, dead) and tilts/lays the body.
+  Cosmetic only: every kind hits and is hit with the same capsule (`BODY_RADIUS`,
+  `BODY_HEIGHT`), even the bigger Cragmaw.
+- Enemy snapshot entries send yaw as a 32-bit float and health rounded up (drawing only).
 - Optional `[ai] always_aware` (true on the training dummy): the enemy is never
   "unaware" for backstabs, so only rear-arc hits backstab it
   (`EnemyBrain.is_unaware_of`, used by `World._is_backstab`).

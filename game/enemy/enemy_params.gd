@@ -129,3 +129,29 @@ static func from_tuning(file: String) -> EnemyParams:
 	p.kill_xp = maxi(0, Tuning.get_optional(file, "progression", "kill_xp", 0))
 	p.mastery_xp = maxi(0, Tuning.get_optional(file, "progression", "mastery_xp", 0))
 	return p
+
+
+## Problems with this kind's tuning, e.g. a loot table or projectile kind that
+## doesn't exist (a unit test runs it on every data/enemy_*.cfg). `db`: the item
+## database its loot table must be in.
+func validate(db: ItemDatabase) -> PackedStringArray:
+	var problems := PackedStringArray()
+	if max_health <= 0.0:
+		problems.append("max_health must be above 0")
+	if not loot_table.is_empty() and not db.tables.has(loot_table):
+		problems.append("unknown loot table '%s'" % loot_table)
+	if attack == null or attack.total_ticks() <= 0:
+		problems.append("[attack] has no length")
+	elif not attack.projectile.is_empty():
+		if ProjectileParams.get_kind(attack.projectile) == null:
+			problems.append("unknown projectile '%s'" % attack.projectile)
+		elif attack.projectile_tick >= attack.total_ticks():
+			problems.append("projectile_time is after the swing ends")
+	if not stationary:
+		if aggro_range > leash_range:
+			problems.append("aggro_range is beyond leash_range")
+		if move_speed <= 0.0 or return_speed <= 0.0:
+			problems.append("move_speed and return_speed must be above 0")
+		if keep_distance > 0.0 and retreat_speed <= 0.0:
+			problems.append("keep_distance needs a retreat_speed above 0")
+	return problems

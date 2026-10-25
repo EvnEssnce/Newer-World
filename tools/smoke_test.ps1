@@ -257,6 +257,17 @@ if (-not $enemySummary -or [int]$enemySummary.Matches[0].Groups[1].Value -lt 1) 
 } else {
     Write-Host "PASS enemies: $($enemySummary.Line)" -ForegroundColor Green
 }
+# Every enemy kind placed on the map spawned (the camps: build order 5.1). The
+# bots never visit the camps, so their fights aren't checked here (unit tests).
+$kindSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY enemy_kinds spawned=(\S+)'
+$missingKinds = @('husk', 'dummy', 'thorn', 'seer', 'crag') | Where-Object {
+    -not ($kindSummary -and $kindSummary.Matches[0].Groups[1].Value -match "(^|,)${_}:[1-9]") }
+if ($missingKinds) {
+    Write-Host "FAIL enemy kinds: never spawned: $($missingKinds -join ', ') ($($kindSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS enemy kinds: $($kindSummary.Line)" -ForegroundColor Green
+}
 # The bots use abilities (on each other or Husks), swap weapons and respec once a cycle.
 $abilitySummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY abilities uses=(\d+) ability_hits=(\d+) parries=(\d+) swaps=(\d+) builds=(\d+)'
 if (-not $abilitySummary) {
