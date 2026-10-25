@@ -183,6 +183,11 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       120–160 and 135–175 (2 items); XP 40/70/220 per kill; camps east, west and
       north-east of the test map (`design/enemies.md`). Shared: per-kind looks, camp
       alerts, keep distance, enemy projectiles.
+   1b. **Enemy scaling by gear score** (developer's direction, session 62; design in
+      `design/enemies.md` "Planned"): about 10–12 kinds for the whole game, reused in
+      every zone tier; each placement sets the enemy's GS, which scales its health,
+      damage and XP (`data/enemy_scaling.cfg`) and its drops (loot bands relative to the
+      enemy's GS instead of fixed per kind). Before or with 5.2's tiered zones.
    2. **The zone:** a small map from CC0 packs: mob camps, gathering node spawns, a
       town with crafting stations, spawn points.
 6. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations in

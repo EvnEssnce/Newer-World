@@ -27,3 +27,27 @@ Shared engine work (session 62):
 
 Snapshot budget: 8 enemies (with the dummy). `-Bots 6` measured 1111 bytes max with
 3 enemies before; more camps need interest management (build order "network headroom").
+
+## Planned: scaling by zone (developer, session 62)
+
+Few kinds, many strengths: about **10–12 enemy kinds across the whole game**, each
+reused in every zone tier, with its **gear score** set by where it's placed. Drops
+follow the enemy you fought, not a fixed band per kind.
+
+- **Enemy gear score per placement**: a camp marker (later the zone) gives the enemy's
+  GS (`metadata/gear_score`, falling back to the zone's, then the kind file's
+  `[stats] gear_score`). The kind file holds its stats at a reference GS (100).
+- **Stats scale with it** (`data/enemy_scaling.cfg`): health and damage multipliers
+  per GS (a curve like `GearScore.factor`, likely steeper, since players gain from gear
+  and levels too); block stamina damage with damage; speeds, timings, ranges and AI
+  don't scale (they're the kind's feel). Armor piercing already uses the enemy's GS.
+  XP per kill scales too.
+- **Loot GS from the enemy's GS**: a loot table gives a band *relative* to the enemy
+  (e.g. −10 to +15), so the same Thornling drops 110–150 in a starting zone and
+  250–290 later; a kind's table keeps its item weights and drop chance, and elites
+  (the Cragmaw) get a higher offset and better rarity odds. Rarity odds may also rise
+  with GS.
+- Session 62's fixed bands (110–150 / 120–160 / 135–175) become these offsets around
+  each camp's GS when this is built.
+- Clients would show the GS (or a level) on the nameplate: they can read it from the
+  marker by enemy id (same scene, same order), so snapshots stay the same size.
