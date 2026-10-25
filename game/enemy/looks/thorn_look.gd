@@ -81,6 +81,12 @@ func label_height() -> float:
 	return 1.4
 
 
+## A four-legged body rolls onto its side (the default lays it on its tail).
+func dead_pose() -> void:
+	body_pivot.rotation = Vector3(0.0, 0.0, PI / 2.0)
+	body_pivot.position.y = Enemy.BODY_RADIUS
+
+
 func pose(attack_tick: float) -> void:
 	var jaw := JAW_REST
 	var lunge := 0.0

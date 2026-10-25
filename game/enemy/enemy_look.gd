@@ -50,6 +50,13 @@ func label_height() -> float:
 	return 2.7
 
 
+## Lays the body down while dead (body_pivot is reset when alive). Default:
+## on its back, for an upright body.
+func dead_pose() -> void:
+	body_pivot.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
+	body_pivot.position.y = Enemy.BODY_RADIUS
+
+
 ## Poses the parts. attack_tick: ticks since its swing started (fractional, for
 ## smooth swings), -1 when not swinging; never called while dead.
 func pose(_attack_tick: float) -> void:

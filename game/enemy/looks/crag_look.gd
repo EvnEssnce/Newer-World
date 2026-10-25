@@ -30,10 +30,6 @@ var _fist_materials: Array[StandardMaterial3D] = []
 
 func build() -> void:
 	model.scale = Vector3.ONE * SCALE
-	# The F3 hitbox box is a child of the model: keep it at the real hitbox size.
-	var debug := model.get_node_or_null("HitboxDebug") as Node3D
-	if debug != null:
-		debug.scale = Vector3.ONE / SCALE
 	eyes.scale = Vector3(1.3, 0.7, 1.0)
 
 	# Shoulder boulders, tipped at odd angles.

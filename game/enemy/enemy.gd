@@ -348,7 +348,7 @@ func record_my_damage(damage: float, result: int) -> void:
 
 
 func show_hit(damage: float, result: int) -> void:
-	HitFeedback.spawn_label(self, 2.8, damage, result)
+	HitFeedback.spawn_label(self, _look.label_height() + 0.1, damage, result)
 	if HitFeedback.flashes(result):
 		_hit_flash_until = Time.get_ticks_msec() + HIT_FLASH_MS
 
@@ -376,11 +376,10 @@ func _update_label() -> void:
 func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
 	_model.rotation.y = yaw
 	if dead:
-		_body_pivot.rotation.x = -PI / 2.0
-		_body_pivot.position.y = BODY_RADIUS
+		_look.dead_pose()
 	else:
 		_body_pivot.position.y = BODY_HEIGHT / 2.0
-		_body_pivot.rotation.x = STAGGER_TILT if staggered else 0.0
+		_body_pivot.rotation = Vector3(STAGGER_TILT if staggered else 0.0, 0.0, 0.0)
 
 	var attack := params.attack
 	var windup := float(attack.windup_ticks)
@@ -401,6 +400,9 @@ func _show(yaw: float, staggered: bool, attack_tick: float) -> void:
 					attack.hitbox_width, attack.hitbox_height, attack.hitbox_range)
 			_hitbox_debug.position = Vector3(0.0, attack.hitbox_height / 2.0, -attack.hitbox_range / 2.0)
 		_hitbox_debug.visible = attack.shape != AttackParams.SHAPE_NONE
+		# Under the model, which a look may scale: draw it at the real size.
+		_hitbox_debug.scale = Vector3.ONE / _model.scale
+		_hitbox_debug.position /= _model.scale
 		var active := attack_tick >= windup and attack_tick < strike_end
 		_hitbox_material.albedo_color = Color(1.0, 0.2, 0.2, 0.45 if active else 0.1)
 
