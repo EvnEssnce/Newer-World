@@ -7,7 +7,8 @@
 # that the bots pick up and equip; no unexpected prediction corrections;
 # snapshots must fit in one packet; characters saved (periodically, after
 # changes, as they leave), then a server restart on the same database file
-# brings the first bot's character back exactly as last saved.
+# brings the first bot's character back exactly as last saved, and a client on
+# other code (--fake-version) is refused with a message.
 #   powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 [-Port N] [-Party] [-Class ID] [-Bots N]
 # -Class picks the bots' class (default fighter; e.g. juggernaut).
 # -Bots runs more bot clients (default 2), e.g. to see snapshot sizes with more
@@ -172,10 +173,31 @@ if (-not $server.WaitForExit(10000)) { taskkill /T /F /PID $server.Id | Out-Null
 $restartServer = Start-Godot 'server_restart' (@('--server', '--verbose', "--port=$Port", $dbArg, '--quit-after=6') + $tune)
 Start-Sleep -Seconds 1
 $restartClient = Start-Godot 'client_restart' (@('--bot', '--verbose', "--class=$Class") + $keeperFlags + @("--address=127.0.0.1:$Port", '--quit-after=8') + $tune)
+# A client on other code (it claims another version): the server must refuse
+# it with a message (VersionCheck) and never let it log in.
+$mismatchClient = Start-Godot 'client_mismatch' (@('--bot', '--verbose', '--fake-version=smoke-old-build', '--account=smoke_mismatch') + @("--address=127.0.0.1:$Port", '--quit-after=4') + $tune)
 if (-not $restartClient.WaitForExit(36000)) { taskkill /T /F /PID $restartClient.Id | Out-Null }
+if (-not $mismatchClient.WaitForExit(20000)) { taskkill /T /F /PID $mismatchClient.Id | Out-Null }
 if (-not $restartServer.WaitForExit(10000)) { taskkill /T /F /PID $restartServer.Id | Out-Null }
 
 $failed = $false
+# Code versions (VersionCheck): every bot on the server's code was let in, and
+# the restart phase's client claiming another version was turned away with
+# the message, before logging in.
+$versionSummary = Select-String -Path (Join-Path $logDir 'server.log') -Pattern '^SUMMARY version code=\w+ accepted=(\d+) refused=(\d+) timed_out=(\d+)'
+$restartVersion = Select-String -Path (Join-Path $logDir 'server_restart.log') -Pattern '^SUMMARY version code=\w+ accepted=(\d+) refused=(\d+) timed_out=(\d+)'
+$mismatchRefused = Select-String -Path (Join-Path $logDir 'client_mismatch.log') -Pattern '^\[client\] refused by the server: version smoke-old-build' -Quiet
+if (-not $versionSummary -or [int]$versionSummary.Matches[0].Groups[1].Value -lt $Bots `
+        -or [int]$versionSummary.Matches[0].Groups[2].Value -ne 0 -or [int]$versionSummary.Matches[0].Groups[3].Value -ne 0) {
+    Write-Host "FAIL version: not every bot was let in on the server's code ($($versionSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif (-not $restartVersion -or [int]$restartVersion.Matches[0].Groups[1].Value -lt 1 `
+        -or [int]$restartVersion.Matches[0].Groups[2].Value -ne 1 -or -not $mismatchRefused) {
+    Write-Host "FAIL version: the client on other code wasn't refused with a message ($($restartVersion.Line); client message: $mismatchRefused)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "PASS version: $($versionSummary.Line); restart: $($restartVersion.Line)" -ForegroundColor Green
+}
 # Every bot logged in: made its account (a hashed password), made a character
 # and chose it (AccountService). refused= counts each bot's first login try,
 # made before its account exists.

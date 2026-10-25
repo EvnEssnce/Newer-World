@@ -74,8 +74,9 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
-crafted gear (Milestone 3) and accounts with saved characters (Milestone 5) are on main.
-841 unit tests; the smoke tests pass for every class with 0 prediction corrections.
+crafted gear (Milestone 3), accounts with saved characters (Milestone 5) and
+progression (levels, mastery, points from levels; awaiting its hand playtest) are on main.
+846 unit tests; the smoke tests pass for every class with 0 prediction corrections.
 
 ---
 
@@ -94,9 +95,10 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    - **Next playtest: 2–3 friends.** Ask each to read "Prediction corrections" in the
      HUD's debug lines (next to Ping) before quitting; check the rest of the session 43
      list (§4).
-   - **Fix session** for what it finds. Candidates already known: a build check (a
-     friend on older code gets odd failures, not a message), projectile lag
-     compensation if leading shots feels bad.
+   - **Fix session** for what it finds. Candidate already known: projectile lag
+     compensation if leading shots feels bad. (The build check is done, session 61:
+     a friend on another build is refused with a message naming both versions;
+     re-send the zip after code changes.)
 2. **Done: Milestone 3, gathering and crafting** (sessions 45–48; on main since
    session 52). Brief: two or three node types, one refining step, one crafting station,
    tradeskill XP. Decided (§4): F gathers, no durability, no item weight yet, no tool
@@ -170,7 +172,8 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       `data/testing.cfg [progression] full_points` (off; the smoke test turns it on).
       (Session 58 tried one shared pool from the character level instead; reverted the
       same day: per-weapon mastery points were intended.)
-   4. **Hand playtest** of 4.2–4.3, then merge `progression` to main.
+   4. **Hand playtest** of 4.2–4.3 and session 60 (§4). `progression` was
+      fast-forwarded into main in session 61, before this playtest.
 5. **Content for a zone (Milestone 6).**
    1. **More enemies and camps:** 2–3 new enemy kinds with their own loot tables and
       gear score ranges (everything drops GS 101–140 today), placed as camps.
@@ -341,7 +344,9 @@ Networking:
   rings and the beam's aim raycast use current positions. It favours the attacker: at
   high ping a target can be hit just after reaching cover (capped at `max_rewind`
   0.35 s). Untested with real latency (localhost rewinds ~8 ticks).
-- No build check between client and server code (re-export after code changes).
+- The code version check (session 61) can't tell an old exe (from before it) apart
+  from a silent connection: those get "Disconnected from server." after 10 s
+  (`[server] version_timeout`), not the message. Exports from now on get the message.
 - Hit events arrive before the attacker's swing is drawn on other clients.
 - About 1 smoke run in 15–20 shows a few (≤4) small unexpected corrections, mostly at
   seq 7–8 right after spawning (server y 0.0008 on the floor, predicted 0.0; identical
@@ -447,6 +452,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 58 | 2026-10-18 | Feedback on 4.2–4.3, branch `progression`. **One point pool:** the character level (cap 30) gives 12 + 2.5 a level (`[points]`), shared by the Wing tree and every weapon tree (`CharacterBuild.set_point_pool`, `point_limit` = spent + left; `MasteryTree.fit_order`); mastery levels give none; every node cost and tier gate doubled, weapon tree budget 30, Wing 24, so level 30 fills Wings + 1.5 branches in two weapons (developer chose this over per-class rates). **HUD:** a 10 px XP bar; the controls line became a keybinds list bottom left (`KeybindsPanel`, keys from `InputActions`, F1 hides). **Characters:** Delete on the character list (two clicks; `_request_delete_character`, ownership checked). **Names:** `data/name_filter.cfg` + `AccountRules.blocked_name` (look-alikes, squeezed repeats, whole-only short words, an allowed list). 838 tests (pool sharing, level 1 and 30 on the real data, the filter); smoke default and `-Party` pass first time, 0 corrections; HUD, K panel and character list checked in screenshots |
 | 59 | 2026-10-18 | Reverted session 58's point pool at the developer's request (per-weapon mastery points were intended, not a bug): session 57's point rules, node costs and tree budgets are back (files restored from 69ffc3f); the character level cap stays 30. Kept from session 58: the XP bar, the keybinds list, character delete, the name filter. 837 tests; smoke default and `-Party` pass first time, 0 corrections |
 | 60 | 2026-10-18 | Wing trees cost 22 (all branches 11) with 3 Wing points at level 1, so they fill exactly at level 20; levels 21–30 give class bonus points (`[level_bonus]` in class files, `ClassDef.level_bonus`, `Player.set_level_bonus`; move speed, dodge and Ember cost as owner-only synced ints in `PlayerState`, header 12 → 15). Mage: Mending Beam `self_heal` 22.5, Renewal Pulse zone `owner_heal` 120, Sapping Pulse replaces Life Spore (status `sapped`: `mark_attacks="light_heavy"`, `mark_heal` 0.5; `_marked_scale` + `_heal_from_mark`; `SUMMARY mage mark_heals=`). 841 tests (level bonus, synced fields, real Wing trees at 20); smoke default, `-Party` and `-Class mage` pass, 0 corrections; mark heals didn't happen in two Mage runs (bots didn't follow up on a sapped Husk), so that path needs a hand check |
+| 61 | 2026-10-25 | Main fast-forwarded to `progression` (sessions 54–60) at the developer's request, before the progression hand playtest. **Code version check:** `CodeVersion` (a hash of the code files, not data/; an export packs `code_version.txt`, written by `tools/write_code_version.gd` in `export_client.ps1`) and `VersionCheck` (`/root/Main/VersionCheck`, two RPCs that never change): a client says its version on connect, the server sends the tuning only on a match (and only then allows login), else refuses with a message naming both versions; a silent connection (a pre-check build) is dropped after `[server] version_timeout` 10 s. The connect page shows "Game version X". 846 tests (5 new); on Linux with PowerShell 7: smoke default passes (version checks: 2 accepted, the `--fake-version` client refused), `-Party` passes everything but the known Linux `party_members=0` quit timing (also on the unchanged code, 2 of 2 runs); a pre-check build against the new server was dropped after 10 s with no errors; the refusal screen checked in a screenshot. Hand check: export, change a script, host, and connect the old exe (message) |
 
 ---
 

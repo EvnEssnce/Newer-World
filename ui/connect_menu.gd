@@ -136,6 +136,10 @@ func _build_connect_page() -> void:
 	page.add_child(_address)
 	var button := _button("Connect", _request_connect)
 	page.add_child(button)
+	# To compare with the host's when the server turns this build away.
+	var version := _label("Game version %s" % CodeVersion.current())
+	version.modulate = Color(1, 1, 1, 0.5)
+	page.add_child(version)
 	_controls["connect"] = [_address, button]
 
 

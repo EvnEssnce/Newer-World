@@ -9,7 +9,8 @@ class_name LaunchArgs
 ## ":memory:" = a fresh one), --class= (client: the class the create screen
 ## offers first; a --bot's class when it makes its character), --account= and
 ## --character= (--bot: who it logs in as, see AccountService), --menu-preview=,
-## --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning).
+## --quit-after=, --screenshot-dir=, --tune= (repeatable; see Tuning),
+## --fake-version= (tests: claim another code version, see CodeVersion).
 
 
 static func has_flag(flag_name: String) -> bool:

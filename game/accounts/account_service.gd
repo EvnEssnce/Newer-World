@@ -58,6 +58,8 @@ var names := PlayerNames.new()
 
 ## Server: the database (opened by server_open).
 var persistence: Persistence
+## Server: only a peer on the server's code may log in (set by Main).
+var version_check: VersionCheck
 var _sessions: Dictionary[int, Session] = {}
 ## Password hashes running on worker threads: {task, out, done}.
 var _hash_jobs: Array[Dictionary] = []
@@ -123,6 +125,8 @@ func _request_login(account_name: String, password: String, create: bool) -> voi
 	if not multiplayer.is_server():
 		return
 	var peer := multiplayer.get_remote_sender_id()
+	if version_check and not version_check.is_verified(peer):
+		return
 	var session: Session = _sessions.get(peer)
 	if session and (session.busy or session.account_id != 0):
 		return

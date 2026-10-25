@@ -24,3 +24,6 @@ Thumbs.db
 
 # Temporary no-focus override written by tools/screenshot_run.ps1
 /override.cfg
+
+# The code version tools/export_client.ps1 writes for an export (CodeVersion)
+/code_version.txt

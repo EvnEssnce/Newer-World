@@ -39,6 +39,9 @@ core/
   tuning.gd          Autoload. Loads every res://data/*.cfg; the server sends its values to clients.
   net.gd             Autoload. ENet server/client setup, connection signals, ping.
   launch_args.gd     Command-line flags (after "--").
+  code_version.gd    CodeVersion: a hash of the code files (not data/), or the one an export
+                     packed in (code_version.txt). Unit tested. version_check.gd: VersionCheck
+                     (/root/Main/VersionCheck), refuses a client on other code; see "Networking model".
   net_codec.gd       NetCodec: compact, lossless binary encoding for snapshots. Unit tested.
   position_history.gd  PositionHistory: a body's recent positions per tick (lag compensation). Pure.
   correction_smoothing.gd  CorrectionSmoothing: the local player's drawn offset after a correction. Pure.
@@ -261,7 +264,23 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   and camera glide from where they were drawn (`CorrectionSmoothing`,
   `Player._draw_offset`; `[client] correction_smoothing` s, jumps over
   `correction_snap_distance` snap): drawing only, the body moves at once.
-- **The server's tuning wins** (`Tuning.send_to_peer` on `Net.peer_joined`): every
+- **Code version check** (`/root/Main/VersionCheck`, `VersionCheck`, made by `Main` on
+  both sides): a client sends `_hello(CodeVersion.current())` as it connects; a match
+  emits `peer_verified` (the server then sends the tuning, and only a verified peer may
+  log in: `AccountService._request_login`); a mismatch gets `_refused(server_version)`
+  and a disconnect after it, and the address screen says "This game (version X) doesn't
+  match the server's (version Y). Get the latest NewerWorld.zip from the host." (the
+  connect page also shows "Game version X"). A peer that says nothing for `[server]
+  version_timeout` s (network.cfg; a build from before the check) is disconnected.
+  `CodeVersion` = 12 hex of SHA-256 over every `.gd`/`.tscn`/`.tres`/`.gdshader` file
+  and `project.godot` outside data/, tests/, tools/, design/, assets/, addons/ and
+  build/, with `\r` removed (~10 ms); an exported game reads `res://code_version.txt`
+  instead, written by `tools/write_code_version.gd` in `export_client.ps1` just before
+  exporting (gitignored, deleted after). **Never change VersionCheck's path, RPCs or
+  their arguments**: old builds must still reach them. `SUMMARY version code=
+  accepted= refused= timed_out=` (server; the smoke test checks both bots accepted and,
+  in its restart phase, a `--fake-version` client refused with the message).
+- **The server's tuning wins** (`Tuning.send_to_peer` on `VersionCheck.peer_verified`): every
   `data/*.cfg` value (with the server's `--tune` overrides) goes to a client as it
   connects (`var_to_bytes` + zstd, ~35 KB, reliable RPC on `/root/Tuning`); the client
   replaces its own (`Tuning.apply_packed`, its `--tune` ignored) and `Main` only makes
@@ -269,7 +288,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test.
   moves on every load; every class that caches tuning (`PlayerParams.current()`,
   `ItemDatabase`, `StatusDefs`, `GearScore`, `ClassDef`, `MasteryTree`, `EnemyParams`,
   `ProjectileParams`/`ProjectileVisual`, `ZoneParams`, `AimRay.tuned()`, `GatherNodeParams`, `TradeskillDefs`, `RecipeDefs`) rebuilds when it
-  does: **a new cache must do the same**. Friends' builds only need the same code.
+  does: **a new cache must do the same**. Friends' builds only need the same code
+  (the version check above enforces it).
 - **Lag compensation** (`[lag_compensation]` in network.cfg): the server records every
   player's and enemy's position each tick (`PositionHistory`, `World._record_positions`,
   after the sim, before the snapshot) and tests a player's melee/beam/ally-support
@@ -1169,6 +1189,7 @@ don't collide. Within one checkout, run them one after the other: they share the
 `build\smoke` log folder.
 
 Game flags (after `--`): `--server`, `--port=N`, `--connect`, `--address=host[:port]`,
+`--fake-version=X` (claim code version X: tests the version check),
 `--db=PATH` (server: the database, default `user://newer_world.db`; `:memory:` = fresh,
 gone at exit), `--class=ID` (client: the class the create-character screen offers first;
 a `--bot`'s class when it makes its character; default `fighter`, unknown = default),
@@ -1275,8 +1296,9 @@ use the smoke test instead.
 ## Export and hosting
 
 - `export_presets.cfg` has a "Windows Desktop" preset (one exe with the pack embedded,
-  `include_filter="data/*"`: `data/*.cfg` aren't Godot resources; tests/tools/design
-  excluded). `tools\export_client.ps1` exports it to `build\export\` and zips it; it
+  `include_filter="data/*, code_version.txt"`: `data/*.cfg` aren't Godot resources;
+  tests/tools/design excluded). `tools\export_client.ps1` writes `code_version.txt`
+  (see "Code version check"), exports to `build\export\` and zips it; it
   needs Godot's export templates (installed from the editor). The zip holds the exe
   and the godot-sqlite DLL exported beside it (session 55: the exe ran as a headless
   server).

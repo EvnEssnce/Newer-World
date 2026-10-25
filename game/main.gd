@@ -2,9 +2,10 @@ extends Node
 ## Entry point. Decides whether this process is the dedicated server or a client.
 ##
 ## The World scene is always added as /root/Main/World on both sides, because
-## RPCs are matched by node path. /root/Main/Accounts (AccountService) exists
-## from the start on both sides: a client logs in and chooses a character
-## through it, and only then makes its World.
+## RPCs are matched by node path. /root/Main/VersionCheck and
+## /root/Main/Accounts (AccountService) exist from the start on both sides: a
+## client on the server's code (VersionCheck) gets the server's tuning, logs in
+## and chooses a character, and only then makes its World.
 
 const WORLD_SCENE := preload("res://game/world/world.tscn")
 const CONNECT_MENU_SCENE := preload("res://ui/connect_menu.tscn")
@@ -18,6 +19,9 @@ const PERF_SPIKE_MS := 50.0
 var _world: World
 var _menu: ConnectMenu
 var _accounts: AccountService
+var _version_check: VersionCheck
+## Client: why the server turned this build away (shown when it disconnects).
+var _refusal := ""
 ## Server: the shutdown save ran (_save_before_quitting).
 var _saved_on_quit := false
 ## Client: connected to the server, and its tuning arrived (_enter_world needs both).
@@ -42,8 +46,12 @@ func _ready() -> void:
 	if quit_after > 0.0:
 		_quit_after(quit_after)
 
+	_version_check = VersionCheck.new()
+	_version_check.name = "VersionCheck"
+	add_child(_version_check)
 	_accounts = AccountService.new()
 	_accounts.name = "Accounts"
+	_accounts.version_check = _version_check
 	add_child(_accounts)
 	if LaunchArgs.has_flag("server") or OS.has_feature("dedicated_server"):
 		_start_server()
@@ -68,8 +76,10 @@ func _start_server() -> void:
 	# Nothing to render, so don't spin the CPU between physics ticks.
 	Engine.max_fps = Engine.physics_ticks_per_second
 	print("[server] listening on UDP port %d (max %d players)" % [port, max_players])
-	# Every client plays with the server's tuning (Tuning.send_to_peer).
-	Net.peer_joined.connect(Tuning.send_to_peer)
+	# Every client on the server's code plays with the server's tuning
+	# (Tuning.send_to_peer); one on other code is refused first.
+	_version_check.server_start()
+	_version_check.peer_verified.connect(Tuning.send_to_peer)
 	_spawn_world()
 
 
@@ -80,6 +90,7 @@ func _start_client() -> void:
 	Tuning.server_tuning_applied.connect(_on_server_tuning)
 	Net.connection_failed.connect(_on_connection_failed)
 	Net.server_disconnected.connect(_on_server_disconnected)
+	_version_check.refused.connect(_on_version_refused)
 	_accounts.login_finished.connect(_on_login_finished)
 	_accounts.characters_changed.connect(_on_characters_changed)
 	_accounts.play_finished.connect(_on_play_finished)
@@ -119,6 +130,7 @@ func _connect(address: String) -> void:
 		return
 	_connected = false
 	_server_tuning = false
+	_refusal = ""
 	var err := Net.connect_to_server(host, port)
 	if err != OK:
 		_menu.set_status("Could not start connecting: %s" % error_string(err))
@@ -130,6 +142,7 @@ func _connect(address: String) -> void:
 func _on_connected() -> void:
 	print("[client] connected as peer %d" % multiplayer.get_unique_id())
 	_connected = true
+	_version_check.client_connected()
 	if _server_tuning:
 		_start_login()
 	else:
@@ -140,9 +153,22 @@ func _on_connected() -> void:
 ## _on_connected); logging in (and so the World) only starts once both have
 ## happened, so every params cache, and the name rules, use the server's values.
 func _on_server_tuning() -> void:
+	if not _refusal.is_empty():
+		return
 	_server_tuning = true
 	if _connected:
 		_start_login()
+
+
+## The server runs other code: it disconnects this client next, and the
+## address screen then says why (_on_server_disconnected).
+func _on_version_refused(server_version: String) -> void:
+	_refusal = ("This game (version %s) doesn't match the server's (version %s). "
+			+ "Get the latest NewerWorld.zip from the host.") % [CodeVersion.current(), server_version]
+	print("[client] refused by the server: version %s, the server runs %s" % [
+			CodeVersion.current(), server_version])
+	if _menu:
+		_menu.set_status(_refusal)
 
 
 ## --bot logs in and picks its character by itself (AccountService.start_bot).
@@ -233,7 +259,7 @@ func _on_server_disconnected() -> void:
 		remove_child(_world)
 		_world.queue_free()
 		_world = null
-	_show_menu("Disconnected from server.")
+	_show_menu(_refusal if not _refusal.is_empty() else "Disconnected from server.")
 
 
 # --- Shared ---
@@ -270,7 +296,8 @@ func _quit_after(seconds: float) -> void:
 	_save_before_quitting()
 	if _world:
 		_world.print_summary()
-	if multiplayer.is_server():
+	if Net.is_server:  # (multiplayer.is_server() is true on a disconnected client too)
+		_version_check.print_summary()
 		_accounts.print_summary()
 	if _perf_log:
 		print("SUMMARY perf spikes=%d worst_ms=%.0f worst_physics_ms=%.1f" % [
