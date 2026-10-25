@@ -3,7 +3,8 @@ extends Node
 ## dropped (rarity spread vs. the weights, items, gear scores, affix values),
 ## so drop rates can be tuned from numbers. Run with tools\roll_loot.ps1.
 ##
-## Options (after "--"): --table=husk  --kills=50000  --seed=1
+## Options (after "--"): --table=husk  --kills=50000  --seed=1  --gear-score=120
+## (the killed enemy's gear score, for tables with a relative band)
 
 func _ready() -> void:
 	var table_id := LaunchArgs.get_value("table", "husk")
@@ -26,7 +27,8 @@ func _ready() -> void:
 	var drops: Array[Item] = []
 	var kills_with_drop := 0
 	for i in kills:
-		var dropped := LootRoller.roll_table(table, db, rng)
+		var dropped := LootRoller.roll_table(table, db, rng,
+				int(LaunchArgs.get_value("gear-score", "120")))
 		if not dropped.is_empty():
 			kills_with_drop += 1
 		drops.append_array(dropped)

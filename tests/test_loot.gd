@@ -197,3 +197,52 @@ func test_real_data_files_are_consistent() -> void:
 		if not def.weapon_type.is_empty():
 			assert_true(Tuning.has_file("weapon_" + def.weapon_type),
 					"%s's weapon %s exists" % [def.id, def.weapon_type])
+
+
+# --- Relative bands (gear score from the killed enemy's) ---
+
+func test_relative_band_follows_the_enemys_gear_score() -> void:
+	var table: ItemDatabase.LootTable = db.tables["test"]
+	table.relative = true
+	table.gear_score_below = 10
+	table.gear_score_above = 20
+	var seen_low := 1000
+	var seen_high := 0
+	for i in 200:
+		for item in LootRoller.roll_table(table, db, rng, 300):
+			seen_low = mini(seen_low, item.gear_score)
+			seen_high = maxi(seen_high, item.gear_score)
+	assert_true(seen_low >= 290 and seen_high <= 320, "300 - 10 .. 300 + 20")
+	assert_true(seen_high - seen_low > 20, "spread over the band")
+
+
+func test_relative_band_is_kept_within_the_floor_and_ceiling() -> void:
+	var table: ItemDatabase.LootTable = db.tables["test"]
+	table.relative = true
+	table.gear_score_below = 30
+	table.gear_score_above = 30
+	db.drop_gear_score_floor = 100
+	db.drop_gear_score_ceiling = 500
+	for i in 100:
+		for item in LootRoller.roll_table(table, db, rng, 110):
+			assert_true(item.gear_score >= 100, "never under the floor")
+		for item in LootRoller.roll_table(table, db, rng, 490):
+			assert_true(item.gear_score <= 500, "never over the ceiling")
+
+
+func test_kill_rolls_use_the_enemys_gear_score() -> void:
+	var table: ItemDatabase.LootTable = db.tables["test"]
+	table.relative = true
+	table.gear_score_below = 0
+	table.gear_score_above = 0
+	var loot := LootRoller.roll_kill(table, db, [4] as Array[int], rng, 250)
+	for item: Item in loot[4]:
+		assert_eq(item.gear_score, 250)
+
+
+func test_validate_relative_band() -> void:
+	var table: ItemDatabase.LootTable = db.tables["test"]
+	table.relative = true
+	table.gear_score_below = -30  # GS + 30 .. GS + 10: backwards
+	table.gear_score_above = 10
+	assert_true(Array(db.validate()).any(func(p: String) -> bool: return p.contains("gear_score_below")))

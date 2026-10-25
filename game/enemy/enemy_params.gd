@@ -131,6 +131,45 @@ static func from_tuning(file: String) -> EnemyParams:
 	return p
 
 
+## A copy of this kind's tuning for one placed at gear_score (its camp's):
+## health, hit damage and block stamina damage, and kill/mastery XP grow by
+## data/scaling.cfg's rates per 5 gear score away from the kind's own
+## gear_score; nothing else changes. The same params when it's the kind's own.
+func scaled_to(new_gear_score: int) -> EnemyParams:
+	return scaled_by(new_gear_score,
+			Tuning.get_value("scaling", "scaling", "health_per_5"),
+			Tuning.get_value("scaling", "scaling", "damage_per_5"),
+			Tuning.get_value("scaling", "scaling", "xp_per_5"))
+
+
+## scaled_to with the rates given (fractions per 5 gear score). Pure.
+func scaled_by(new_gear_score: int, health_rate: float, damage_rate: float,
+		xp_rate: float) -> EnemyParams:
+	if new_gear_score == gear_score:
+		return self
+	var steps := (new_gear_score - gear_score) / 5.0
+	var result := copy()
+	result.gear_score = new_gear_score
+	result.max_health = max_health * pow(1.0 + health_rate, steps)
+	var damage := pow(1.0 + damage_rate, steps)
+	result.attack = attack.copy()
+	result.attack.damage = attack.damage * damage
+	result.attack.block_stamina_damage = attack.block_stamina_damage * damage
+	var xp := pow(1.0 + xp_rate, steps)
+	result.kill_xp = roundi(kill_xp * xp)
+	result.mastery_xp = roundi(mastery_xp * xp)
+	return result
+
+
+## Every field copied (attack shared: copy it before changing it).
+func copy() -> EnemyParams:
+	var result := EnemyParams.new()
+	for property in get_property_list():
+		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			result.set(property.name, get(property.name))
+	return result
+
+
 ## Problems with this kind's tuning, e.g. a loot table or projectile kind that
 ## doesn't exist (a unit test runs it on every data/enemy_*.cfg). `db`: the item
 ## database its loot table must be in.

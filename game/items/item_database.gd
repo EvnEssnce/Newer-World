@@ -81,6 +81,21 @@ class LootTable:
 	var rolls := 0
 	var gear_score_min := 0
 	var gear_score_max := 0
+	## Relative band (gear_score_below / gear_score_above in the file): each item's
+	## gear score is the killed enemy's gear score - below .. + above. Then
+	## gear_score_min/max aren't used.
+	var relative := false
+	var gear_score_below := 0
+	var gear_score_above := 0
+
+	## An item's gear score from this table, killing an enemy of enemy_gear_score
+	## (relative tables), kept within [floor, ceiling] (loot.cfg [drops]).
+	func roll_gear_score(enemy_gear_score: int, floor: int, ceiling: int,
+			rng: RandomNumberGenerator) -> int:
+		var gs := rng.randi_range(gear_score_min, gear_score_max)
+		if relative:
+			gs = enemy_gear_score + rng.randi_range(-gear_score_below, gear_score_above)
+		return clampi(gs, floor, maxi(floor, ceiling))
 	## Item id -> relative weight.
 	var item_weights: Dictionary = {}
 	## Rarity id -> relative weight.
@@ -93,6 +108,9 @@ var rarities: Dictionary[String, RarityDef] = {}
 var items: Dictionary[String, ItemDef] = {}
 var affixes: Dictionary[String, AffixDef] = {}
 var tables: Dictionary[String, LootTable] = {}
+## Dropped items' gear score is kept within these (loot.cfg [drops]).
+var drop_gear_score_floor := 100
+var drop_gear_score_ceiling := 700
 ## The gear score curve items' main stats follow.
 var gear := GearScore.new()
 
@@ -123,6 +141,8 @@ static func from_tuning() -> ItemDatabase:
 		r.color = Tuning.get_value("loot", id, "color")
 		db.rarities[id] = r
 
+	db.drop_gear_score_floor = Tuning.get_optional("loot", "drops", "min_gear_score", 100)
+	db.drop_gear_score_ceiling = Tuning.get_optional("loot", "drops", "max_gear_score", 700)
 	for section in Tuning.get_sections("loot"):
 		if not section.begins_with(TABLE_PREFIX):
 			continue
@@ -130,8 +150,13 @@ static func from_tuning() -> ItemDatabase:
 		t.id = section.trim_prefix(TABLE_PREFIX)
 		t.drop_chance = Tuning.get_value("loot", section, "drop_chance")
 		t.rolls = Tuning.get_value("loot", section, "rolls")
-		t.gear_score_min = Tuning.get_value("loot", section, "gear_score_min")
-		t.gear_score_max = Tuning.get_value("loot", section, "gear_score_max")
+		t.relative = Tuning.has_value("loot", section, "gear_score_below")
+		if t.relative:
+			t.gear_score_below = Tuning.get_value("loot", section, "gear_score_below")
+			t.gear_score_above = Tuning.get_value("loot", section, "gear_score_above")
+		else:
+			t.gear_score_min = Tuning.get_value("loot", section, "gear_score_min")
+			t.gear_score_max = Tuning.get_value("loot", section, "gear_score_max")
 		t.item_weights = Tuning.get_value("loot", section, "items")
 		t.rarity_weights = Tuning.get_value("loot", section, "rarity_weights")
 		db.tables[t.id] = t
@@ -224,7 +249,9 @@ func validate() -> PackedStringArray:
 	for table: LootTable in tables.values():
 		if table.drop_chance < 0.0 or table.drop_chance > 1.0:
 			problems.append("loot table '%s' drop_chance must be 0-1" % table.id)
-		if table.gear_score_min > table.gear_score_max:
+		if table.relative and -table.gear_score_below > table.gear_score_above:
+			problems.append("loot table '%s' has -gear_score_below above gear_score_above" % table.id)
+		if not table.relative and table.gear_score_min > table.gear_score_max:
 			problems.append("loot table '%s' has gear_score_min above max" % table.id)
 		for item_id: String in table.item_weights:
 			if not items.has(item_id):

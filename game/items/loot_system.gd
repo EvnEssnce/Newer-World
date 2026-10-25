@@ -222,7 +222,7 @@ func on_enemy_killed(enemy: Enemy) -> void:
 	if contributors.is_empty():
 		return
 	_kills_rolled += 1
-	var loot := LootRoller.roll_kill(table, _db, contributors, _rng)
+	var loot := LootRoller.roll_kill(table, _db, contributors, _rng, enemy.params.gear_score)
 	for peer: int in loot:
 		var items: Array[Item] = []
 		items.assign(loot[peer])

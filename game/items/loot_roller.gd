@@ -5,12 +5,13 @@ class_name LootRoller
 
 ## Personal loot for a kill: every player who damaged the enemy (peer ids, in
 ## order) gets their own roll of the table. Returns peer id -> items, leaving
-## out players whose roll dropped nothing.
+## out players whose roll dropped nothing. enemy_gear_score: the killed enemy's
+## (a relative table's band is around it).
 static func roll_kill(table: ItemDatabase.LootTable, db: ItemDatabase, contributors: Array[int],
-		rng: RandomNumberGenerator) -> Dictionary[int, Array]:
+		rng: RandomNumberGenerator, enemy_gear_score := 100) -> Dictionary[int, Array]:
 	var result: Dictionary[int, Array] = {}
 	for peer in contributors:
-		var items := roll_table(table, db, rng)
+		var items := roll_table(table, db, rng, enemy_gear_score)
 		if not items.is_empty():
 			result[peer] = items
 	return result
@@ -19,7 +20,7 @@ static func roll_kill(table: ItemDatabase.LootTable, db: ItemDatabase, contribut
 ## One player's drop from a kill: nothing (drop_chance failed), or `rolls` items,
 ## each with its own item, rarity and gear score.
 static func roll_table(table: ItemDatabase.LootTable, db: ItemDatabase,
-		rng: RandomNumberGenerator) -> Array[Item]:
+		rng: RandomNumberGenerator, enemy_gear_score := 100) -> Array[Item]:
 	var drops: Array[Item] = []
 	if table.drop_chance < 1.0 and rng.randf() >= table.drop_chance:
 		return drops
@@ -28,7 +29,8 @@ static func roll_table(table: ItemDatabase.LootTable, db: ItemDatabase,
 		var rarity := pick_weighted(table.rarity_weights, rng)
 		if item_id.is_empty() or rarity.is_empty():
 			continue
-		var gear_score := rng.randi_range(table.gear_score_min, table.gear_score_max)
+		var gear_score := table.roll_gear_score(enemy_gear_score, db.drop_gear_score_floor,
+				db.drop_gear_score_ceiling, rng)
 		drops.append(roll_item(db.items[item_id], rarity, gear_score, db, rng))
 	return drops
 

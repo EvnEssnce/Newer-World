@@ -193,6 +193,7 @@ ui/                  connect_menu (client start screens: address, login/create a
                      (`Item.stat_changes`), hover tooltips).
 data/                Tuning files: network, movement, combat, camera, enemy_husk, enemy_dummy,
                      enemy_thorn, enemy_seer, enemy_crag (the camp kinds, design/enemies.md),
+                     scaling (enemy health/damage/XP growth per gear score),
                      weapon_<id> (broadsword, spear, dual_axes; Juggernaut: halberd,
                      greataxe, war_hammer; Assassin: dual_talons, throwing_knives;
                      Ranger: longbow, crossbow, firebolts; Mage: great_staff, gauntlet;
@@ -972,9 +973,23 @@ charges are cross-class).
   and three camps far from the spawn, the Husks, the gather nodes and the Forge:
   **Thornling** (`thorn`, 2 east at (24, 0)), **Cinder Seer** (`seer`, 2 west at
   (-24, -6)), **Cragmaw** (`crag`, 1 north-east at (21, -23)). Each has its own loot
-  table (`data/loot.cfg` `table_thorn` GS 110–150, `table_seer` 120–160, `table_crag`
-  135–175, 2 items) and `[progression]` XP. `[stats] name` is the label's name
-  (default: the kind capitalized). Every enemy is in every snapshot (no interest
+  table and `[progression]` XP. `[stats] name` is the label's name (default: the kind
+  capitalized), shown with its gear score ("Cinder Seer  GS 150"; not the dummy's).
+- **Gear score scaling** (session 62, developer's direction: ~10–12 kinds for the
+  whole game, reused in every zone tier): a kind file's stats are at its `[stats]
+  gear_score`; a marker's `metadata/gear_score` places it stronger or weaker
+  (`World.placed_gear_score(enemy_id)`, the marker by id, so clients know it without
+  snapshots; camps: Thornlings 140, Seers 150, Cragmaw 180; Husks their own 120).
+  `Enemy._ready` swaps in `EnemyParams.scaled_to(gs)` (`scaled_by` is the pure part):
+  max health, hit damage and block stamina damage, kill/mastery XP × (1 + rate) per 5
+  GS (`data/scaling.cfg`); speeds, timings, ranges and AI never scale. Armor
+  piercing uses the same gear score. **Drops follow it:** enemy loot tables give
+  `gear_score_below`/`gear_score_above` (relative to the killed enemy's GS,
+  `LootTable.roll_gear_score`, clamped to loot.cfg `[drops] min_gear_score` /
+  `max_gear_score`) instead of absolute `gear_score_min/max` (still supported).
+  `tools\roll_loot.ps1` passes `--gear-score=` (default 120) for relative tables.
+  Drop chances were halved in session 62 (Husk 30%, Thornling 22.5%, Seer 30%,
+  Cragmaw 50% × 2 items), rarity weights unchanged. Every enemy is in every snapshot (no interest
   management): 8 now; `-Bots 6` measured 1277 of 1360 bytes with them (session 62),
   room for one or two more before interest management.
 - **Camps**: a marker's `metadata/camp` (a name). When an enemy starts fighting

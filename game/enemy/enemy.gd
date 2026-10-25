@@ -29,6 +29,9 @@ const STAGGER_TILT := 0.4
 var enemy_id := 0
 ## Which data/enemy_<kind>.cfg it uses.
 var kind := "husk"
+## Its placement's gear score (World, from its marker's metadata/gear_score on
+## both sides); -1 = its kind's own. params are scaled to it (EnemyParams.scaled_to).
+var placed_gear_score := -1
 var params: EnemyParams
 ## Its camp: where it wanders, returns to and respawns.
 var home := Vector3.ZERO
@@ -93,6 +96,8 @@ var _meter_text := ""
 
 func _ready() -> void:
 	params = EnemyParams.for_kind(kind)
+	if placed_gear_score >= 0:
+		params = params.scaled_to(placed_gear_score)
 	_gravity = PlayerParams.current().gravity
 	if multiplayer.is_server():
 		health = params.max_health
@@ -365,7 +370,10 @@ func set_statuses(data: PackedInt32Array) -> void:
 
 func _update_label() -> void:
 	var status := "Defeated" if health <= 0.0 else str(ceili(health))
-	_name_label.text = "%s\n%s" % [params.display_name, status]
+	var title := params.display_name
+	if not params.stationary:
+		title += "  GS %d" % params.gear_score
+	_name_label.text = "%s\n%s" % [title, status]
 	if not _status_text.is_empty():
 		_name_label.text += "\n" + _status_text
 	if not _meter_text.is_empty():

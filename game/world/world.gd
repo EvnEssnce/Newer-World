@@ -2296,10 +2296,22 @@ func _spawn_enemies() -> void:
 		enemy.position = marker.position
 		enemy.navigation = enemy_navigation
 		enemy.camp = marker.get_meta("camp", "")
+		enemy.placed_gear_score = placed_gear_score(enemy.enemy_id)
 		enemy.attack_stepped.connect(_on_enemy_attack_stepped)
 		enemy.projectile_released.connect(_on_enemy_projectile)
 		_enemies.add_child(enemy)
 		next_id -= 1
+
+
+## The gear score enemy_id's marker places it at (metadata/gear_score; ids
+## count the EnemySpawns markers from -1, the same on every machine), or -1 for
+## its kind's own.
+func placed_gear_score(enemy_id: int) -> int:
+	var index := -enemy_id - 1
+	var spawns := get_node("EnemySpawns")
+	if index < 0 or index >= spawns.get_child_count():
+		return -1
+	return int(spawns.get_child(index).get_meta("gear_score", -1))
 
 
 ## Server: `enemy` just started fighting (it was pulled): the idle members of
@@ -3432,6 +3444,7 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 			enemy.enemy_id = enemy_id
 			enemy.name = str(enemy_id)
 			enemy.kind = state[1]
+			enemy.placed_gear_score = placed_gear_score(enemy_id)
 			enemy.position = state[2]
 			_enemies.add_child(enemy)
 		enemy.push_snapshot(server_time, state[2], state[3], state[4], state[5], state[7])

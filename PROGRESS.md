@@ -183,11 +183,12 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       120–160 and 135–175 (2 items); XP 40/70/220 per kill; camps east, west and
       north-east of the test map (`design/enemies.md`). Shared: per-kind looks, camp
       alerts, keep distance, enemy projectiles.
-   1b. **Enemy scaling by gear score** (developer's direction, session 62; design in
-      `design/enemies.md` "Planned"): about 10–12 kinds for the whole game, reused in
-      every zone tier; each placement sets the enemy's GS, which scales its health,
-      damage and XP (`data/enemy_scaling.cfg`) and its drops (loot bands relative to the
-      enemy's GS instead of fixed per kind). Before or with 5.2's tiered zones.
+   1b. **Built (session 62, branch `milestone-6`; same playtest).** **Enemy scaling by
+      gear score** (developer's direction): about 10–12 kinds for the whole game,
+      reused in every zone tier; each placement sets the enemy's GS (camp markers:
+      Thornlings 140, Seers 150, Cragmaw 180), which scales its health, damage and XP
+      (`data/scaling.cfg`) and its drops (loot bands relative to the enemy's GS).
+      Every drop chance halved (Husk 60% → 30%), rarity weights unchanged.
    2. **The zone:** a small map from CC0 packs: mob camps, gathering node spawns, a
       town with crafting stations, spawn points.
 6. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations in
@@ -251,7 +252,10 @@ sidestep it at 13 m? a guard blocks it; Burn on a hit; they back away when you c
 in), the **Cragmaw** north-east at (21, -23) (a 1.2 s windup, a cone slam that breaks a
 guard and knocks you 3 m; circle behind it during the windup and it misses; barely
 staggers). Do the looks read (and the Thornling lying on its side when dead)? Loot
-and XP feel right for the effort (Cragmaw: 2400 health, always 2 items)? F3 boxes.
+and XP feel right for the effort? F3 boxes. **Scaling:** nameplates read "Thornling
+GS 140" etc.; the camps are placed above their kinds' own GS (Cragmaw 180: ~2870
+health, ~270 per slam); drops land around the enemy's GS (Thornlings 125–165, Seers
+135–175, Cragmaw 170–200, Husks 101–140); fewer drops overall (half as often).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -324,10 +328,15 @@ Say "keep" or what to change.
 
 - **Enemy camps (session 62):** names Thornling, Cinder Seer, Cragmaw (ids `thorn`,
   `seer`, `crag`); 2 + 2 + 1 placed (snapshot room: `-Bots 6` max 1277 of 1360 bytes,
-  so one or two more enemies at most before interest management). GS bands 110–150 /
-  120–160 / 135–175 (above crafted gear's 100–140; same item pool as the Husk, the Seer
-  leaning to casters and Wing Enhancements); drop 45% / 60% / 100% ×2; kill XP 40 / 70
-  / 220, mastery 30 / 55 / 160; respawn 12 / 15 / 45 s. Aggro 9 / 10 / 7 m so nobody
+  so one or two more enemies at most before interest management). Kind GS 125 / 135 /
+  160, camps placed at 140 / 150 / 180; loot bands around the enemy's GS −15/+25,
+  −15/+25, −10/+20 (Husk −19/+20 = its old 101–140), within GS 100–700; same item pool
+  as the Husk, the Seer leaning to casters and Wing Enhancements; drop chances
+  (halved at your request) 22.5% / 30% / 50% ×2, Husk 30%; kill XP 40 / 70 / 220,
+  mastery 30 / 55 / 160 at the kind's GS (scaled up at the camps); respawn 12 / 15 / 45 s.
+  **Scaling rates** (`data/scaling.cfg`, per 5 GS): health +1.6%, damage and block
+  stamina damage +1.12% (the gear curve), XP +1.6%; nothing else scales. Rarity odds
+  don't rise with GS yet. Aggro 9 / 10 / 7 m so nobody
   walking by is pulled; a camp fights together (pulling one alerts the rest, not other
   camps or Husks). Seer orbs hit players only, blockable and parryable, never other
   enemies; a blinded Seer's cast fizzles. Every kind still hits and is hit with the
@@ -489,7 +498,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 60 | 2026-10-18 | Wing trees cost 22 (all branches 11) with 3 Wing points at level 1, so they fill exactly at level 20; levels 21–30 give class bonus points (`[level_bonus]` in class files, `ClassDef.level_bonus`, `Player.set_level_bonus`; move speed, dodge and Ember cost as owner-only synced ints in `PlayerState`, header 12 → 15). Mage: Mending Beam `self_heal` 22.5, Renewal Pulse zone `owner_heal` 120, Sapping Pulse replaces Life Spore (status `sapped`: `mark_attacks="light_heavy"`, `mark_heal` 0.5; `_marked_scale` + `_heal_from_mark`; `SUMMARY mage mark_heals=`). 841 tests (level bonus, synced fields, real Wing trees at 20); smoke default, `-Party` and `-Class mage` pass, 0 corrections; mark heals didn't happen in two Mage runs (bots didn't follow up on a sapped Husk), so that path needs a hand check |
 | 61 | 2026-10-25 | Main fast-forwarded to `progression` (sessions 54–60) at the developer's request, before the progression hand playtest. **Code version check:** `CodeVersion` (a hash of the code files, not data/; an export packs `code_version.txt`, written by `tools/write_code_version.gd` in `export_client.ps1`) and `VersionCheck` (`/root/Main/VersionCheck`, two RPCs that never change): a client says its version on connect, the server sends the tuning only on a match (and only then allows login), else refuses with a message naming both versions; a silent connection (a pre-check build) is dropped after `[server] version_timeout` 10 s. The connect page shows "Game version X". 846 tests (5 new); on Linux with PowerShell 7: smoke default passes (version checks: 2 accepted, the `--fake-version` client refused), `-Party` passes everything but the known Linux `party_members=0` quit timing (also on the unchanged code, 2 of 2 runs); a pre-check build against the new server was dropped after 10 s with no errors; the refusal screen checked in a screenshot. Hand check: export, change a script, host, and connect the old exe (message) |
 
-| 62 | 2026-10-25 | Build order 5.1 on branch `milestone-6` (from main d7768d1): **three camp enemy kinds**. Shared engine first (main session): `EnemyLook` (looks per kind in `game/enemy/looks/`, Husk and dummy moved there; `dead_pose`), camp alerts (`metadata/camp`, `EnemyBrain.pulled`/`alert`), `[ai] keep_distance`/`retreat_speed`, enemy projectiles (`ProjectileSystem.server_fire_enemy`, players only), `[stats] name`, a ~10-byte smaller enemy snapshot entry, `EnemyParams.validate`, `SUMMARY enemy_kinds`, loot tables. Then three parallel agents (worktrees), one kind each (cfg, look, tests), merged clean: **Thornling**, **Cinder Seer** (+ `projectile_cinder_orb`), **Cragmaw**; camps placed east/west/north-east, after the dummy (ids unchanged). From the agents' notes: a stagger after a swing came down starts the cooldown; F3 boxes and hit numbers fit scaled looks. 884 tests; on Linux with PowerShell 7 smoke default ×3 pass (new checks: every kind spawned; the Seers, tuned to 45 m aggro in the smoke test only, throw: 4–9 orbs a run), `-Party` passes everything but the known `party_members=0` quit timing (2 runs), `-Bots 6` passes (server quit 8 s later, the known 4-core issue) with max snapshot 1277 bytes. Needs the camp hand playtest (§4) |
+| 62 | 2026-10-25 | Build order 5.1 on branch `milestone-6` (from main d7768d1): **three camp enemy kinds**. Shared engine first (main session): `EnemyLook` (looks per kind in `game/enemy/looks/`, Husk and dummy moved there; `dead_pose`), camp alerts (`metadata/camp`, `EnemyBrain.pulled`/`alert`), `[ai] keep_distance`/`retreat_speed`, enemy projectiles (`ProjectileSystem.server_fire_enemy`, players only), `[stats] name`, a ~10-byte smaller enemy snapshot entry, `EnemyParams.validate`, `SUMMARY enemy_kinds`, loot tables. Then three parallel agents (worktrees), one kind each (cfg, look, tests), merged clean: **Thornling**, **Cinder Seer** (+ `projectile_cinder_orb`), **Cragmaw**; camps placed east/west/north-east, after the dummy (ids unchanged). From the agents' notes: a stagger after a swing came down starts the cooldown; F3 boxes and hit numbers fit scaled looks. 884 tests; on Linux with PowerShell 7 smoke default ×3 pass (new checks: every kind spawned; the Seers, tuned to 45 m aggro in the smoke test only, throw: 4–9 orbs a run), `-Party` passes everything but the known `party_members=0` quit timing (2 runs), `-Bots 6` passes (server quit 8 s later, the known 4-core issue) with max snapshot 1277 bytes. Then, at the developer's request, **gear score scaling** (marker `metadata/gear_score`, `data/scaling.cfg`, `EnemyParams.scaled_to`: health, damage, XP; loot bands relative to the enemy's GS, `LootTable.roll_gear_score`; nameplates show GS) and **every drop chance halved**: 891 tests; smoke default and `-Party` pass (the known party line aside; a GS 150 Seer dropped GS 164). Needs the camp hand playtest (§4) |
 
 ---
 

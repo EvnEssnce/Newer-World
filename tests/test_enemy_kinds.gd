@@ -48,3 +48,46 @@ func test_every_spawn_marker_has_a_kind_file() -> void:
 	for kind in ["husk", "dummy", "thorn", "seer", "crag"]:
 		assert_true(kinds.has(kind), "a %s is placed" % kind)
 	assert_eq(camps.size(), 3, "three camps")
+
+
+func _base_params() -> EnemyParams:
+	var params := EnemyParams.new()
+	params.gear_score = 100
+	params.max_health = 1000.0
+	params.move_speed = 3.0
+	params.kill_xp = 100
+	params.mastery_xp = 50
+	params.attack = AttackParams.new()
+	params.attack.damage = 100.0
+	params.attack.block_stamina_damage = 20.0
+	params.attack.windup_ticks = 30
+	return params
+
+
+func test_scaling_to_a_higher_gear_score() -> void:
+	var base := _base_params()
+	var scaled := base.scaled_by(150, 0.02, 0.01, 0.03)  # 10 steps of 5 GS
+	assert_eq(scaled.gear_score, 150)
+	assert_almost(scaled.max_health, 1000.0 * pow(1.02, 10))
+	assert_almost(scaled.attack.damage, 100.0 * pow(1.01, 10))
+	assert_almost(scaled.attack.block_stamina_damage, 20.0 * pow(1.01, 10))
+	assert_eq(scaled.kill_xp, roundi(100 * pow(1.03, 10)))
+	assert_eq(scaled.mastery_xp, roundi(50 * pow(1.03, 10)))
+	assert_eq(scaled.move_speed, 3.0, "speeds don't scale")
+	assert_eq(scaled.attack.windup_ticks, 30, "timings don't scale")
+	assert_eq(base.max_health, 1000.0, "the kind's own params are untouched")
+	assert_eq(base.attack.damage, 100.0)
+
+
+func test_scaling_down_and_to_its_own_gear_score() -> void:
+	var base := _base_params()
+	assert_true(base.scaled_by(100, 0.02, 0.01, 0.03) == base, "its own GS: the same params")
+	assert_true(base.scaled_by(50, 0.02, 0.01, 0.03).max_health < 1000.0, "weaker below")
+
+
+func test_camp_markers_place_gear_scores() -> void:
+	var world: Node = load("res://game/world/world.tscn").instantiate()
+	for marker: Node in world.get_node("EnemySpawns").get_children():
+		if marker.has_meta("gear_score"):
+			assert_true(int(marker.get_meta("gear_score")) >= 100, marker.name)
+	world.free()
