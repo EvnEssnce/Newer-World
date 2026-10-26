@@ -4,8 +4,9 @@ entry_symbol = "sqlite_library_init"
 compatibility_minimum = "4.7"
 
 ; godot-sqlite v4.9 (github.com/2shady4u/godot-sqlite, MIT, built for Godot 4.7.1).
-; Only the Windows and Linux x86_64 binaries are kept: the server runs on one of them.
-; Other platforms: copy their binaries from the release's addons.zip and list them here.
+; Kept: Windows and Linux x86_64, and macOS (universal: Intel and Apple Silicon) so
+; a Mac can run its own server. Other platforms: copy their binaries from the
+; release's addons.zip and list them here.
 
 [libraries]
 
@@ -13,3 +14,5 @@ windows.debug.x86_64 = "res://addons/godot-sqlite/bin/libgdsqlite.windows.templa
 windows.release.x86_64 = "res://addons/godot-sqlite/bin/libgdsqlite.windows.template_release.x86_64.dll"
 linux.debug.x86_64 = "res://addons/godot-sqlite/bin/libgdsqlite.linux.template_debug.x86_64.so"
 linux.release.x86_64 = "res://addons/godot-sqlite/bin/libgdsqlite.linux.template_release.x86_64.so"
+macos.debug = "res://addons/godot-sqlite/bin/libgdsqlite.macos.template_debug.framework"
+macos.release = "res://addons/godot-sqlite/bin/libgdsqlite.macos.template_release.framework"

@@ -215,10 +215,11 @@ design/              classes.md: class/weapon/ability design, then per-class imp
                      enemies.md: the enemy kinds and camps (build order 5.1).
 assets/              CC0 art packs go here (Kenney, Quaternius, Mixamo).
 addons/godot-sqlite/ godot-sqlite v4.9 (MIT, built for Godot 4.7.1): Windows and Linux x86_64
-                     binaries only (`gdsqlite.gdextension` lists them). Other platforms: copy
-                     their binaries from the release's addons.zip.
+                     and macOS (universal) binaries (`gdsqlite.gdextension` lists them). Other
+                     platforms: copy their binaries from the release's addons.zip.
 tests/               test_*.gd unit tests; framework/ holds the runner and TestCase.
-tools/               PowerShell run scripts, unit test runner, smoke test.
+tools/               PowerShell run scripts, unit test runner, smoke test; run_local_mac.sh
+                     (macOS/Linux: server + your window + a bot, like run_local_test.ps1).
 ```
 
 ## Networking model
@@ -1226,6 +1227,12 @@ powershell -ExecutionPolicy Bypass -File tools\smoke_test.ps1 -Bots 6    # more 
 ```
 
 Run `run_tests.ps1`, `smoke_test.ps1` and `smoke_test.ps1 -Party` before committing.
+
+**On a Mac** (Godot 4.7 in /Applications, or `GODOT` set): `sh tools/run_local_mac.sh
+[--no-bot] [--party] [--class=ID]` runs the server, your window and a bot on the Mac
+(logs in `build/local/`); closing your window stops the rest. As a client of another
+server: `Godot --path . -- --address=HOST:24565`. Unit tests: `Godot --path . --headless
+res://tests/framework/run_tests.tscn`. Never run on a real Mac yet (session 62).
 
 **Linux cloud sessions** (no PowerShell, no Godot installed): download
 `Godot_v4.7.2-stable_linux.x86_64.zip` from the godotengine GitHub releases into the
