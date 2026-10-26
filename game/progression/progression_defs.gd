@@ -43,8 +43,16 @@ var wing_points_per_level := 1
 ## A weapon tree's points at mastery level 1, and per mastery level after the first.
 var mastery_start_points := 0
 var mastery_points_per_level := 1
-## Character XP for each gather (any node kind).
-var gather_xp := 0
+## Character XP per point of tradeskill XP earned by gathering or crafting
+## (every action that gives XP gives character XP too).
+var tradeskill_xp_fraction := 0.0
+
+## Character XP for `tradeskill_xp` earned by a gather or craft (rounded, at
+## least 1 when any was earned and the fraction is above 0).
+func xp_for_tradeskill(tradeskill_xp: int) -> int:
+	if tradeskill_xp <= 0 or tradeskill_xp_fraction <= 0.0:
+		return 0
+	return maxi(1, roundi(tradeskill_xp * tradeskill_xp_fraction))
 
 
 ## The game's rules, loaded once (again when Tuning.version moves).
@@ -67,7 +75,7 @@ static func from_tuning() -> ProgressionDefs:
 	defs.wing_start_points = Tuning.get_value("progression", "character", "wing_start_points")
 	defs.mastery_points_per_level = Tuning.get_value("progression", "weapon_mastery", "points_per_level")
 	defs.mastery_start_points = Tuning.get_value("progression", "weapon_mastery", "start_points")
-	defs.gather_xp = Tuning.get_value("progression", "sources", "gather_xp")
+	defs.tradeskill_xp_fraction = Tuning.get_value("progression", "sources", "tradeskill_xp_fraction")
 	for problem in defs.validate():
 		push_error("progression.cfg: " + problem)
 	return defs
@@ -94,6 +102,6 @@ func validate() -> PackedStringArray:
 			problems.append("[%s] xp_base must be above 0 and xp_exponent at least 0" % entry[0])
 	if mini(mini(wing_points_per_level, mastery_points_per_level), mini(wing_start_points, mastery_start_points)) < 0:
 		problems.append("points can't be negative")
-	if gather_xp < 0:
-		problems.append("[sources] gather_xp can't be negative")
+	if tradeskill_xp_fraction < 0.0:
+		problems.append("[sources] tradeskill_xp_fraction can't be negative")
 	return problems

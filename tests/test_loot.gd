@@ -246,3 +246,31 @@ func test_validate_relative_band() -> void:
 	table.gear_score_below = -30  # GS + 30 .. GS + 10: backwards
 	table.gear_score_above = 10
 	assert_true(Array(db.validate()).any(func(p: String) -> bool: return p.contains("gear_score_below")))
+
+
+# --- Drops lean to the killer's class ---
+
+func test_class_item_weights() -> void:
+	_item("spear", "weapon", "spear", "weapon_power", 100.0)
+	_item("plumes", "wings", "", "wing_power", 100.0)
+	db.items["plumes"].class_id = "fighter"
+	_item("vanes", "wings", "", "wing_power", 100.0)
+	db.items["vanes"].class_id = "ranger"
+	var weights := {"sword": 2, "spear": 2, "cap": 2, "plumes": 2, "vanes": 2}
+	var fighter := LootRoller.class_item_weights(weights, db, "fighter",
+			PackedStringArray(["broadsword"]), 3.0, 0.1)
+	assert_almost(fighter["sword"], 6.0, 0.001, "its own weapon type")
+	assert_almost(fighter["spear"], 0.2, 0.001, "a weapon its class can't use")
+	assert_almost(fighter["cap"], 2.0, 0.001, "armor: any class, unchanged")
+	assert_almost(fighter["plumes"], 6.0, 0.001, "its own Wing Enhancement")
+	assert_almost(fighter["vanes"], 0.2, 0.001, "another class's Wing Enhancement")
+
+
+func test_kill_rolls_use_each_players_weights() -> void:
+	var table: ItemDatabase.LootTable = db.tables["test"]
+	var only_cap: Dictionary[int, Dictionary] = {7: {"cap": 1, "sword": 0}}
+	for i in 50:
+		var loot := LootRoller.roll_kill(table, db, [7, 8] as Array[int], rng, 100, only_cap)
+		for item: Item in loot[7]:
+			assert_eq(item.item_id, "cap", "peer 7 rolls its own weights")
+		assert_true(loot.has(8), "a peer without weights rolls the table's")

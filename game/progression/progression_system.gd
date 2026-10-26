@@ -35,6 +35,8 @@ var _progress: Dictionary[int, Progression] = {}
 var _players_tracked := 0
 var _kills_credited := 0
 var _gathers := 0
+## Character XP grants from gathers and crafts (on_tradeskill_xp).
+var _tradeskill_grants := 0
 var _xp_granted := 0
 var _mastery_xp_granted := 0
 var _level_ups := 0
@@ -93,12 +95,21 @@ func on_enemy_killed(enemy: Enemy) -> void:
 				Progression.mastery_split(enemy.damaged_by[peer], enemy.params.mastery_xp))
 
 
-## The gathering hook: `peer` finished a gather. Server.
+## The gathering hook: `peer` finished a gather (counted; its XP comes
+## through on_tradeskill_xp). Server.
 func on_gathered(peer: int, _skill: String, _node_kind: String, _amount: int) -> void:
 	if _is_client or not _progress.has(peer):
 		return
 	_gathers += 1
-	grant(peer, defs.gather_xp, {})
+
+
+## World/Tradeskills: a gather or craft earned `xp` tradeskill XP: character XP
+## too (defs.xp_for_tradeskill). Server.
+func on_tradeskill_xp(peer: int, _skill: String, xp: int) -> void:
+	if _is_client or not _progress.has(peer):
+		return
+	_tradeskill_grants += 1
+	grant(peer, defs.xp_for_tradeskill(xp), {})
 
 
 ## Gives `peer` character XP and mastery XP (weapon id -> XP); sends the owner
@@ -158,9 +169,9 @@ func print_summary() -> void:
 	var levels := 0
 	for progress in _progress.values():
 		levels += progress.level()
-	print("SUMMARY progression players=%d tracked_now=%d levels_now=%d kills_credited=%d gathers=%d xp_granted=%d mastery_xp_granted=%d level_ups=%d mastery_level_ups=%d xp_lines=%d" % [
+	print("SUMMARY progression players=%d tracked_now=%d levels_now=%d kills_credited=%d gathers=%d xp_granted=%d mastery_xp_granted=%d level_ups=%d mastery_level_ups=%d xp_lines=%d tradeskill_grants=%d" % [
 			_players_tracked, _progress.size(), levels, _kills_credited, _gathers, _xp_granted,
-			_mastery_xp_granted, _level_ups, _mastery_level_ups, _xp_lines])
+			_mastery_xp_granted, _level_ups, _mastery_level_ups, _xp_lines, _tradeskill_grants])
 
 
 # --- Client ---

@@ -401,7 +401,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   player in `Enemy.damaged_by` the enemy file's `[progression] kill_xp`, and its
   `mastery_xp` split by damage per weapon (`damaged_by[peer]` = weapon id → damage;
   `World._credited_weapon`: the weapon out when it landed, "" during a Wing ability;
-  `Progression.mastery_split`); a gather (`gathered`) gives `[sources] gather_xp`.
+  `Progression.mastery_split`); **every tradeskill XP gain from a gather or craft gives
+  character XP too** (`TradeskillSystem.xp_earned` → `on_tradeskill_xp`,
+  `[sources] tradeskill_xp_fraction` 0.6 of it, even at the skill's cap; developer's
+  rule: no action gives a specific XP without character XP).
   `grant` → server → owner `_receive_progress(dict)`, `_receive_xp(xp, mastery)` ("+50 XP
   +40 Spear" feed line), `_receive_level_up(weapon_id, from, to)` ("" = character);
   `save_changed`; `points_changed` → `BuildService.on_points_changed`. Clients: `local`,
@@ -1053,6 +1056,10 @@ charges are cross-class).
 - Snapshots carry `Enemy.get_snapshot()` per enemy; clients interpolate like remote
   players. The windup is telegraphed by the body glowing red.
 - Enemies don't collide with players (layer 4; players and enemies only mask the world).
+- The test map (60 × 60 m) has walls around its edge (`WallNorth`/`South`/`East`/`West`,
+  layer 1, 3 m high: a Seer backing away fell off it); an enemy below
+  `data/navigation.cfg [enemies] fall_reset_height` is respawned at its camp
+  (`fall_resets=` on `SUMMARY enemy_kinds`).
 - The smoke test tunes the Seers' aggro to 45 m (leash 60) so they come to the bots
   and throw (checks `enemy_projectiles` ≥ 1); the other camps stay out of its fights.
 - **Training dummy** (`data/enemy_dummy.cfg`, marker `TrainingDummy` at z = +18, the far
@@ -1105,6 +1112,9 @@ don't bind them to anything else.
   or damage over time took health since it (re)spawned or healed at home) when it dies
   (`World._damage_enemy` → `on_enemy_killed`), `LootRoller.roll_kill`. Each roll that
   drops something becomes its own `GroundLoot.Drop`, `[drops] scatter` m from the body
+  (each player's roll leans to their class: `LootRoller.class_item_weights`, loot.cfg
+  `[drops] own_class_weight` 3 for weapons/Wing Enhancements their class can use,
+  `other_class_weight` 0.1 for other classes', armor unchanged),
   (snapped to the ground), seen only by its owner, gone after `[drops] lifetime`. No
   party loot rules needed.
 - **Pickup** (F): the server moves the sender's drops within `[drops] pickup_range`

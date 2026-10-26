@@ -22,6 +22,9 @@ const XP_COLOR := Color(0.65, 0.85, 1.0)
 
 ## Server: `peer` gained XP (World/Saves marks it for saving).
 signal save_changed(peer: int)
+## Server: a gather or craft earned `xp` in a skill (before the level cap cuts
+## it): World/Progression gives character XP for it.
+signal xp_earned(peer: int, skill: String, xp: int)
 
 var defs: TradeskillDefs
 var _is_client := false
@@ -90,7 +93,9 @@ func on_gathered(peer: int, skill: String, node_kind: String, amount: int) -> vo
 	if _is_client or not _skills.has(peer) or not defs.is_gathering(skill):
 		return
 	_gathers += 1
-	add_xp(peer, skill, defs.gather_xp(skill, node_kind, amount), true)
+	var xp := defs.gather_xp(skill, node_kind, amount)
+	add_xp(peer, skill, xp, true)
+	xp_earned.emit(peer, skill, xp)
 
 
 ## World/Crafting finished a craft: `xp` (the recipe's XP x the quantity) for
@@ -102,6 +107,7 @@ func on_crafted(peer: int, skill: String, xp: int) -> void:
 	if not _skills[peer].is_capped(skill):
 		_craft_xp += maxi(0, xp)
 	add_xp(peer, skill, xp, true)
+	xp_earned.emit(peer, skill, xp)
 
 
 ## Gives `peer` XP in a skill (gathering and crafting); returns the

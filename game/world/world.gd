@@ -359,9 +359,10 @@ func _ready() -> void:
 	progression = ProgressionSystem.new()
 	progression.name = "Progression"
 	add_child(progression)
-	# Kills (World._damage_enemy) and gathers give XP; level-ups raise the tree
+	# Kills (World._damage_enemy), gathers and crafts (tradeskill XP) give XP; level-ups raise the tree
 	# points World/Builds allows (server).
 	gathering.gathered.connect(progression.on_gathered)
+	tradeskills.xp_earned.connect(progression.on_tradeskill_xp)
 	_builds.progression = progression
 	progression.points_changed.connect(_builds.on_points_changed)
 	if multiplayer.is_server():
@@ -3641,10 +3642,13 @@ func print_summary() -> void:
 				_enemies.get_child_count(), _enemy_hits, _enemy_damaged, _enemy_kills, switches,
 				_taunts, _heal_threat])
 		var spawned: Dictionary[String, int] = {}
+		var fall_resets := 0
 		for enemy: Enemy in _enemies.get_children():
 			spawned[enemy.kind] = spawned.get(enemy.kind, 0) + 1
-		print("SUMMARY enemy_kinds spawned=%s kills=%s camp_alerts=%d %s" % [_kind_counts(spawned),
-				_kind_counts(_kills_by_kind), _camp_alerts, _projectiles.enemy_summary()])
+			fall_resets += enemy.fall_resets
+		print("SUMMARY enemy_kinds spawned=%s kills=%s camp_alerts=%d %s fall_resets=%d" % [
+				_kind_counts(spawned), _kind_counts(_kills_by_kind), _camp_alerts,
+				_projectiles.enemy_summary(), fall_resets])
 		enemy_navigation.print_summary()
 		print("SUMMARY party formed=%d parties=%d pvp_hits=%d ally_hits_ignored=%d shield_wall_covers=%d" % [
 				party.rules.formed_count, party.rules.party_count(), _pvp_hits, _ally_hits_ignored,

@@ -66,6 +66,10 @@ var wall_stun_source := 0
 var _ticks_since_damage := 0
 var _rng := RandomNumberGenerator.new()
 var _gravity := 0.0
+## Server: below this height it fell off the map (data/navigation.cfg [enemies]).
+var _fall_reset_height := -20.0
+## Server: times it fell off the map and was put back at its camp.
+var fall_resets := 0
 
 # Statuses (server; clients get a copy in snapshots for the label)
 ## Buffs and debuffs, indices into status_defs. Slow and root change its
@@ -102,6 +106,7 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		health = params.max_health
 		brain.wander_point = home
+		_fall_reset_height = Tuning.get_value("navigation", "enemies", "fall_reset_height")
 		_give_path()
 		_rng.randomize()
 		_name_label.visible = false
@@ -152,6 +157,10 @@ func server_step(targets: Dictionary, delta: float) -> void:
 	velocity.y = 0.0 if is_on_floor() else velocity.y - _gravity * delta
 	_apply_force_step()
 	move_and_slide()
+	if global_position.y < _fall_reset_height:
+		fall_resets += 1
+		respawn()  # fell off the map: back at its camp, full health
+		return
 	if brain.arrived_home:
 		health = params.max_health
 		damaged_by.clear()

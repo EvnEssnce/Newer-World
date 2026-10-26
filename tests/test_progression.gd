@@ -147,3 +147,13 @@ func test_feed_lines() -> void:
 	assert_eq(ProgressionSystem.xp_line(50, {}), "+50 XP")
 	assert_eq(Hud.xp_text(3, 120, 1039), "Level 3   120 / 1039 XP")
 	assert_eq(Hud.xp_text(20, 0, 0), "Level 20 (max)")
+
+
+func test_tradeskill_xp_gives_character_xp() -> void:
+	defs.tradeskill_xp_fraction = 0.6
+	assert_eq(defs.xp_for_tradeskill(25), 15, "a gather's 25 Mining XP")
+	assert_eq(defs.xp_for_tradeskill(30), 18, "a refine's 30 XP")
+	assert_eq(defs.xp_for_tradeskill(1), 1, "at least 1 for any earned")
+	assert_eq(defs.xp_for_tradeskill(0), 0)
+	defs.tradeskill_xp_fraction = 0.0
+	assert_eq(defs.xp_for_tradeskill(25), 0, "off")

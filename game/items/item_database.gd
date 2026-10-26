@@ -111,6 +111,9 @@ var tables: Dictionary[String, LootTable] = {}
 ## Dropped items' gear score is kept within these (loot.cfg [drops]).
 var drop_gear_score_floor := 100
 var drop_gear_score_ceiling := 700
+## Item weight multipliers for the killer's class (LootRoller.class_item_weights).
+var own_class_weight := 1.0
+var other_class_weight := 1.0
 ## The gear score curve items' main stats follow.
 var gear := GearScore.new()
 
@@ -143,6 +146,8 @@ static func from_tuning() -> ItemDatabase:
 
 	db.drop_gear_score_floor = Tuning.get_optional("loot", "drops", "min_gear_score", 100)
 	db.drop_gear_score_ceiling = Tuning.get_optional("loot", "drops", "max_gear_score", 700)
+	db.own_class_weight = Tuning.get_optional("loot", "drops", "own_class_weight", 1.0)
+	db.other_class_weight = Tuning.get_optional("loot", "drops", "other_class_weight", 1.0)
 	for section in Tuning.get_sections("loot"):
 		if not section.begins_with(TABLE_PREFIX):
 			continue

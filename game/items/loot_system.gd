@@ -222,7 +222,14 @@ func on_enemy_killed(enemy: Enemy) -> void:
 	if contributors.is_empty():
 		return
 	_kills_rolled += 1
-	var loot := LootRoller.roll_kill(table, _db, contributors, _rng, enemy.params.gear_score)
+	var weights: Dictionary[int, Dictionary] = {}
+	for peer in contributors:
+		var player := players.get_node(str(peer)) as Player
+		if player.build != null:
+			var class_def := player.build.class_def
+			weights[peer] = LootRoller.class_item_weights(table.item_weights, _db, class_def.id,
+					class_def.weapons, _db.own_class_weight, _db.other_class_weight)
+	var loot := LootRoller.roll_kill(table, _db, contributors, _rng, enemy.params.gear_score, weights)
 	for peer: int in loot:
 		var items: Array[Item] = []
 		items.assign(loot[peer])
