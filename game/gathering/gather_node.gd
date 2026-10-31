@@ -8,7 +8,7 @@ extends RefCounted
 ## What F does (interact_choice).
 enum Interact { PICKUP, GATHER, CRAFT }
 
-## Its index under World/GatherNodes (what the network sends).
+## Its index under World/Map/GatherNodes (what the network sends).
 var id := 0
 ## Its GatherNodeParams kind id.
 var kind := ""

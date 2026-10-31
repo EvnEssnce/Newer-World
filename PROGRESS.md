@@ -57,7 +57,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
-| Zone | Mob camps, node spawns, a town with crafting stations | Test map only; three enemy camps and edge walls on it (session 62) |
+| Zone | Mob camps, node spawns, a town with crafting stations | Ashvale blockout (session 64): 400 × 400 m, town, 8 enemy groups, 22 nodes, 4 spawn points; art packs later. Test map kept for the smoke test |
 
 ---
 
@@ -196,7 +196,19 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       unchanged); every tradeskill XP gain also gives character XP (0.6×; crafting gave
       none before). macOS: godot-sqlite binaries and `tools/run_local_mac.sh`.
    2. **The zone:** a small map from CC0 packs: mob camps, gathering node spawns, a
-      town with crafting stations, spawn points.
+      town with crafting stations, spawn points. Decided (session 64): **400 × 400 m**,
+      a **blockout now** (shapes built in code; CC0 packs replace them later: this
+      container can't download them), the **test map kept** for the smoke test
+      (`data/world.cfg [map] id` picks the map; the zone is the default).
+      1. **Built (session 64, branch `claude/nice-pascal-atlnuy`; needs a hand
+         playtest).** Maps as scenes (`World/Map`, `GameMap`), player spawn points
+         (respawn at the nearest), generated low-poly terrain with hills, flats, roads
+         and edge mountains, seeded trees and rocks, blockout town (palisade, houses,
+         Forge, dummy) and **Ashvale**: 21 enemies in 8 groups (GS 120 near town to
+         185 in the north), 22 gather nodes, 4 spawn points (`CLAUDE.md` "Maps").
+      2. Next: the developer's walk-through (§4), then CC0 packs (Kenney Nature Kit,
+         Fantasy Town Kit or Quaternius) dropped into `assets/` to replace the
+         blockout pieces; more stations in town when more station kinds exist.
 6. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations in
    place of the capsule (the developer downloads the packs; Mixamo needs an Adobe
    login). Then the Milestone 6 playtest with real people.
@@ -259,6 +271,16 @@ next to a crate); Pyre Heart drawing a Husk's aggro; Second Wind and Second Step
 rolls / Ashsteps); Ricochet; Seeker Spark (watch for kinks from course corrections);
 Tripwire and Smoke Bolt; Kindle Life; Mirror Aegis reflecting projectiles.
 
+**Ashvale (session 64):** run `tools\run_local_test.ps1` (the zone is the default map;
+`data/world.cfg`). Walk out of town through each gate: does the layout read (harder to
+the north), are the distances right (town to the north ridge is ~240 m, ~40 s), do camps
+pop in too late at the 60 m view radius (fog starts at 90 m), and does movement on
+slopes, among trees and through the palisade gates feel right? Die near a shrine:
+respawn there. Gather in the meadows/forests, craft at the town Forge. Open
+`game/maps/ashvale.tscn` in the editor: terrain, trees and buildings show; move a Flats
+or Hills marker and press Rebuild on Terrain, then Decor. Look for prediction
+corrections on the HUD (should stay 0).
+
 ### Decisions to confirm (defaults that were built)
 
 Say "keep" or what to change.
@@ -316,6 +338,10 @@ Say "keep" or what to change.
   Pulse** replaces Life Spore (Siphon tier 2): 4 m pulse, 50 damage, Sapped 6 s; your
   next light or heavy on a sapped target (projectiles too, not abilities) deals +40%
   and heals you half of that hit. Lifeweaver now heals, Siphon damages and drains.
+- **Ashvale (session 64):** the name; town in the south, difficulty rising north; a
+  respawn goes to the spawn point nearest where you fell (town or one of 3 shrines),
+  a new arrival always to the town; Husks have no camp (no group pulls); the training
+  dummy is in town. Map edges are mountains plus invisible walls. Fog from 90 m.
 - **Names (session 58):** a blocked-word list (`data/name_filter.cfg`) for account and
   character names: words refused anywhere, short ones only as the whole name, and an
   allowed list ("Peacock", "Dickens", "Annalise"). A refused name says only "That name
@@ -379,6 +405,15 @@ Gameplay:
   logs in; the in-game class change (test tool) doesn't change the stored class; no
   character delete or rename on the start screens.
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
+
+Maps (session 64):
+- The enemies' navmesh bake takes ~1.1 s on Ashvale (vs. a few ms on the test map):
+  fine at startup, but each enemy-blocking wall (Shield Wall, Sheltering Wings) is cut
+  out ~1 s late. Tiled baking (rebake only the tiles a wall touches) if it matters.
+- Interest management: enemies and players appear at 60 m, which an open map shows
+  more than the walled test map did (the fog starts at 90 m).
+- Blockout only: no water, no ambient sounds, trees are cones; roads are colour only.
+  The palisade has no gate doors.
 
 Networking:
 - Snapshots fit one packet up to about 6 players and 8 enemies **in view** (6 bots,
@@ -504,6 +539,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 62 | 2026-10-25 | Build order 5.1 on branch `milestone-6` (from main d7768d1): **three camp enemy kinds**. Shared engine first (main session): `EnemyLook` (looks per kind in `game/enemy/looks/`, Husk and dummy moved there; `dead_pose`), camp alerts (`metadata/camp`, `EnemyBrain.pulled`/`alert`), `[ai] keep_distance`/`retreat_speed`, enemy projectiles (`ProjectileSystem.server_fire_enemy`, players only), `[stats] name`, a ~10-byte smaller enemy snapshot entry, `EnemyParams.validate`, `SUMMARY enemy_kinds`, loot tables. Then three parallel agents (worktrees), one kind each (cfg, look, tests), merged clean: **Thornling**, **Cinder Seer** (+ `projectile_cinder_orb`), **Cragmaw**; camps placed east/west/north-east, after the dummy (ids unchanged). From the agents' notes: a stagger after a swing came down starts the cooldown; F3 boxes and hit numbers fit scaled looks. 884 tests; on Linux with PowerShell 7 smoke default ×3 pass (new checks: every kind spawned; the Seers, tuned to 45 m aggro in the smoke test only, throw: 4–9 orbs a run), `-Party` passes everything but the known `party_members=0` quit timing (2 runs), `-Bots 6` passes (server quit 8 s later, the known 4-core issue) with max snapshot 1277 bytes. Then, at the developer's request, **gear score scaling** (marker `metadata/gear_score`, `data/scaling.cfg`, `EnemyParams.scaled_to`: health, damage, XP; loot bands relative to the enemy's GS, `LootTable.roll_gear_score`; nameplates show GS) and **every drop chance halved**: 891 tests; smoke default and `-Party` pass (the known party line aside; a GS 150 Seer dropped GS 164). Then the developer's Mac playtest feedback: macOS godot-sqlite binaries + `tools/run_local_mac.sh`; walls around the test map and an enemy fall reset; drops lean to the killer's class; every gather and craft gives character XP (0.6 × its tradeskill XP); 894 tests; smoke default and `-Party` pass (known party line aside; 3 gathers + 2 crafts gave 5 character XP grants). UI scale slider noted for later. Needs the camp hand playtest (§4) |
 
 | 63 | 2026-10-31 | Developer's playtest of session 62 on a Mac approved (camps, scaling, walls, class drops, craft XP); a one-time shader error at launch didn't come back. Main fast-forwarded to `milestone-6`. Then **interest management** on `milestone-6`: `Interest` (`core/interest.gd`, network.cfg `[interest]` 60 m in / 70 m out, horizontal), each client's snapshot has only nearby players and enemies plus itself and its party; clients drop and respawn what leaves and enters view; `SUMMARY net hidden_players= hidden_enemies=`, client `out_of_view=`; the bot remembers the other bot's id for its turn order. 900 tests; smoke (run at a 20/25 m radius, checks the far camps are left out) default 5 runs, 4 passed and 1 failed a bot's air dodge (a Forge trip ate its last circling phase; not seen again), `-Party` passes but the known `party_members=0` line, `-Bots 6` passes with max 1,228 bytes (1,277 before). Hand checked by the developer (at a 20/25 m radius: camps vanish and come back); main fast-forwarded |
+| 64 | 2026-10-31 | Build order 5.2 started (developer: 400 × 400 m, blockout now, test map kept). **Maps as scenes:** the test map moved out of `world.tscn` into `game/maps/test_map.tscn`; `World/Map` (`GameMap`) is the map `data/world.cfg [map] id` names (server's choice reaches clients with the tuning; smoke test tunes `test_map`); `PlayerSpawns` markers (join at the first, respawn at the nearest). **Ashvale** (`game/maps/ashvale.tscn`): `Terrain`/`TerrainShape` (4 m low-poly grid: noise, hills, edge mountains, flats, road colours; heights in 1/64 m so every machine builds the same collision), `MapDecor`/`DecorScatter` (520 seeded trees, 160 rocks, hex-prism colliders), `BlockoutBuilding`, `Palisade`; town, 4 spawn points, 21 enemies in 8 groups (GS 120–185), 22 gather nodes, the Forge. Navmesh copy uses `merge` (`set_indices` refused the big terrain). 916 tests (16 new); smoke default passes ×2, `-Party` passes but the known `party_members=0` line; two bots on Ashvale for 36 s: 0 corrections. Overview image and views checked; needs the developer's walk-through (§4) |
 
 ---
 

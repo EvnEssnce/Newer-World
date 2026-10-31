@@ -1,12 +1,12 @@
 class_name CraftingStation
 extends RefCounted
-## One placed crafting station (a Marker3D under World/Stations; its kind is a
+## One placed crafting station (a Marker3D under World/Map/Stations; its kind is a
 ## [station_<kind>] of data/stations.cfg). Stations have no state: every machine
 ## builds the same list from the level, so a station's id (its marker index) is
 ## all the network sends. Also which station F means (`pick`). Pure logic, unit
 ## tested (tests/test_crafting.gd).
 
-## Its index under World/Stations.
+## Its index under World/Map/Stations.
 var id := 0
 ## Its RecipeDefs.StationDef kind id.
 var kind := ""

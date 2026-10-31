@@ -34,7 +34,7 @@ func test_validate_finds_problems() -> void:
 
 
 func test_every_spawn_marker_has_a_kind_file() -> void:
-	var world: Node = load("res://game/world/world.tscn").instantiate()
+	var world: Node = load(GameMap.path_for("test_map")).instantiate()
 	var kinds := {}
 	var camps := {}
 	for marker: Node in world.get_node("EnemySpawns").get_children():
@@ -86,7 +86,7 @@ func test_scaling_down_and_to_its_own_gear_score() -> void:
 
 
 func test_camp_markers_place_gear_scores() -> void:
-	var world: Node = load("res://game/world/world.tscn").instantiate()
+	var world: Node = load(GameMap.path_for("test_map")).instantiate()
 	for marker: Node in world.get_node("EnemySpawns").get_children():
 		if marker.has_meta("gear_score"):
 			assert_true(int(marker.get_meta("gear_score")) >= 100, marker.name)

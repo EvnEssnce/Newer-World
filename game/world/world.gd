@@ -254,15 +254,17 @@ var _shared_damage := 0.0
 var _kindled := 0
 var _judgments := 0
 
+## World/Map: the level (ground, walls, enemy/node/station/spawn markers).
+var map: GameMap
 ## Parties (World/Party, both sides). See are_allies.
 var party: PartySystem
 ## World/Loot: drops, pickup, inventories (both sides).
 var loot: LootSystem
 ## World/Tradeskills: tradeskill levels and XP (both sides).
 var tradeskills: TradeskillSystem
-## World/Gathering: gathering nodes (both sides; markers under World/GatherNodes).
+## World/Gathering: gathering nodes (both sides; markers under World/Map/GatherNodes).
 var gathering: GatheringSystem
-## World/Crafting: crafting stations and recipes (both sides; markers under World/Stations).
+## World/Crafting: crafting stations and recipes (both sides; markers under World/Map/Stations).
 var crafting: CraftingSystem
 ## World/Progression: character level and weapon mastery (both sides; server holds them).
 var progression: ProgressionSystem
@@ -348,6 +350,7 @@ var _builds: BuildService
 
 func _ready() -> void:
 	_verbose = LaunchArgs.has_flag("verbose")
+	_add_map()
 	_add_party_system()
 	_add_projectile_system()
 	_add_zone_system()
@@ -614,7 +617,8 @@ func _client_ready() -> void:
 	player.name = str(peer_id)
 	player.peer_id = peer_id
 	var angle := _players.get_child_count() * TAU / 8.0
-	player.position = Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS + Vector3.UP * 0.1
+	player.position = map.player_spawns()[0] + Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS \
+			+ Vector3.UP * 0.1
 	player.attack_stepped.connect(_on_attack_stepped)
 	player.ability_started.connect(_on_ability_started)
 	player.weapon_swapped.connect(func(_p: Player) -> void: _swaps += 1)
@@ -2319,7 +2323,7 @@ func _print_force_summary() -> void:
 
 func _spawn_enemies() -> void:
 	var next_id := -1
-	for marker: Marker3D in $EnemySpawns.get_children():
+	for marker: Marker3D in map.markers("EnemySpawns"):
 		var enemy: Enemy = ENEMY_SCENE.instantiate()
 		enemy.enemy_id = next_id
 		enemy.name = str(next_id)
@@ -2340,10 +2344,10 @@ func _spawn_enemies() -> void:
 ## its kind's own.
 func placed_gear_score(enemy_id: int) -> int:
 	var index := -enemy_id - 1
-	var spawns := get_node("EnemySpawns")
-	if index < 0 or index >= spawns.get_child_count():
+	var spawns := map.markers("EnemySpawns")
+	if index < 0 or index >= spawns.size():
 		return -1
-	return int(spawns.get_child(index).get_meta("gear_score", -1))
+	return int(spawns[index].get_meta("gear_score", -1))
 
 
 ## Server: `enemy` just started fighting (it was pulled): the idle members of
@@ -2372,12 +2376,15 @@ func _on_enemy_projectile(enemy: Enemy) -> void:
 	_projectiles.server_fire_enemy(enemy, enemy.params.attack, aim + Vector3.UP * enemy.params.aim_height)
 
 
-## Server: brings a dead player back at a random spawn point with full health.
-## The point must be exactly on the ground: the body's on-floor flag isn't synced,
-## so a mid-air teleport makes the client's prediction disagree for a tick.
+## Server: brings a dead player back with full health at a random point
+## around the map's spawn point nearest where they fell (GameMap.player_spawns).
+## The point must be exactly on the ground (a spawn point stands on level
+## ground): the body's on-floor flag isn't synced, so a mid-air teleport makes
+## the client's prediction disagree for a tick.
 func _respawn(player: Player) -> void:
 	var angle := randf() * TAU
-	player.global_position = Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS
+	var spawn := GameMap.nearest_point(map.player_spawns(), player.global_position)
+	player.global_position = spawn + Vector3(cos(angle), 0.0, sin(angle)) * SPAWN_RADIUS
 	player.velocity = Vector3.ZERO
 	player.health = player.max_health()
 	player.state.revive(player.params)
@@ -2670,13 +2677,28 @@ func _add_loot_system() -> void:
 	add_child(loot)
 
 
+## World/Map: the level data/world.cfg names (GameMap), first, so its ground
+## and markers are in place before anything reads them. An unknown id falls
+## back to the test map (logged).
+func _add_map() -> void:
+	var id := GameMap.current_id()
+	map = GameMap.instantiate_map(id)
+	if map == null:
+		id = "test_map"
+		map = GameMap.instantiate_map(id)
+	map.name = "Map"
+	add_child(map)
+	move_child(map, 0)
+	print("[%s] map: %s" % ["server" if multiplayer.is_server() else "client", id])
+
+
 ## World/Gathering must exist on the server and every client (RPCs by path).
 func _add_gathering_system() -> void:
 	gathering = GatheringSystem.new()
 	gathering.name = "Gathering"
 	gathering.players = _players
 	gathering.loot = loot
-	gathering.markers = get_node_or_null("GatherNodes")
+	gathering.markers = map.group_node("GatherNodes")
 	loot.gathering = gathering
 	add_child(gathering)
 
@@ -2688,7 +2710,7 @@ func _add_crafting_system() -> void:
 	crafting.players = _players
 	crafting.loot = loot
 	crafting.tradeskills = tradeskills
-	crafting.markers = get_node_or_null("Stations")
+	crafting.markers = map.group_node("Stations")
 	loot.crafting = crafting
 	add_child(crafting)
 

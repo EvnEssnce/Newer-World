@@ -2,7 +2,7 @@ class_name GatheringSystem
 extends Node
 ## Gathering nodes over the network. World adds one at World/Gathering on the
 ## server and on every client (RPCs are matched by node path). The nodes come
-## from the Marker3D children of World/GatherNodes (metadata/kind = a
+## from the Marker3D children of World/Map/GatherNodes (metadata/kind = a
 ## [node_<kind>] of data/gathering.cfg), so every machine builds the same list
 ## (a node's id = its index) and only availability travels.
 ##
@@ -51,7 +51,7 @@ const BOT_FIRST_TIMEOUT := 6.0
 ## World/Players and World/Loot. Set by World before adding this node.
 var players: Node3D
 var loot: LootSystem
-## World/GatherNodes (the level's markers). Set by World.
+## World/Map/GatherNodes (the level's markers). Set by World.
 var markers: Node
 ## See the header.
 var time_multiplier_hook: Callable

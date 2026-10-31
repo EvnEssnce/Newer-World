@@ -1,0 +1,617 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://game/maps/game_map.gd" id="1_map"]
+[ext_resource type="Script" path="res://game/maps/terrain.gd" id="2_terrain"]
+[ext_resource type="Script" path="res://game/maps/decor.gd" id="3_decor"]
+[ext_resource type="Script" path="res://game/maps/blockout_building.gd" id="4_building"]
+[ext_resource type="Script" path="res://game/maps/palisade.gd" id="5_palisade"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+ground_bottom_color = Color(0.5, 0.53, 0.56, 1)
+ground_horizon_color = Color(0.6463, 0.6558, 0.6708, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+tonemap_mode = 2
+fog_enabled = true
+fog_mode = 1
+fog_light_color = Color(0.62, 0.68, 0.76, 1)
+fog_density = 0.45
+fog_sky_affect = 0.0
+fog_depth_begin = 90.0
+fog_depth_end = 420.0
+
+[node name="Ashvale" type="Node3D"]
+script = ExtResource("1_map")
+metadata/_note = "The first zone (build order 5.2): a 400 x 400 m blockout. North (-Z) gets harder."
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 40, 0)
+shadow_enabled = true
+directional_shadow_max_distance = 120.0
+
+[node name="Terrain" type="StaticBody3D" parent="."]
+script = ExtResource("2_terrain")
+
+[node name="Hills" type="Node3D" parent="Terrain"]
+
+[node name="NorthRidge" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 5, 12, -150)
+metadata/radius = 55.0
+
+[node name="WestHills" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -150, 9, -55)
+metadata/radius = 45.0
+
+[node name="EastRise" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 150, 7, -20)
+metadata/radius = 40.0
+
+[node name="CragHollow" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -118, -5, -120)
+metadata/radius = 32.0
+
+[node name="TownKnoll" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 2, 110)
+metadata/radius = 60.0
+
+[node name="MiddleMound" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -30, 5, 10)
+metadata/radius = 25.0
+
+[node name="EastMound" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 60, 6, -20)
+metadata/radius = 22.0
+
+[node name="SouthWestRise" type="Marker3D" parent="Terrain/Hills"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -120, 6, 120)
+metadata/radius = 35.0
+
+[node name="Flats" type="Node3D" parent="Terrain"]
+
+[node name="Plaza" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+metadata/radius = 11.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="Town" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+metadata/radius = 42.0
+metadata/blend = 14.0
+metadata/ground = "grass"
+
+[node name="WestShrine" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -115, 0, 5)
+metadata/radius = 10.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="NorthShrine" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 25, 0, -85)
+metadata/radius = 10.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="EastShrine" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 120, 0, 45)
+metadata/radius = 10.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="WestThicket" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -105, 0, 51)
+metadata/radius = 9.0
+metadata/blend = 8.0
+metadata/ground = "dirt"
+
+[node name="EastThicket" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 95, 0, 8)
+metadata/radius = 9.0
+metadata/blend = 8.0
+metadata/ground = "dirt"
+
+[node name="SeerCircle" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -75, 0, -48)
+metadata/radius = 10.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="SeerRuins" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 123, 0, -72)
+metadata/radius = 9.0
+metadata/blend = 8.0
+metadata/ground = "stone"
+
+[node name="CragRidge" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 12, 0, -130)
+metadata/radius = 10.0
+metadata/blend = 10.0
+metadata/ground = "dirt"
+
+[node name="CragHollow" type="Marker3D" parent="Terrain/Flats"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -116, 0, -121)
+metadata/radius = 11.0
+metadata/blend = 10.0
+metadata/ground = "dirt"
+
+[node name="Roads" type="Node3D" parent="Terrain"]
+
+[node name="NorthRoad" type="Node3D" parent="Terrain/Roads"]
+metadata/width = 4.0
+
+[node name="P0" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+
+[node name="P1" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 71)
+
+[node name="P2" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 5, 0, 30)
+
+[node name="P3" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 15, 0, -40)
+
+[node name="P4" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 25, 0, -85)
+
+[node name="P5" type="Marker3D" parent="Terrain/Roads/NorthRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 12, 0, -130)
+
+[node name="WestRoad" type="Node3D" parent="Terrain/Roads"]
+metadata/width = 4.0
+
+[node name="P0" type="Marker3D" parent="Terrain/Roads/WestRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+
+[node name="P1" type="Marker3D" parent="Terrain/Roads/WestRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -34, 0, 105)
+
+[node name="P2" type="Marker3D" parent="Terrain/Roads/WestRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -70, 0, 80)
+
+[node name="P3" type="Marker3D" parent="Terrain/Roads/WestRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -115, 0, 5)
+
+[node name="P4" type="Marker3D" parent="Terrain/Roads/WestRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -75, 0, -45)
+
+[node name="EastRoad" type="Node3D" parent="Terrain/Roads"]
+metadata/width = 4.0
+
+[node name="P0" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+
+[node name="P1" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 34, 0, 105)
+
+[node name="P2" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 75, 0, 85)
+
+[node name="P3" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 120, 0, 45)
+
+[node name="P4" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 125, 0, -15)
+
+[node name="P5" type="Marker3D" parent="Terrain/Roads/EastRoad"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 120, 0, -70)
+
+[node name="Decor" type="StaticBody3D" parent="."]
+script = ExtResource("3_decor")
+
+[node name="Props" type="Node3D" parent="."]
+
+[node name="Palisade" type="StaticBody3D" parent="Props"]
+script = ExtResource("5_palisade")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+metadata/clearance = 4.0
+
+[node name="House1" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.499973, 0, -0.866041, 0, 1, 0, 0.866041, 0, 0.499973, 19.92, 0, 116.5)
+size = Vector3(7, 3.5, 5.5)
+wall_color = Color(0.62, 0.55, 0.45, 1)
+roof_color = Color(0.45, 0.25, 0.2, 1)
+metadata/clearance = 7.0
+
+[node name="House2" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.939628, 0, -0.342197, 0, 1, 0, 0.342197, 0, 0.939628, 7.87, 0, 126.61)
+size = Vector3(6, 3.2, 5)
+wall_color = Color(0.58, 0.5, 0.42, 1)
+roof_color = Color(0.36, 0.3, 0.26, 1)
+metadata/clearance = 7.0
+
+[node name="House3" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.939628, 0, 0.342197, 0, 1, 0, -0.342197, 0, 0.939628, -7.87, 0, 126.61)
+size = Vector3(8, 3.8, 6)
+wall_color = Color(0.66, 0.6, 0.5, 1)
+roof_color = Color(0.5, 0.32, 0.22, 1)
+metadata/clearance = 7.0
+
+[node name="House4" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.50005, 0, 0.865996, 0, 1, 0, -0.865996, 0, 0.50005, -19.05, 0, 116.0)
+size = Vector3(6, 3.2, 5)
+wall_color = Color(0.62, 0.55, 0.45, 1)
+roof_color = Color(0.45, 0.25, 0.2, 1)
+metadata/clearance = 7.0
+
+[node name="House5" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(-0.573521, 0, 0.819191, 0, 1, 0, -0.819191, 0, -0.573521, -18.84, 0, 91.81)
+size = Vector3(7, 3.5, 5)
+wall_color = Color(0.58, 0.5, 0.42, 1)
+roof_color = Color(0.36, 0.3, 0.26, 1)
+metadata/clearance = 7.0
+
+[node name="House6" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(-0.573521, 0, -0.819191, 0, 1, 0, 0.819191, 0, -0.573521, 18.84, 0, 91.81)
+size = Vector3(9, 4, 6)
+wall_color = Color(0.66, 0.6, 0.5, 1)
+roof_color = Color(0.5, 0.32, 0.22, 1)
+metadata/clearance = 7.0
+
+[node name="TownBrazier" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+size = Vector3(1.2, 1, 1.2)
+roof_height = 0.0
+door = false
+glow = true
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 7.0
+
+[node name="WestShrineBrazier" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -115, 0, 5)
+size = Vector3(1.2, 1, 1.2)
+roof_height = 0.0
+door = false
+glow = true
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 7.0
+
+[node name="NorthShrineBrazier" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 25, 0, -85)
+size = Vector3(1.2, 1, 1.2)
+roof_height = 0.0
+door = false
+glow = true
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 7.0
+
+[node name="EastShrineBrazier" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 120, 0, 45)
+size = Vector3(1.2, 1, 1.2)
+roof_height = 0.0
+door = false
+glow = true
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 7.0
+
+[node name="SeerStone1" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -67.21, 0, -43.5)
+size = Vector3(0.9, 3.2, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="SeerStone2" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.5, 0, -0.866025, 0, 1, 0, 0.866025, 0, 0.5, -75.0, 0, -39.0)
+size = Vector3(0.9, 2.4, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="SeerStone3" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(-0.5, 0, -0.866025, 0, 1, 0, 0.866025, 0, -0.5, -82.79, 0, -43.5)
+size = Vector3(0.9, 3.2, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="SeerStone4" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(-1.0, 0, 0, 0, 1, 0, 0, 0, -1.0, -82.79, 0, -52.5)
+size = Vector3(0.9, 2.4, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="SeerStone5" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(-0.5, 0, 0.866025, 0, 1, 0, -0.866025, 0, -0.5, -75.0, 0, -57.0)
+size = Vector3(0.9, 3.2, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="SeerStone6" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.5, 0, 0.866025, 0, 1, 0, -0.866025, 0, 0.5, -67.21, 0, -52.5)
+size = Vector3(0.9, 2.4, 0.9)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 2.0
+
+[node name="RuinWall1" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.939693, 0, -0.34202, 0, 1, 0, 0.34202, 0, 0.939693, 117, 0, -66)
+size = Vector3(6, 2.4, 0.8)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 3.0
+
+[node name="RuinWall2" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(0.5, 0, 0.866025, 0, 1, 0, -0.866025, 0, 0.5, 129, 0, -78)
+size = Vector3(5, 1.6, 0.8)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 3.0
+
+[node name="RuinPillar1" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 118, 0, -78)
+size = Vector3(1, 3.4, 1)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 3.0
+
+[node name="RuinPillar2" type="StaticBody3D" parent="Props"]
+script = ExtResource("4_building")
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 130, 0, -67)
+size = Vector3(1, 2.2, 1)
+roof_height = 0.0
+door = false
+wall_color = Color(0.56, 0.55, 0.53, 1)
+metadata/clearance = 3.0
+
+[node name="EnemySpawns" type="Node3D" parent="."]
+
+[node name="HuskWest1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -55, 0, 68)
+metadata/kind = "husk"
+
+[node name="HuskWest2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -60, 0, 74)
+metadata/kind = "husk"
+
+[node name="HuskWest3" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -50, 0, 76)
+metadata/kind = "husk"
+
+[node name="HuskEast1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 55, 0, 62)
+metadata/kind = "husk"
+
+[node name="HuskEast2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 60, 0, 68)
+metadata/kind = "husk"
+
+[node name="HuskEast3" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 50, 0, 70)
+metadata/kind = "husk"
+
+[node name="TrainingDummy" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -13, 0, 95)
+metadata/kind = "dummy"
+
+[node name="ThornWest1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -105, 0, 55)
+metadata/kind = "thorn"
+metadata/camp = "west_thicket"
+metadata/gear_score = 140
+
+[node name="ThornWest2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -100, 0, 49)
+metadata/kind = "thorn"
+metadata/camp = "west_thicket"
+metadata/gear_score = 140
+
+[node name="ThornWest3" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -110, 0, 48)
+metadata/kind = "thorn"
+metadata/camp = "west_thicket"
+metadata/gear_score = 140
+
+[node name="ThornEast1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 95, 0, 12)
+metadata/kind = "thorn"
+metadata/camp = "east_thicket"
+metadata/gear_score = 145
+
+[node name="ThornEast2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 100, 0, 5)
+metadata/kind = "thorn"
+metadata/camp = "east_thicket"
+metadata/gear_score = 145
+
+[node name="ThornEast3" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 90, 0, 5)
+metadata/kind = "thorn"
+metadata/camp = "east_thicket"
+metadata/gear_score = 145
+
+[node name="SeerCircle1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -75, 0, -44)
+metadata/kind = "seer"
+metadata/camp = "seer_circle"
+metadata/gear_score = 150
+
+[node name="SeerCircle2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -71, 0, -51)
+metadata/kind = "seer"
+metadata/camp = "seer_circle"
+metadata/gear_score = 150
+
+[node name="SeerCircle3" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -79, 0, -51)
+metadata/kind = "seer"
+metadata/camp = "seer_circle"
+metadata/gear_score = 150
+
+[node name="SeerRuins1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 121, 0, -70)
+metadata/kind = "seer"
+metadata/camp = "seer_ruins"
+metadata/gear_score = 155
+
+[node name="SeerRuins2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 126, 0, -74)
+metadata/kind = "seer"
+metadata/camp = "seer_ruins"
+metadata/gear_score = 155
+
+[node name="CragRidge" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 12, 0, -130)
+metadata/kind = "crag"
+metadata/camp = "crag_ridge"
+metadata/gear_score = 180
+
+[node name="CragHollow1" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -120, 0, -118)
+metadata/kind = "crag"
+metadata/camp = "crag_hollow"
+metadata/gear_score = 185
+
+[node name="CragHollow2" type="Marker3D" parent="EnemySpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -112, 0, -124)
+metadata/kind = "crag"
+metadata/camp = "crag_hollow"
+metadata/gear_score = 185
+
+[node name="GatherNodes" type="Node3D" parent="."]
+
+[node name="Fiber1" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -28, 0, 62)
+metadata/kind = "fiber"
+
+[node name="Fiber2" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 28, 0, 58)
+metadata/kind = "fiber"
+
+[node name="Fiber3" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -82, 0, 112)
+metadata/kind = "fiber"
+
+[node name="Fiber4" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 80, 0, 110)
+metadata/kind = "fiber"
+
+[node name="Fiber5" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 12, 0, 40)
+metadata/kind = "fiber"
+
+[node name="Fiber6" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -40, 0, 20)
+metadata/kind = "fiber"
+
+[node name="Fiber7" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 45, 0, 25)
+metadata/kind = "fiber"
+
+[node name="Wood1" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -95, 0, 95)
+metadata/kind = "wood"
+
+[node name="Wood2" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -120, 0, 80)
+metadata/kind = "wood"
+
+[node name="Wood3" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -135, 0, 115)
+metadata/kind = "wood"
+
+[node name="Wood4" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 110, 0, 100)
+metadata/kind = "wood"
+
+[node name="Wood5" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 130, 0, 80)
+metadata/kind = "wood"
+
+[node name="Wood6" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 95, 0, 128)
+metadata/kind = "wood"
+
+[node name="Wood7" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -35, 0, -95)
+metadata/kind = "wood"
+
+[node name="Wood8" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 65, 0, -45)
+metadata/kind = "wood"
+
+[node name="Ore1" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -20, 0, -60)
+metadata/kind = "ore"
+
+[node name="Ore2" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 45, 0, -75)
+metadata/kind = "ore"
+
+[node name="Ore3" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -55, 0, -100)
+metadata/kind = "ore"
+
+[node name="Ore4" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 75, 0, -115)
+metadata/kind = "ore"
+
+[node name="Ore5" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -150, 0, -60)
+metadata/kind = "ore"
+
+[node name="Ore6" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 150, 0, -25)
+metadata/kind = "ore"
+
+[node name="Ore7" type="Marker3D" parent="GatherNodes"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -10, 0, -150)
+metadata/kind = "ore"
+
+[node name="Stations" type="Node3D" parent="."]
+
+[node name="Forge" type="Marker3D" parent="Stations"]
+transform = Transform3D(-0.743294, 0, -0.668965, 0, 1, 0, 0.668965, 0, -0.743294, 9, 0, 95)
+metadata/kind = "forge"
+
+[node name="PlayerSpawns" type="Node3D" parent="."]
+
+[node name="Town" type="Marker3D" parent="PlayerSpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 0, 0, 105)
+
+[node name="WestShrine" type="Marker3D" parent="PlayerSpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, -115, 0, 5)
+
+[node name="NorthShrine" type="Marker3D" parent="PlayerSpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 25, 0, -85)
+
+[node name="EastShrine" type="Marker3D" parent="PlayerSpawns"]
+transform = Transform3D(1.0, 0, 0, 0, 1, 0, 0, 0, 1.0, 120, 0, 45)

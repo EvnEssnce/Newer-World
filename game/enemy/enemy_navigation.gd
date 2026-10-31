@@ -151,8 +151,9 @@ func _new_mesh() -> NavigationMesh:
 ## radius around it, like a crate).
 func _source_with_walls() -> NavigationMeshSourceGeometryData3D:
 	var source := NavigationMeshSourceGeometryData3D.new()
-	source.set_vertices(_static_source.get_vertices())
-	source.set_indices(_static_source.get_indices())
+	# merge, not set_vertices/set_indices: set_indices refuses a mesh with more
+	# indices than vertex floats (shared vertices: a big terrain).
+	source.merge(_static_source)
 	for wall: Array in _walls.values():
 		source.add_projected_obstruction(wall[0], wall[1], wall[2], false)
 	return source

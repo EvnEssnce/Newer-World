@@ -2,7 +2,7 @@ class_name CraftingSystem
 extends Node
 ## Crafting stations and recipes over the network. World adds one at
 ## World/Crafting on the server and on every client (RPCs are matched by node
-## path). The stations come from the Marker3D children of World/Stations
+## path). The stations come from the Marker3D children of World/Map/Stations
 ## (metadata/kind = a [station_<kind>] of data/stations.cfg), so every machine
 ## builds the same list (a station's id = its index); stations have no state.
 ##
@@ -72,7 +72,7 @@ const MOVED_TEXT := "Crafting cancelled: you moved."
 var players: Node3D
 var loot: LootSystem
 var tradeskills: TradeskillSystem
-## World/Stations (the level's markers). Set by World.
+## World/Map/Stations (the level's markers). Set by World.
 var markers: Node
 
 var defs: RecipeDefs

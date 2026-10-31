@@ -42,6 +42,10 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
+    # The 60 x 60 m test map (data/world.cfg picks the zone by default): the
+    # bots' scheduled checks (Husks, the Forge, the dummy, the camps) are laid
+    # out for it.
+    '--tune=world/map/id=test_map',
     # Interest management on a small radius, so the far camps are left out of the
     # bots' snapshots near the spawn, and players and Husks drop out of view and
     # come back as the bots walk to the Forge (checked: hidden_enemies).

@@ -51,6 +51,13 @@ core/
   aim_hold.gd        AimHold: aimed-zone abilities cast on key release (hold = marker). Pure.
 game/
   main.gd/.tscn      Entry point: server or client. Adds World at /root/Main/World.
+  maps/              The levels (see "Maps"): game_map.gd (GameMap: World/Map, the map
+                     data/world.cfg names; marker groups, snapping, spawn points),
+                     test_map.tscn (60 x 60 m, the smoke test's), ashvale.tscn (the zone,
+                     400 x 400 m blockout), terrain.gd + terrain_shape.gd (TerrainShape:
+                     heights, the exact collision surface, colours; pure, unit tested),
+                     decor.gd + decor_scatter.gd (seeded trees/rocks; pure part tested),
+                     blockout_building.gd, palisade.gd (placeholder props, @tool).
   world/world.gd     Server sim loop, snapshots, hit resolution; client input sending,
                      prediction, interpolation, hit display; test bot.
   world/build_service.gd  World/Builds node: class/weapon/mastery/Wing requests (RPCs), validation.
@@ -211,6 +218,7 @@ data/                Tuning files: network, movement, combat, camera, enemy_husk
                      full tree points),
                      accounts (name/password rules, max characters, hash iterations),
                      name_filter (words names can't contain),
+                     world (which map the server runs),
                      saving (periodic and after-change save delays), progression
                      (character/mastery level caps and XP curves, tree points per level) (.cfg).
 design/              classes.md: class/weapon/ability design, then per-class implementation notes.
@@ -332,7 +340,7 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   (`PlayerState.start_equip`, a server event) and, for weapon items, the loadout
   (through `BuildService.apply_weapons`).
 - **Gathering** (`World/Gathering`, `GatheringSystem`; nodes are `Marker3D`s under
-  `World/GatherNodes` with `metadata/kind`, id = marker index on both sides; never in
+  `World/Map/GatherNodes` with `metadata/kind`, id = marker index on both sides; never in
   snapshots): client → server `_request_gather(node_id)`; server → all
   `_receive_all_nodes(bytes)` on join and `_receive_node_state(id, available)` on change.
   The server checks alive, range + `[gather] range_tolerance`, node available, bag room,
@@ -348,8 +356,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   `_receive_xp(skill, xp)`, a "+25 Mining XP" feed line. Saved with the character (`join_xp` only for a
   character with no saved tradeskills).
   **Crafting** (`World/Crafting`, `CraftingSystem`; stations are `Marker3D`s under
-  `World/Stations`: one Forge at (-7, 0, 17), ~31 m from the Husk homes, out of their
-  leash + reach; stateless): client →
+  `World/Map/Stations`: on the test map one Forge at (-7, 0, 17), ~31 m from the Husk
+  homes, out of their leash + reach; stateless): client →
   server `_request_craft(station_id, recipe_id, quantity)`; the server checks range +
   `[crafting] range_tolerance`, level, materials and bag room after the inputs go
   (`CraftingRules.check`), runs one busy lock of craft time × quantity (`start_gather`,
@@ -803,7 +811,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
 - **Death**: at 0 health the server calls `PlayerState.kill()`; dead players can't act,
   can't be hit, and lie grey on the ground. Then a Rebirth if eligible (see "Ember,
   Wings and Rebirth"); otherwise after `[death] respawn_time` the server
-  `_respawn`s them at a random point on the spawn circle with full health and stamina
+  `_respawn`s them at a random point 3 m around the map's spawn point nearest where
+  they fell (`GameMap.player_spawns`) with full health and stamina
   (`revive()`, Ember back to resting). The client shows a countdown banner from the
   `HIT_DEFEATED` event.
 - **Lag compensation** (see "Networking model"): a player's melee and beam hits test
@@ -981,12 +990,13 @@ charges are cross-class).
 
 ## Enemies
 
-- Placed by `Marker3D`s under `World/EnemySpawns` (level data; `metadata/kind` picks
+- Placed by `Marker3D`s under `World/Map/EnemySpawns` (level data; `metadata/kind` picks
   `data/enemy_<kind>.cfg`). The server spawns one `Enemy` per marker at startup with a
   negative id (`-1`, `-2`, ...), which is also its node name under `World/Enemies` and
   how hit events address it (peer ids are always positive). New markers go last, so
   existing ids don't move.
-- **Kinds** (session 62, `design/enemies.md`): Husk (2, near (0, -15)), training dummy,
+- **Kinds** (session 62, `design/enemies.md`; positions here are the test map's, see
+  "Maps" for Ashvale's): Husk (2, near (0, -15)), training dummy,
   and three camps far from the spawn, the Husks, the gather nodes and the Forge:
   **Thornling** (`thorn`, 2 east at (24, 0)), **Cinder Seer** (`seer`, 2 west at
   (-24, -6)), **Cragmaw** (`crag`, 1 north-east at (21, -23)). Each has its own loot
@@ -1092,6 +1102,49 @@ charges are cross-class).
   have `force_*` keys: the Husk's `force_distance` is 0 (off); the smoke test turns it
   on (0.4 m: a longer shove pushed the bots out of their fights and broke the guard
   check) with `--tune` so predicted players get knocked back in most runs.
+
+## Maps
+
+- **`World/Map`** (`GameMap`, `game/maps/<id>.tscn`): `data/world.cfg [map] id` picks it
+  (default `ashvale`; the smoke test passes `--tune=world/map/id=test_map`). The
+  server's tuning reaches clients before their World is made, so both load the same map
+  (and map scenes are code: a changed map changes `CodeVersion`). `World._add_map` adds
+  it first, at the origin; an unknown id falls back to the test map (logged).
+- A map holds its ground/walls (static bodies, layer 1), light and sky, and marker
+  groups: `EnemySpawns`, `GatherNodes`, `Stations` (ids = indices: add new ones last),
+  `PlayerSpawns` (a new arrival appears around the first; a respawn around the one
+  nearest where they fell; each on level ground ≥ `GameMap.SPAWN_CLEARANCE` m around, a
+  test checks Ashvale's) and `Props` (buildings, palisade, braziers).
+- **Terrain** (`Terrain`, `TerrainShape`): a 4 m grid of heights from seeded noise,
+  `Hills` markers (y = height, `metadata/radius`), edge mountains (`edge_start`,
+  `edge_height`) and `Flats` markers (level areas: town, camps, spawn shrines;
+  `metadata/radius`/`blend`/`ground`, height = the ground's own at the centre unless
+  `metadata/fixed_height`), plus `Roads` (colour only). One flat-shaded mesh and one
+  `ConcavePolygonShape3D` from the same triangles; invisible walls on the edge.
+  **Same on every machine:** no trig in heights, every vertex height a multiple of 1/64
+  m, decor seeded with positions/sizes only (hex prism colliders, no rotation), the
+  palisade's corners rounded to 1/4096: prediction depends on identical collision.
+  `GameMap` snaps every marker and `Props` child onto the ground at load (their y in the
+  scene is ignored; `metadata/keep_y` keeps a prop's). `@tool`: the editor shows the
+  terrain, decor, buildings and palisade; press Rebuild on Terrain/Decor after moving a
+  marker.
+- **Decor** (`MapDecor`, `DecorScatter`): ~520 trees (forests from noise, denser around
+  wood nodes) and ~160 rocks, kept off roads, flats, markers and props
+  (`metadata/clearance`); trunks and rocks collide (hex prisms: a `CylinderShape3D`
+  parses into hundreds of navmesh triangles). Drawn with MultiMeshes.
+- **Ashvale** (session 64, blockout, `ashvale.tscn`; north = −Z gets harder): town at
+  (0, 105) (palisade r 34 with east/west/north gates, 6 houses, the Forge at (9, 95),
+  the training dummy at (−13, 95), a spawn brazier on the plaza); spawn shrines west
+  (−115, 5), north (25, −85), east (120, 45); Husks ×3 at (−55, 72) and (55, 66) (GS
+  120); Thornlings ×3 west (−105, 51, GS 140) and east (95, 8, GS 145); Cinder Seers ×3
+  in a stone circle (−75, −48, GS 150) and ×2 at ruins (123, −72, GS 155); Cragmaws ×1 on
+  the north ridge (12, −130, GS 180) and ×2 in a hollow (−116, −121, GS 185); 21 enemies;
+  22 gather nodes (7 fiber in meadows near town, 8 wood in forests, 7 ore in the rocky
+  north and on hills). Roads from the town's gates to the shrines and camps. The
+  enemies' navmesh takes ~1.1 s to bake here (startup, and in the background for each
+  enemy-blocking wall).
+- To redo the overview image: load the map under an orthographic camera at y 200,
+  size 400 (session 64 did it with a throwaway scene; no tool yet).
 
 ## Controls
 
