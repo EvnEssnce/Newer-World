@@ -56,7 +56,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Gathering | Ore, wood, fiber, hide nodes; tool requirements; respawn timers | Built (Milestone 3): ore, wood and fiber nodes with charges and respawn timers; no tool items; hide waits for animals |
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
-| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
+| Progression | Character level, weapon mastery levels (1 point per level, cap 20) | On main (sessions 54, 57, 58, 60): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
 | Zone | Mob camps, node spawns, a town with crafting stations | Ashvale blockout (session 64): 400 × 400 m, town, 8 enemy groups, 22 nodes, 4 spawn points; art packs later. Test map kept for the smoke test |
 
 ---
@@ -463,7 +463,9 @@ Housekeeping:
 - Tests for anything that isn't feel; feel is playtested by hand. Run the unit tests and
   both smoke tests before committing (`CLAUDE.md` "Running"; Linux cloud sessions have
   their own notes there).
-- Git from the first commit, private GitHub repo (`EvnEssnce/Newer-World`).
+- Git from the first commit, private GitHub repo (`EvnEssnce/Newer-World`). Since
+  session 65, **`main` is the only branch**: every older branch was already in it and
+  was deleted. A session's branch merges into main once its work is playtested and approved.
 
 ---
 
@@ -540,7 +542,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 
 | 63 | 2026-10-31 | Developer's playtest of session 62 on a Mac approved (camps, scaling, walls, class drops, craft XP); a one-time shader error at launch didn't come back. Main fast-forwarded to `milestone-6`. Then **interest management** on `milestone-6`: `Interest` (`core/interest.gd`, network.cfg `[interest]` 60 m in / 70 m out, horizontal), each client's snapshot has only nearby players and enemies plus itself and its party; clients drop and respawn what leaves and enters view; `SUMMARY net hidden_players= hidden_enemies=`, client `out_of_view=`; the bot remembers the other bot's id for its turn order. 900 tests; smoke (run at a 20/25 m radius, checks the far camps are left out) default 5 runs, 4 passed and 1 failed a bot's air dodge (a Forge trip ate its last circling phase; not seen again), `-Party` passes but the known `party_members=0` line, `-Bots 6` passes with max 1,228 bytes (1,277 before). Hand checked by the developer (at a 20/25 m radius: camps vanish and come back); main fast-forwarded |
 | 64 | 2026-10-31 | Build order 5.2 started (developer: 400 × 400 m, blockout now, test map kept). **Maps as scenes:** the test map moved out of `world.tscn` into `game/maps/test_map.tscn`; `World/Map` (`GameMap`) is the map `data/world.cfg [map] id` names (server's choice reaches clients with the tuning; smoke test tunes `test_map`); `PlayerSpawns` markers (join at the first, respawn at the nearest). **Ashvale** (`game/maps/ashvale.tscn`): `Terrain`/`TerrainShape` (4 m low-poly grid: noise, hills, edge mountains, flats, road colours; heights in 1/64 m so every machine builds the same collision), `MapDecor`/`DecorScatter` (520 seeded trees, 160 rocks, hex-prism colliders), `BlockoutBuilding`, `Palisade`; town, 4 spawn points, 21 enemies in 8 groups (GS 120–185), 22 gather nodes, the Forge. Navmesh copy uses `merge` (`set_indices` refused the big terrain). 916 tests (16 new); smoke default passes ×2, `-Party` passes but the known `party_members=0` line; two bots on Ashvale for 36 s: 0 corrections. Overview image and views checked; needs the developer's walk-through (§4) |
-| 65 | 2026-10-31 | Developer's Ashvale playtest (session 64) approved: distances and difficulty fine for now, camps appear at a good distance (may raise interest to 80/100 later), slopes smooth for players and enemies, shrine respawns right, 1 correction in ~36k snapshots. Fixes: the crafting panel's bar and the gather/equip bar (`LootHud`) moved in 1% jumps (Godot `ProgressBar.step` defaults to 0.01: visible over a long batch); `step = 0` now. Choppable pines (`GatherNodeVisual._build_wood`) look different from decor pines: yellow-green canopy, gold crown, shimmering resin streaks, 7 rising light motes. Minimap noted for later (§3 5.2). 916 tests pass; smoke run (bash, 2 bots) clean, gathering and crafting normal |
+| 65 | 2026-10-31 | Developer's Ashvale playtest (session 64) approved: distances and difficulty fine for now, camps appear at a good distance (may raise interest to 80/100 later), slopes smooth for players and enemies, shrine respawns right, 1 correction in ~36k snapshots. Fixes: the crafting panel's bar and the gather/equip bar (`LootHud`) moved in 1% jumps (Godot `ProgressBar.step` defaults to 0.01: visible over a long batch); `step = 0` now. Choppable pines (`GatherNodeVisual._build_wood`) look different from decor pines: yellow-green canopy, gold crown, shimmering resin streaks, 7 rising light motes. Minimap noted for later (§3 5.2). Main fast-forwarded to this work at the developer's request; every other branch (all already in main) deleted, so main is the one branch. 916 tests pass; smoke run (bash, 2 bots) clean, gathering and crafting normal |
 
 ---
 
