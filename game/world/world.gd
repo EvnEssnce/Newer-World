@@ -107,6 +107,12 @@ var _lag_saved_hits := 0
 var _snapshots_sent := 0
 var _snapshot_bytes := 0
 var _snapshot_bytes_max := 0
+## Server: which players and enemies each client's snapshots carry (network.cfg
+## [interest]).
+var _interest := Interest.new()
+## Server: entries left out of snapshots by interest management (players, enemies).
+var _hidden_players := 0
+var _hidden_enemies := 0
 ## Largest single entries seen: own player (full state), another player, enemy.
 var _entry_bytes_max := [0, 0, 0]
 var _max_input_buffer := 8
@@ -279,6 +285,11 @@ var _snapshots_received := 0
 ## Remote players that left: peer id -> meters seen moving (for the summary,
 ## since the other bot can quit a moment before this one prints it).
 var _departed_seen := {}
+## Client: players and enemies dropped because they left the snapshot (left the
+## game or out of view: interest management).
+var _out_of_view := 0
+## Bot: the peer id of the last other player it saw (its turn order).
+var _bot_other_peer := 0
 ## The click that captures the mouse mustn't also attack: after capturing, the
 ## attack button has to be released once before it counts.
 var _attack_blocked := true
@@ -368,6 +379,8 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		var snapshot_rate: int = Tuning.get_value("network", "server", "snapshot_rate")
 		_snapshot_interval = maxi(1, roundi(Engine.physics_ticks_per_second / float(snapshot_rate)))
+		_interest = Interest.new(Tuning.get_value("network", "interest", "enter_radius"),
+				Tuning.get_value("network", "interest", "exit_radius"))
 		_max_input_buffer = Tuning.get_value("network", "server", "max_input_buffer")
 		_max_inputs_per_tick = Tuning.get_value("network", "server", "max_inputs_per_tick")
 		_lag_comp = Tuning.get_value("network", "lag_compensation", "enabled")
@@ -520,29 +533,46 @@ func _note_lag_hit(attacker: Player, attack: AttackParams, beam: PackedVector3Ar
 ## Each recipient gets its own player's full entry (Player.get_snapshot: what
 ## reconciliation needs) and everyone else's slim one (get_view_snapshot), in
 ## NetCodec bytes. Every entry is encoded once and reused for every recipient.
+## Interest management: a recipient gets only the players and enemies near it,
+## itself and its party members (Interest; clients drop what's left out).
 func _broadcast_snapshot() -> void:
-	var players := _players.get_children()
 	var full := {}
-	var views: Array[PackedByteArray] = []
-	for player: Player in players:
+	var views := {}  # peer id -> view entry bytes
+	var positions := {}  # peer id / enemy id -> position
+	for player: Player in _players.get_children():
 		full[player.peer_id] = NetCodec.encode(player.get_snapshot())
-		views.append(NetCodec.encode(player.get_view_snapshot()))
+		views[player.peer_id] = NetCodec.encode(player.get_view_snapshot())
+		positions[player.peer_id] = player.global_position
 		_note_entry_size(0, full[player.peer_id].size())
-		_note_entry_size(1, views[-1].size())
-	var enemies := StreamPeerBuffer.new()
-	NetCodec.write_array_header(enemies, _enemies.get_child_count())
+		_note_entry_size(1, views[player.peer_id].size())
+	var enemy_entries := {}  # enemy id -> entry bytes
 	for enemy: Enemy in _enemies.get_children():
-		var entry := NetCodec.encode(enemy.get_snapshot())
-		_note_entry_size(2, entry.size())
-		enemies.put_data(entry)
+		enemy_entries[enemy.enemy_id] = NetCodec.encode(enemy.get_snapshot())
+		positions[enemy.enemy_id] = enemy.global_position
+		_note_entry_size(2, enemy_entries[enemy.enemy_id].size())
 	for peer_id in _connected_player_ids():
+		var always: Array = [peer_id]
+		for other: int in views:
+			if other != peer_id and are_allies(peer_id, other):
+				always.append(other)
+		var in_view := _interest.update(peer_id, positions[peer_id], positions, always)
+		var seen_players: Array[int] = []
+		var seen_enemies: Array[int] = []
+		for id in in_view:
+			if id > 0:
+				seen_players.append(id)
+			else:
+				seen_enemies.append(id)
+		_hidden_players += views.size() - seen_players.size()
+		_hidden_enemies += enemy_entries.size() - seen_enemies.size()
 		var buffer := StreamPeerBuffer.new()
 		NetCodec.write_array_header(buffer, 2)
-		NetCodec.write_array_header(buffer, players.size())
-		for i in players.size():
-			var player: Player = players[i]
-			buffer.put_data(full[peer_id] if player.peer_id == peer_id else views[i])
-		buffer.put_data(enemies.data_array)
+		NetCodec.write_array_header(buffer, seen_players.size())
+		for id in seen_players:
+			buffer.put_data(full[id] if id == peer_id else views[id])
+		NetCodec.write_array_header(buffer, seen_enemies.size())
+		for id in seen_enemies:
+			buffer.put_data(enemy_entries[id])
 		var data := buffer.data_array
 		_snapshots_sent += 1
 		_snapshot_bytes += data.size()
@@ -632,6 +662,7 @@ func _on_peer_left(peer_id: int) -> void:
 		_players.remove_child(player)
 		player.queue_free()
 	_histories.erase(peer_id)
+	_interest.forget(peer_id)
 	print("[server] peer %d left (%d players)" % [peer_id, _players.get_child_count()])
 
 
@@ -2897,7 +2928,10 @@ func _bot_input() -> Array:
 		_bot_first_ability_pressed = false
 	_bot_note_husk_hits()
 	var other_player := _nearest_remote_player()
-	var first_turn := other_player == null or multiplayer.get_unique_id() < other_player.peer_id
+	# Remembered: with interest management the other bot can be out of view.
+	if other_player != null:
+		_bot_other_peer = other_player.peer_id
+	var first_turn := _bot_other_peer == 0 or multiplayer.get_unique_id() < _bot_other_peer
 	var party := LaunchArgs.has_flag("bot-party")
 	var duel := (not party and t >= BOT_DUEL_START and t < BOT_DUEL_END and other_player != null
 			and (_bot_player_kills < 2 if first_turn else not _bot_seen_respawn))
@@ -3424,10 +3458,14 @@ func _receive_snapshot(tick: int, data: PackedByteArray) -> void:
 			health = state[3]
 		player.bonus_max_health = health.y - player.params.max_health
 		player.set_health(health.x)
+	# Missing: it left, or it's out of view (interest management): either way
+	# it's dropped here and spawned fresh if it comes back.
 	for player: Player in _players.get_children():
 		if not seen.has(player.peer_id):
-			print("[client] peer %d left" % player.peer_id)
-			_departed_seen[player.peer_id] = player.distance_seen
+			if _verbose:
+				print("[client] peer %d left or out of view" % player.peer_id)
+			_out_of_view += 1
+			_departed_seen[player.peer_id] = _departed_seen.get(player.peer_id, 0.0) + player.distance_seen
 			_players.remove_child(player)
 			player.queue_free()
 	_receive_enemy_states(server_time, decoded[1])
@@ -3453,6 +3491,7 @@ func _receive_enemy_states(server_time: float, enemy_states: Array) -> void:
 		enemy.set_statuses(state[8])
 	for enemy: Enemy in _enemies.get_children():
 		if not seen.has(enemy.enemy_id):
+			_out_of_view += 1
 			_enemies.remove_child(enemy)
 			enemy.queue_free()
 
@@ -3672,9 +3711,10 @@ func print_summary() -> void:
 		saves.print_summary()
 		print("SUMMARY gear_combat gear_crits=%d armored_hits=%d armor_stopped=%d" % [
 				_gear_crits, _armored_hits, roundi(_armor_stopped)])
-		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d" % [
+		print("SUMMARY net snapshots_sent=%d bytes_avg=%d bytes_max=%d own_entry_max=%d other_entry_max=%d enemy_entry_max=%d hidden_players=%d hidden_enemies=%d" % [
 				_snapshots_sent, _snapshot_bytes / maxi(1, _snapshots_sent), _snapshot_bytes_max,
-				_entry_bytes_max[0], _entry_bytes_max[1], _entry_bytes_max[2]])
+				_entry_bytes_max[0], _entry_bytes_max[1], _entry_bytes_max[2],
+				_hidden_players, _hidden_enemies])
 		print("SUMMARY lag_comp enabled=%s rewound_tests=%d rewind_ticks_avg=%.1f rewind_ticks_max=%d saved_hits=%d" % [
 				_lag_comp, _lag_rewound_tests, _lag_rewind_ticks / maxf(1.0, _lag_rewound_tests),
 				_lag_rewind_ticks_max, _lag_saved_hits])
@@ -3695,7 +3735,8 @@ func print_summary() -> void:
 	var seen := _departed_seen.duplicate()
 	for player: Player in _players.get_children():
 		if not player.is_local:
-			seen[player.peer_id] = player.distance_seen
+			seen[player.peer_id] = seen.get(player.peer_id, 0.0) + player.distance_seen
+	print("SUMMARY client=%d out_of_view=%d" % [multiplayer.get_unique_id(), _out_of_view])
 	for peer_id: int in seen:
 		print("SUMMARY client=%d remote=%d moved=%.1f" % [
 				multiplayer.get_unique_id(), peer_id, seen[peer_id]])

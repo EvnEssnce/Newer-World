@@ -42,6 +42,10 @@ function Start-Godot([string]$name, [string[]]$gameArgs) {
 # within the run, even though they block.
 # Every process gets the same overrides, as prediction requires.
 $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5',
+    # Interest management on a small radius, so the far camps are left out of the
+    # bots' snapshots near the spawn, and players and Husks drop out of view and
+    # come back as the bots walk to the Forge (checked: hidden_enemies).
+    '--tune=network/interest/enter_radius=20', '--tune=network/interest/exit_radius=25',
     # The Cinder Seers (west camp) notice the bots from across the map and follow
     # them, so enemy projectiles are thrown every run (the bots never visit camps).
     '--tune=enemy_seer/ai/aggro_range=45', '--tune=enemy_seer/ai/leash_range=60',
@@ -539,6 +543,10 @@ if (-not $netSummary -or [int]$netSummary.Matches[0].Groups[1].Value -lt 1) {
     $failed = $true
 } elseif ([int]$netSummary.Matches[0].Groups[3].Value -gt $snapshotBudget) {
     Write-Host "FAIL net: a snapshot was over $snapshotBudget bytes ($($netSummary.Line))" -ForegroundColor Red
+    $failed = $true
+} elseif ($netSummary.Line -notmatch ' hidden_enemies=([1-9]\d*)') {
+    # The far camps (24+ m from the spawn) are out of a bot's 20 m view there.
+    Write-Host "FAIL net: interest management left no enemy out of a snapshot ($($netSummary.Line))" -ForegroundColor Red
     $failed = $true
 } else {
     Write-Host "PASS net: $($netSummary.Line)" -ForegroundColor Green

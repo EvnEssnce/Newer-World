@@ -44,6 +44,8 @@ core/
                      (/root/Main/VersionCheck), refuses a client on other code; see "Networking model".
   net_codec.gd       NetCodec: compact, lossless binary encoding for snapshots. Unit tested.
   position_history.gd  PositionHistory: a body's recent positions per tick (lag compensation). Pure.
+  interest.gd        Interest: which players/enemies each client's snapshots carry (radius with
+                     hysteresis, always-visible ids). Pure, unit tested.
   correction_smoothing.gd  CorrectionSmoothing: the local player's drawn offset after a correction. Pure.
   input_actions.gd   Key bindings, registered in code.
   aim_hold.gd        AimHold: aimed-zone abilities cast on key release (hold = marker). Pure.
@@ -244,7 +246,17 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   player with no queued input doesn't move. That keeps server and client in lockstep.
 - **Server → each client**, `snapshot_rate` times per second, `World._receive_snapshot`
   (unreliable ordered, channel 2): `tick` and `NetCodec` bytes of `[players, enemies]`,
-  built per recipient (`World._broadcast_snapshot`). The recipient's own entry is
+  built per recipient (`World._broadcast_snapshot`). **Interest management**
+  (`Interest`, network.cfg `[interest]`, session 63): a recipient gets only the players
+  and enemies within `enter_radius` (60 m, horizontal) of its server position, kept
+  until past `exit_radius` (70 m), plus itself and its party members (`are_allies`)
+  wherever they are (party frames read their health from the snapshot). A client drops
+  a missing id (left the game or out of view; `out_of_view=` on its summary) and
+  spawns it fresh when it comes back (enemies: a dummy's DPS readout restarts).
+  Reliable events (hits, projectiles, zones) still go to everyone; a client skips a
+  hit on what it doesn't have. `SUMMARY net ... hidden_players= hidden_enemies=`; the
+  smoke test runs a 20/25 m radius so the far camps are left out (checked).
+  The recipient's own entry is
   `Player.get_snapshot()`: `[peer_id, position, velocity, last_processed_seq,
   PlayerState.to_array(), Vector2(health, max_health)]` (max health includes gear; one
   Vector2 is the size of a float health alone); every other player's is
@@ -513,9 +525,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   Append new fields at the end. **Snapshot size** (`SUMMARY net` on the server; the
   smoke test fails a snapshot over 1360 bytes, ENet's 1392-byte MTU less the RPC
   header): own entry ~200–240 bytes, each other player ~145–175, each enemy ~40–45;
-  with the 8 enemies of session 62: 2 players ~610–680 bytes, 6 players ~1,280 (Godot's
-  Variant encoding was ~1.4 KB for 2 players). About 6 players in view fit one packet
-  now; interest management (only nearby players/enemies) is next for more.
+  with the 8 enemies of session 62 all in view: 2 players ~610–680 bytes, 6 players
+  ~1,280 (Godot's Variant encoding was ~1.4 KB for 2 players). About 6 players and 8
+  enemies **in view** fit one packet; interest management keeps the rest out (a crowd
+  in one spot can still overflow: nothing caps the count in view yet).
   Enemy snapshots: `[id, kind, position, yaw, mode, attack_tick, health, dead,
   statuses (same packing)]`.
 - **I-frames**: `PlayerState.is_invulnerable(params)`: a dodge's window, or an ability's
@@ -993,9 +1006,9 @@ charges are cross-class).
   `max_gear_score`) instead of absolute `gear_score_min/max` (still supported).
   `tools\roll_loot.ps1` passes `--gear-score=` (default 120) for relative tables.
   Drop chances were halved in session 62 (Husk 30%, Thornling 22.5%, Seer 30%,
-  Cragmaw 50% × 2 items), rarity weights unchanged. Every enemy is in every snapshot (no interest
-  management): 8 now; `-Bots 6` measured 1277 of 1360 bytes with them (session 62),
-  room for one or two more before interest management.
+  Cragmaw 50% × 2 items), rarity weights unchanged. Only enemies within a client's view radius are in
+  its snapshots (interest management, session 63): a map can hold many camps as long
+  as about 8 are near any one spot (`-Bots 6` with all 8 in view: 1277 of 1360 bytes).
 - **Camps**: a marker's `metadata/camp` (a name). When an enemy starts fighting
   (IDLE → CHASE: `EnemyBrain.pulled`, cleared by `take_pulled`), `World._alert_camp`
   has its idle campmates `alert` (proximity threat on the same player, then chase).
@@ -1023,6 +1036,7 @@ charges are cross-class).
   starts the attack cooldown, so staggering a recovery gives no free recast; one in
   the windup cancels with no cooldown (`EnemyBrain._interrupt_cooldown`).
 - Enemy snapshot entries send yaw as a 32-bit float and health rounded up (drawing only).
+  Clients only have the enemies in view (interest management, see "Networking model").
 - Optional `[ai] always_aware` (true on the training dummy): the enemy is never
   "unaware" for backstabs, so only rear-arc hits backstab it
   (`EnemyBrain.is_unaware_of`, used by `World._is_backstab`).
@@ -1274,7 +1288,8 @@ a `--bot`'s class when it makes its character; default `fighter`, unknown = defa
 `--menu-preview=login|characters|create` (show that start screen with sample data and
 never connect; with `--screenshot-dir` the start screens save as `menu_<N>.png`),
 `--bot` (auto-connect; repeats every 8 s: take turns attacking and blocking (the nearest
-Husk within 15 m, else the nearest player; the heavy starts once within 2.2 m or 0.7 s
+Husk within 15 m, else the nearest player in view (its turn order uses the last other
+player it saw, `_bot_other_peer`); the heavy starts once within 2.2 m or 0.7 s
 into the turn, `World._bot_attack_turn`; after the duel, against a Husk the guard stays
 down until a Husk's hit has knocked it back and a bleed has ticked on it, `_bot_invites_husk_hit`), then both use abilities (guard up between; a
 knockback ability first), then circle with weapon swap/jump/air dodge/ground dodge, a free

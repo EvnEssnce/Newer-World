@@ -201,12 +201,11 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    place of the capsule (the developer downloads the packs; Mixamo needs an Adobe
    login). Then the Milestone 6 playtest with real people.
 
-**When needed (not in the order): network headroom.** Before a session with more than
-~6 players together: **interest management** (only nearby players/enemies in each
-snapshot; clients must hide rather than treat a missing id as "left"; party frames need
-members' health from elsewhere), then maybe a string table for weapon ids / Wing set
-(~28 bytes per other player) or delta compression. Today ~7 players in view fit one
-packet (§4, Known issues).
+**Network headroom.** **Done (session 63): interest management**: each client's
+snapshots carry only the players and enemies within 60 m of it (kept to 70 m), plus
+itself and its party (`core/interest.gd`, network.cfg `[interest]`). Next if a crowd in
+one spot overflows a packet: a string table for weapon ids / Wing set (~28 bytes per
+other player), delta compression, or a cap on entities in view (§4, Known issues).
 
 **Later / unscheduled**
 - **UI scale setting** (session 62, Mac feedback): a slider for the UI's size; on a
@@ -382,9 +381,10 @@ Gameplay:
 - Hostile players in PvP walk through Shield Wall (players share one collision mask).
 
 Networking:
-- Snapshots fit one packet up to about 6 players in view with the 8 enemies (6 bots:
-  max 1,277 of 1,360 bytes, session 62); more players or camps need interest
-  management ("network headroom" above).
+- Snapshots fit one packet up to about 6 players and 8 enemies **in view** (6 bots,
+  everything in view: 1,277 of 1,360 bytes). Interest management (session 63) keeps
+  far ones out, but nothing caps a crowd in one spot. Hits, projectiles and zones are
+  still sent to everyone (reliable events; small, but not culled).
 - Enemy looks: only the body capsule shows the red windup telegraph and the white hit
   flash, not a look's own parts (the Cragmaw heats its fists itself).
 - Lag compensation covers melee, beams and ally support only: projectiles, zones, shock
