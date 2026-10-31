@@ -59,6 +59,7 @@ func _ready() -> void:
 	_equip_bar = ProgressBar.new()
 	_equip_bar.custom_minimum_size = Vector2(220, 10)
 	_equip_bar.max_value = 1.0
+	_equip_bar.step = 0.0  # continuous: the default 0.01 moves a long batch in visible jumps
 	_equip_bar.show_percentage = false
 	var track := StyleBoxFlat.new()
 	track.bg_color = Color(0.05, 0.06, 0.08, 0.85)

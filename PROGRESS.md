@@ -200,15 +200,19 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       a **blockout now** (shapes built in code; CC0 packs replace them later: this
       container can't download them), the **test map kept** for the smoke test
       (`data/world.cfg [map] id` picks the map; the zone is the default).
-      1. **Built (session 64, branch `claude/nice-pascal-atlnuy`; needs a hand
-         playtest).** Maps as scenes (`World/Map`, `GameMap`), player spawn points
+      1. **Built (session 64; playtested in session 65: approved, two fixes made).** Maps as scenes (`World/Map`, `GameMap`), player spawn points
          (respawn at the nearest), generated low-poly terrain with hills, flats, roads
          and edge mountains, seeded trees and rocks, blockout town (palisade, houses,
          Forge, dummy) and **Ashvale**: 21 enemies in 8 groups (GS 120 near town to
          185 in the north), 22 gather nodes, 4 spawn points (`CLAUDE.md` "Maps").
-      2. Next: the developer's walk-through (§4), then CC0 packs (Kenney Nature Kit,
+      2. Next: CC0 packs (Kenney Nature Kit,
          Fantasy Town Kit or Quaternius) dropped into `assets/` to replace the
          blockout pieces; more stations in town when more station kinds exist.
+      3. Later (developer, session 65): a **minimap** to find your way around the
+         zone, with enemies and resources on it. Maybe a larger view radius
+         (`network.cfg [interest]` 60/70 → 80/100; check snapshot size with
+         `-Bots 6`). Distances and difficulty get retuned once quests and larger
+         objectives exist.
 6. **Art pass basics:** a CC0 character with Mixamo idle/run/roll/attack animations in
    place of the capsule (the developer downloads the packs; Mixamo needs an Adobe
    login). Then the Milestone 6 playtest with real people.
@@ -271,15 +275,11 @@ next to a crate); Pyre Heart drawing a Husk's aggro; Second Wind and Second Step
 rolls / Ashsteps); Ricochet; Seeker Spark (watch for kinks from course corrections);
 Tripwire and Smoke Bolt; Kindle Life; Mirror Aegis reflecting projectiles.
 
-**Ashvale (session 64):** run `tools\run_local_test.ps1` (the zone is the default map;
-`data/world.cfg`). Walk out of town through each gate: does the layout read (harder to
-the north), are the distances right (town to the north ridge is ~240 m, ~40 s), do camps
-pop in too late at the 60 m view radius (fog starts at 90 m), and does movement on
-slopes, among trees and through the palisade gates feel right? Die near a shrine:
-respawn there. Gather in the meadows/forests, craft at the town Forge. Open
-`game/maps/ashvale.tscn` in the editor: terrain, trees and buildings show; move a Flats
-or Hills marker and press Rebuild on Terrain, then Decor. Look for prediction
-corrections on the HUD (should stay 0).
+**Ashvale fixes (session 65):** craft a batch of 5 at the town Forge: the bar should
+fill smoothly (the gather/equip bar too). In a forest, the choppable Windbent Pines
+should be easy to pick out: gold crown, yellow-green canopy, glowing resin on the
+trunk, motes of light rising around them. The other trees are plain dark-green
+decor.
 
 ### Decisions to confirm (defaults that were built)
 
@@ -540,6 +540,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 
 | 63 | 2026-10-31 | Developer's playtest of session 62 on a Mac approved (camps, scaling, walls, class drops, craft XP); a one-time shader error at launch didn't come back. Main fast-forwarded to `milestone-6`. Then **interest management** on `milestone-6`: `Interest` (`core/interest.gd`, network.cfg `[interest]` 60 m in / 70 m out, horizontal), each client's snapshot has only nearby players and enemies plus itself and its party; clients drop and respawn what leaves and enters view; `SUMMARY net hidden_players= hidden_enemies=`, client `out_of_view=`; the bot remembers the other bot's id for its turn order. 900 tests; smoke (run at a 20/25 m radius, checks the far camps are left out) default 5 runs, 4 passed and 1 failed a bot's air dodge (a Forge trip ate its last circling phase; not seen again), `-Party` passes but the known `party_members=0` line, `-Bots 6` passes with max 1,228 bytes (1,277 before). Hand checked by the developer (at a 20/25 m radius: camps vanish and come back); main fast-forwarded |
 | 64 | 2026-10-31 | Build order 5.2 started (developer: 400 × 400 m, blockout now, test map kept). **Maps as scenes:** the test map moved out of `world.tscn` into `game/maps/test_map.tscn`; `World/Map` (`GameMap`) is the map `data/world.cfg [map] id` names (server's choice reaches clients with the tuning; smoke test tunes `test_map`); `PlayerSpawns` markers (join at the first, respawn at the nearest). **Ashvale** (`game/maps/ashvale.tscn`): `Terrain`/`TerrainShape` (4 m low-poly grid: noise, hills, edge mountains, flats, road colours; heights in 1/64 m so every machine builds the same collision), `MapDecor`/`DecorScatter` (520 seeded trees, 160 rocks, hex-prism colliders), `BlockoutBuilding`, `Palisade`; town, 4 spawn points, 21 enemies in 8 groups (GS 120–185), 22 gather nodes, the Forge. Navmesh copy uses `merge` (`set_indices` refused the big terrain). 916 tests (16 new); smoke default passes ×2, `-Party` passes but the known `party_members=0` line; two bots on Ashvale for 36 s: 0 corrections. Overview image and views checked; needs the developer's walk-through (§4) |
+| 65 | 2026-10-31 | Developer's Ashvale playtest (session 64) approved: distances and difficulty fine for now, camps appear at a good distance (may raise interest to 80/100 later), slopes smooth for players and enemies, shrine respawns right, 1 correction in ~36k snapshots. Fixes: the crafting panel's bar and the gather/equip bar (`LootHud`) moved in 1% jumps (Godot `ProgressBar.step` defaults to 0.01: visible over a long batch); `step = 0` now. Choppable pines (`GatherNodeVisual._build_wood`) look different from decor pines: yellow-green canopy, gold crown, shimmering resin streaks, 7 rising light motes. Minimap noted for later (§3 5.2). 916 tests pass; smoke run (bash, 2 bots) clean, gathering and crafting normal |
 
 ---
 

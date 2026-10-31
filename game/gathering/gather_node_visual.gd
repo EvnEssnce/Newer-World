@@ -3,11 +3,22 @@ extends Node3D
 ## Client look of a gathering node, built in code (low poly): "ore" a grey rock
 ## with glinting copper veins, "wood" a pine, "fiber" a thistle bush. Depleted:
 ## rubble, a stump, a dry tuft. Not collidable (players walk through it).
+## The pine has to stand out among the map's decor pines (MapDecor, plain
+## green cones you can't chop): a gold-tipped yellow-green canopy, glowing amber
+## resin on the trunk and motes of light drifting up around it.
+
+## Motes drifting up around a choppable pine: how many, the ring they rise in
+## (m from the trunk), how high they go (m) and how long one rise takes (s).
+const MOTE_COUNT := 7
+const MOTE_RING := Vector2(0.55, 1.05)
+const MOTE_HEIGHT := Vector2(0.3, 3.2)
+const MOTE_RISE_TIME := 3.2
 
 var _full: Node3D
 var _empty: Node3D
 var _glint: StandardMaterial3D
 var _phase := 0.0
+var _motes: Array[MeshInstance3D] = []
 
 
 func setup(visual: String) -> void:
@@ -38,6 +49,18 @@ func _process(delta: float) -> void:
 	# A slow shimmer with a short bright glint every couple of seconds.
 	var glint := pow(maxf(0.0, sin(_phase * 1.7)), 12.0)
 	_glint.emission_energy_multiplier = 0.6 + 0.3 * sin(_phase * 3.1) + 2.5 * glint
+	_move_motes()
+
+
+## Each mote rises on its own slow spiral, fading in at the bottom and out at the top.
+func _move_motes() -> void:
+	for i in _motes.size():
+		var t := fposmod(_phase / MOTE_RISE_TIME + float(i) / _motes.size(), 1.0)
+		var angle := _phase * 0.6 + i * 2.4
+		var ring := lerpf(MOTE_RING.x, MOTE_RING.y, 0.5 + 0.5 * sin(i * 1.9))
+		var mote := _motes[i]
+		mote.position = Vector3(cos(angle) * ring, lerpf(MOTE_HEIGHT.x, MOTE_HEIGHT.y, t), sin(angle) * ring)
+		mote.scale = Vector3.ONE * maxf(0.01, sin(t * PI))
 
 
 func _build_ore() -> void:
@@ -72,12 +95,39 @@ func _build_ore() -> void:
 
 func _build_wood() -> void:
 	var bark := _material(Color(0.42, 0.28, 0.16))
-	var needles := _material(Color(0.17, 0.4, 0.22))
+	# Warmer and lighter than the decor pines' dark greens, with a gold crown.
+	var needles := _material(Color(0.4, 0.52, 0.17))
+	var crown := _material(Color(0.78, 0.6, 0.2))
 	_full.add_child(_mesh(_cylinder(0.17, 0.26, 2.4, 6), bark, Vector3(0.0, 1.2, 0.0)))
 	_full.add_child(_mesh(_cylinder(0.0, 1.15, 1.7, 7), needles, Vector3(0.0, 2.3, 0.0)))
-	var top := _mesh(_cylinder(0.0, 0.8, 1.4, 7), needles, Vector3(0.0, 3.15, 0.0))
+	var top := _mesh(_cylinder(0.0, 0.8, 1.4, 7), crown, Vector3(0.0, 3.15, 0.0))
 	top.rotation.y = 0.45
 	_full.add_child(top)
+	# Resin running down the trunk: it shimmers like the ore's veins.
+	_glint = _material(Color(0.95, 0.6, 0.15))
+	_glint.emission_enabled = true
+	_glint.emission = Color(1.0, 0.62, 0.18)
+	_glint.roughness = 0.25
+	for i in 3:
+		var angle := i * TAU / 3.0 + 0.5
+		var streak_box := BoxMesh.new()
+		streak_box.size = Vector3(0.09, 0.55 + 0.15 * i, 0.06)
+		var streak := _mesh(streak_box, _glint, Vector3(cos(angle) * 0.24, 0.75 + 0.3 * i, sin(angle) * 0.24))
+		streak.rotation.y = -angle
+		_full.add_child(streak)
+	var mote_material := StandardMaterial3D.new()
+	mote_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mote_material.albedo_color = Color(1.0, 0.85, 0.45)
+	mote_material.emission_enabled = true
+	mote_material.emission = Color(1.0, 0.8, 0.35)
+	mote_material.emission_energy_multiplier = 2.0
+	var mote_mesh := _sphere(0.08, 0.16, 4, 2)
+	for i in MOTE_COUNT:
+		var mote := _mesh(mote_mesh, mote_material, Vector3.ZERO)
+		mote.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_full.add_child(mote)
+		_motes.append(mote)
+	_move_motes()
 	_empty.add_child(_mesh(_cylinder(0.24, 0.29, 0.45, 6), bark, Vector3(0.0, 0.22, 0.0)))
 	_empty.add_child(_mesh(_cylinder(0.22, 0.22, 0.02, 6), _material(Color(0.78, 0.66, 0.45)),
 			Vector3(0.0, 0.455, 0.0)))

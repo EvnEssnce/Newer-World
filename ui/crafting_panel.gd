@@ -126,6 +126,7 @@ func _build_progress_box() -> Control:
 	_progress_bar.show_percentage = false
 	_progress_bar.min_value = 0.0
 	_progress_bar.max_value = 1.0
+	_progress_bar.step = 0.0  # continuous: the default 0.01 moves a long batch in visible jumps
 	_progress_bar.custom_minimum_size.y = 14
 	_progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var fill := StyleBoxFlat.new()
