@@ -57,7 +57,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 | Crafting | Tradeskill XP curves, refining chains, recipes, stations | Built (Milestone 3): 8 tradeskills, one refining step per resource, the Forge, 21 gear recipes |
 | Persistence | Accounts, character saves | Built: database module (session 49), accounts and character select (50), saving (51) |
 | Progression | Character level, weapon mastery levels (1 point per level, cap 20) | Built on branch `progression` (sessions 54, 57, 58): levels (character cap 30) and saving, XP from kills and gathering, mastery XP per weapon, an XP bar, tree points from levels; needs a hand playtest |
-| Zone | Mob camps, node spawns, a town with crafting stations | Test map only; three enemy camps on it (session 62, branch `milestone-6`) |
+| Zone | Mob camps, node spawns, a town with crafting stations | Test map only; three enemy camps and edge walls on it (session 62) |
 
 ---
 
@@ -77,7 +77,8 @@ All six classes are built and have had a hand playtest; four rounds of playtest 
 crafted gear (Milestone 3), accounts with saved characters (Milestone 5) and
 progression (levels, mastery, points from levels; awaiting its hand playtest) are on main.
 846 unit tests on main; the smoke tests pass for every class with 0 prediction corrections.
-Branch `milestone-6` (session 62) adds three camp enemy kinds (884 tests), awaiting a hand playtest.
+Session 62 added three camp enemy kinds, gear score scaling and class-leaning drops
+(894 tests; playtested on a Mac and on main since session 63).
 
 ---
 
@@ -176,20 +177,20 @@ tested and playtested). Each sub-item is roughly one session with one testable g
    4. **Hand playtest** of 4.2–4.3 and session 60 (§4). `progression` was
       fast-forwarded into main in session 61, before this playtest.
 5. **Content for a zone (Milestone 6).**
-   1. **Built (session 62, branch `milestone-6`; awaiting the hand playtest).** **More
+   1. **Done (session 62; playtested on the developer's Mac, on main since session 63).** **More
       enemies and camps:** Thornling (fast pack skirmisher, bleeding bites, hit-and-run),
       Cinder Seer (ranged caster, a dodgeable ember orb, keeps its distance) and Cragmaw
       (lone bruiser, a slow guard-breaking cone slam with knockback); loot GS 110–150,
       120–160 and 135–175 (2 items); XP 40/70/220 per kill; camps east, west and
       north-east of the test map (`design/enemies.md`). Shared: per-kind looks, camp
       alerts, keep distance, enemy projectiles.
-   1b. **Built (session 62, branch `milestone-6`; same playtest).** **Enemy scaling by
+   1b. **Done (session 62, same playtest).** **Enemy scaling by
       gear score** (developer's direction): about 10–12 kinds for the whole game,
       reused in every zone tier; each placement sets the enemy's GS (camp markers:
       Thornlings 140, Seers 150, Cragmaw 180), which scales its health, damage and XP
       (`data/scaling.cfg`) and its drops (loot bands relative to the enemy's GS).
       Every drop chance halved (Husk 60% → 30%), rarity weights unchanged.
-   1c. **Built (session 62, playtest feedback on the Mac).** Walls around the test
+   1c. **Done (session 62, playtest feedback on the Mac; approved).** Walls around the test
       map (Seers backed off its edge) and a fall reset for enemies; drops lean to the
       killer's class (×3 its weapons/Wing Enhancements, ×0.1 other classes', armor
       unchanged); every tradeskill XP gain also gives character XP (0.6×; crafting gave
@@ -251,23 +252,6 @@ level 21+ character, or trust the feed line); Mending Beam healing you while it 
 ally, Renewal Pulse healing you from outside; Sapping Pulse, then a light or heavy on a
 sapped Husk: a bigger number and a green heal (the smoke bots never followed up in
 time, so this path is untested).
-
-**Enemy camps (session 62, branch `milestone-6`):** walk to each camp: **Thornlings**
-east at (24, 0) (two lunge in, bite, Bleed, back off and circle; pulling one brings
-both), **Cinder Seers** west at (-24, -6) (an orb after a 0.8 s red windup: can you
-sidestep it at 13 m? a guard blocks it; Burn on a hit; they back away when you close
-in), the **Cragmaw** north-east at (21, -23) (a 1.2 s windup, a cone slam that breaks a
-guard and knocks you 3 m; circle behind it during the windup and it misses; barely
-staggers). Do the looks read (and the Thornling lying on its side when dead)? Loot
-and XP feel right for the effort? F3 boxes. **Scaling:** nameplates read "Thornling
-GS 140" etc.; the camps are placed above their kinds' own GS (Cragmaw 180: ~2870
-health, ~270 per slam); drops land around the enemy's GS (Thornlings 125–165, Seers
-135–175, Cragmaw 170–200, Husks 101–140); fewer drops overall (half as often).
-
-**Session 62 feedback round (Mac):** walls at the map edge (fight a Seer near it);
-Fighter kills drop mostly Fighter weapons and Wing Enhancements; a Forge craft shows a
-"+18 XP" line beside the tradeskill line. Shader errors in the Mac console at launch
-(not visible in game): send the text.
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -518,6 +502,8 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 61 | 2026-10-25 | Main fast-forwarded to `progression` (sessions 54–60) at the developer's request, before the progression hand playtest. **Code version check:** `CodeVersion` (a hash of the code files, not data/; an export packs `code_version.txt`, written by `tools/write_code_version.gd` in `export_client.ps1`) and `VersionCheck` (`/root/Main/VersionCheck`, two RPCs that never change): a client says its version on connect, the server sends the tuning only on a match (and only then allows login), else refuses with a message naming both versions; a silent connection (a pre-check build) is dropped after `[server] version_timeout` 10 s. The connect page shows "Game version X". 846 tests (5 new); on Linux with PowerShell 7: smoke default passes (version checks: 2 accepted, the `--fake-version` client refused), `-Party` passes everything but the known Linux `party_members=0` quit timing (also on the unchanged code, 2 of 2 runs); a pre-check build against the new server was dropped after 10 s with no errors; the refusal screen checked in a screenshot. Hand check: export, change a script, host, and connect the old exe (message) |
 
 | 62 | 2026-10-25 | Build order 5.1 on branch `milestone-6` (from main d7768d1): **three camp enemy kinds**. Shared engine first (main session): `EnemyLook` (looks per kind in `game/enemy/looks/`, Husk and dummy moved there; `dead_pose`), camp alerts (`metadata/camp`, `EnemyBrain.pulled`/`alert`), `[ai] keep_distance`/`retreat_speed`, enemy projectiles (`ProjectileSystem.server_fire_enemy`, players only), `[stats] name`, a ~10-byte smaller enemy snapshot entry, `EnemyParams.validate`, `SUMMARY enemy_kinds`, loot tables. Then three parallel agents (worktrees), one kind each (cfg, look, tests), merged clean: **Thornling**, **Cinder Seer** (+ `projectile_cinder_orb`), **Cragmaw**; camps placed east/west/north-east, after the dummy (ids unchanged). From the agents' notes: a stagger after a swing came down starts the cooldown; F3 boxes and hit numbers fit scaled looks. 884 tests; on Linux with PowerShell 7 smoke default ×3 pass (new checks: every kind spawned; the Seers, tuned to 45 m aggro in the smoke test only, throw: 4–9 orbs a run), `-Party` passes everything but the known `party_members=0` quit timing (2 runs), `-Bots 6` passes (server quit 8 s later, the known 4-core issue) with max snapshot 1277 bytes. Then, at the developer's request, **gear score scaling** (marker `metadata/gear_score`, `data/scaling.cfg`, `EnemyParams.scaled_to`: health, damage, XP; loot bands relative to the enemy's GS, `LootTable.roll_gear_score`; nameplates show GS) and **every drop chance halved**: 891 tests; smoke default and `-Party` pass (the known party line aside; a GS 150 Seer dropped GS 164). Then the developer's Mac playtest feedback: macOS godot-sqlite binaries + `tools/run_local_mac.sh`; walls around the test map and an enemy fall reset; drops lean to the killer's class; every gather and craft gives character XP (0.6 × its tradeskill XP); 894 tests; smoke default and `-Party` pass (known party line aside; 3 gathers + 2 crafts gave 5 character XP grants). UI scale slider noted for later. Needs the camp hand playtest (§4) |
+
+| 63 | 2026-10-31 | Developer's playtest of session 62 on a Mac approved (camps, scaling, walls, class drops, craft XP); a one-time shader error at launch didn't come back. Main fast-forwarded to `milestone-6` |
 
 ---
 
