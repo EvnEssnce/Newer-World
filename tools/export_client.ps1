@@ -58,5 +58,5 @@ $zip = Join-Path $outDir 'NewerWorld.zip'
 $files = @(Get-ChildItem $outDir -Filter 'NewerWorld*.exe') + @(Get-ChildItem $outDir -Filter '*.dll') |
     Select-Object -ExpandProperty FullName
 Compress-Archive -Path $files -DestinationPath $zip -Force
-"Exported $exe (code version $version: the connect screen shows it)"
+"Exported $exe (code version ${version}: the connect screen shows it)"
 "Send $zip to your friends (unzip, run NewerWorld.exe, enter your Tailscale address)."
