@@ -75,7 +75,7 @@ housing, no large-scale open-world events. PvE is the main focus; PvP is minor.
 All six classes are built and have had a hand playtest; four rounds of playtest feedback
 (sessions 26, 41, 41, 42) are built and approved. Gathering, tradeskills, refining and
 crafted gear (Milestone 3), accounts with saved characters (Milestone 5) and
-progression (levels, mastery, points from levels; awaiting its hand playtest) are on main.
+progression (levels, mastery, points from levels; hand playtested in session 67) are on main.
 846 unit tests on main; the smoke tests pass for every class with 0 prediction corrections.
 Session 62 added three camp enemy kinds, gear score scaling and class-leaning drops
 (894 tests; playtested on a Mac and on main since session 63).
@@ -174,8 +174,9 @@ tested and playtested). Each sub-item is roughly one session with one testable g
       `data/testing.cfg [progression] full_points` (off; the smoke test turns it on).
       (Session 58 tried one shared pool from the character level instead; reverted the
       same day: per-weapon mastery points were intended.)
-   4. **Hand playtest** of 4.2–4.3 and session 60 (§4). `progression` was
-      fast-forwarded into main in session 61, before this playtest.
+   4. **Done (session 67, developer).** **Hand playtest** of 4.2–4.3: XP feed lines, the
+      XP bar, a level-up adding a point in K, the level kept after leaving and
+      rejoining. Session 60's leftovers (class bonus line, Mage heals) are still in §4.
 5. **Content for a zone (Milestone 6).**
    1. **Done (session 62; playtested on the developer's Mac, on main since session 63).** **More
       enemies and camps:** Thornling (fast pack skirmisher, bleeding bites, hit-and-run),
@@ -256,11 +257,10 @@ each friend; hits land on what you see at their ping (compare with
 corrections; a tuning edit on your side reaches them after a server restart; names on
 party frames (session 53; nameplates showed names in the session 56 playtest).
 
-**Progression (sessions 57–58, branch `progression`):** a new character's K panel shows
-"Points: 3 / 3 (of 19)" and its Wings 3 / 3 (of 22); Husk kills give "+50 XP  +40 <weapon>" feed
-lines and fill the XP bar at the bottom edge; a level-up line, then one more point in K;
-leave and rejoin keeps the level. Whether 8 Husks per level and the start points feel
-right. Turn `data/testing.cfg [progression] full_points` on to compare. Also: the keybinds list
+**Progression (sessions 57–58):** the core loop was confirmed in session 67 (feed lines, XP
+bar, a level-up point in K, the level kept on rejoin). Still open: whether 8 Husks per
+level and the start points feel right (turn `data/testing.cfg [progression]
+full_points` on to compare). Also: the keybinds list
 (bottom left, F1 hides it); deleting a character (two clicks); a blocked name refused.
 **Session 60:** the K Wings tab's class bonus line (turn on `full_points` and play a
 level 21+ character, or trust the feed line); Mending Beam healing you while it heals an
@@ -274,12 +274,6 @@ Headsman's Verdict crits; Maelstrom's 7 m Vortex; Tempest Wings' wall stun (Gale
 next to a crate); Pyre Heart drawing a Husk's aggro; Second Wind and Second Step (two
 rolls / Ashsteps); Ricochet; Seeker Spark (watch for kinks from course corrections);
 Tripwire and Smoke Bolt; Kindle Life; Mirror Aegis reflecting projectiles.
-
-**Ashvale fixes (session 65):** craft a batch of 5 at the town Forge: the bar should
-fill smoothly (the gather/equip bar too). In a forest, the choppable Windbent Pines
-should be easy to pick out: gold crown, yellow-green canopy, glowing resin on the
-trunk, motes of light rising around them. The other trees are plain dark-green
-decor.
 
 ### Decisions to confirm (defaults that were built)
 
@@ -544,6 +538,7 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 64 | 2026-10-31 | Build order 5.2 started (developer: 400 × 400 m, blockout now, test map kept). **Maps as scenes:** the test map moved out of `world.tscn` into `game/maps/test_map.tscn`; `World/Map` (`GameMap`) is the map `data/world.cfg [map] id` names (server's choice reaches clients with the tuning; smoke test tunes `test_map`); `PlayerSpawns` markers (join at the first, respawn at the nearest). **Ashvale** (`game/maps/ashvale.tscn`): `Terrain`/`TerrainShape` (4 m low-poly grid: noise, hills, edge mountains, flats, road colours; heights in 1/64 m so every machine builds the same collision), `MapDecor`/`DecorScatter` (520 seeded trees, 160 rocks, hex-prism colliders), `BlockoutBuilding`, `Palisade`; town, 4 spawn points, 21 enemies in 8 groups (GS 120–185), 22 gather nodes, the Forge. Navmesh copy uses `merge` (`set_indices` refused the big terrain). 916 tests (16 new); smoke default passes ×2, `-Party` passes but the known `party_members=0` line; two bots on Ashvale for 36 s: 0 corrections. Overview image and views checked; needs the developer's walk-through (§4) |
 | 65 | 2026-10-31 | Developer's Ashvale playtest (session 64) approved: distances and difficulty fine for now, camps appear at a good distance (may raise interest to 80/100 later), slopes smooth for players and enemies, shrine respawns right, 1 correction in ~36k snapshots. Fixes: the crafting panel's bar and the gather/equip bar (`LootHud`) moved in 1% jumps (Godot `ProgressBar.step` defaults to 0.01: visible over a long batch); `step = 0` now. Choppable pines (`GatherNodeVisual._build_wood`) look different from decor pines: yellow-green canopy, gold crown, shimmering resin streaks, 7 rising light motes. Minimap noted for later (§3 5.2). Main fast-forwarded to this work at the developer's request; every other branch (all already in main) deleted, so main is the one branch. 916 tests pass; smoke run (bash, 2 bots) clean, gathering and crafting normal |
 | 66 | 2026-11-05 | Before the 3-player playtest: `tools/export_client.ps1` failed to parse on Windows (`"... $version: ..."`: PowerShell reads `$version:` as a drive-qualified variable), so nothing had been exported since session 61 added that line; now `${version}`. Every `tools/*.ps1` parse-checked with PowerShell 7's parser (0 errors). Game code unchanged |
+| 67 | 2026-11-06 | Developer confirmed by hand: progression (XP feed lines, XP bar, a level-up point in K, level kept on rejoin; build order 4.4 done) and the session 65 Ashvale fixes (smooth Forge batch bar, choppable pines stand out). Docs only |
 
 ---
 
