@@ -95,3 +95,56 @@ func test_vertical_overlap() -> void:
 	assert_true(_hits(Vector3(0.0, 1.5, -1.0)), "feet below the box top")
 	assert_false(_hits(Vector3(0.0, 2.5, -1.0)), "entirely above")
 	assert_false(_hits(Vector3(0.0, -2.0, -1.0)), "entirely below")
+
+
+# --- Aimed cone (Plumage Flash): the axis follows the aim, pitch included ---
+
+func _cone_attack() -> AttackParams:
+	var cone := AttackParams.new()
+	cone.shape = AttackParams.SHAPE_RADIAL
+	cone.hitbox_range = 6.0
+	cone.hitbox_arc = deg_to_rad(70.0)
+	cone.hitbox_height = 2.2
+	cone.aimed_cone = true
+	return cone
+
+
+func _cone_touches(cone: AttackParams, direction: Vector3, target: Vector3) -> bool:
+	var origin := Vector3(0.0, 1.4, 0.0)
+	return MeleeHitbox.touches(Vector3.ZERO, 0.0, cone, PackedVector3Array([origin,
+			direction.normalized()]), target, RADIUS, HEIGHT)
+
+
+func test_aimed_cone_level_hits_in_front_only() -> void:
+	var cone := _cone_attack()
+	var ahead := Vector3(0.0, 0.0, -1.0)
+	assert_true(_cone_touches(cone, ahead, Vector3(0.0, 0.0, -4.0)), "in front")
+	assert_true(_cone_touches(cone, ahead, Vector3(2.0, 0.0, -4.0)), "inside the 35 degree half arc")
+	assert_false(_cone_touches(cone, ahead, Vector3(5.0, 0.0, -2.0)), "off to the side")
+	assert_false(_cone_touches(cone, ahead, Vector3(0.0, 0.0, 4.0)), "behind")
+	assert_false(_cone_touches(cone, ahead, Vector3(0.0, 0.0, -7.0)), "past its range")
+
+
+func test_aimed_cone_reaches_a_hovering_target_when_aimed_up() -> void:
+	var cone := _cone_attack()
+	var hovering := Vector3(0.0, 4.0, -3.0)  # feet 4 m up: over the level cone's 2.2 m
+	assert_false(MeleeHitbox.hits(Vector3.ZERO, 0.0, cone, hovering, RADIUS, HEIGHT),
+			"the level cone misses it")
+	assert_false(_cone_touches(cone, Vector3(0.0, 0.0, -1.0), hovering),
+			"aimed level, it misses too")
+	var up := Vector3(0.0, 4.4, -3.0) - Vector3(0.0, 1.4, 0.0)  # at its middle
+	assert_true(_cone_touches(cone, up, hovering), "aimed up at it, it hits")
+
+
+func test_aimed_cone_aimed_up_misses_the_ground_in_front() -> void:
+	var cone := _cone_attack()
+	assert_false(_cone_touches(cone, Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, -4.0)),
+			"aimed straight up, a target ahead on the ground is outside")
+
+
+func test_aimed_cone_without_a_line_is_the_level_cone() -> void:
+	var cone := _cone_attack()
+	assert_true(MeleeHitbox.touches(Vector3.ZERO, 0.0, cone, PackedVector3Array(),
+			Vector3(0.0, 0.0, -4.0), RADIUS, HEIGHT))
+	assert_false(MeleeHitbox.touches(Vector3.ZERO, 0.0, cone, PackedVector3Array(),
+			Vector3(0.0, 4.0, -3.0), RADIUS, HEIGHT))

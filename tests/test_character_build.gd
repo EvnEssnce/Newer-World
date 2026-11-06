@@ -256,3 +256,49 @@ func test_every_class_starts_with_abilities_at_level_one() -> void:
 		if build.wing_tree:
 			assert_true(build.wing_slots.count("") < PlayerState.WING_SLOTS,
 					"%s Wings keep an ability" % class_id)
+
+
+# --- Unspent points (the HUD line under the level) ---
+
+func test_unspent_points_per_equipped_tree() -> void:
+	var build := _build()  # sword spent 2 of 10, axes 1 of 10
+	var left := build.unspent_points()
+	assert_eq(left.get("sword", 0), 8)
+	assert_eq(left.get("axes", 0), 9)
+	assert_false(left.has(CharacterBuild.WINGS_KEY), "no Wing tree")
+
+
+func test_unspent_points_follow_the_level_limits() -> void:
+	var build := _build()
+	build.set_point_limits({"sword": 2, "axes": 4}, -1)
+	var left := build.unspent_points()
+	assert_false(left.has("sword"), "all the level's points are spent")
+	assert_eq(left.get("axes", 0), 3)
+
+
+func test_points_text() -> void:
+	assert_eq(Hud.points_text({}, {}), "")
+	assert_eq(Hud.points_text({"spear": 1}, {"spear": "Spear"}), "1 unspent point (K): Spear 1")
+	assert_eq(Hud.points_text({"spear": 2, "wings": 1}, {"spear": "Spear", "wings": "Wings"}),
+			"3 unspent points (K): Spear 2, Wings 1")
+
+
+# --- Gathering passive ---
+
+func test_gathering_passive_applies_to_its_skill_only() -> void:
+	class_def.gather_skill = "mining"
+	class_def.gather_time = 0.85
+	class_def.gather_bonus_chance = 0.1
+	assert_almost(class_def.gather_time_multiplier("mining"), 0.85)
+	assert_almost(class_def.gather_time_multiplier("logging"), 1.0)
+	assert_almost(class_def.gather_extra_chance("mining"), 0.1)
+	assert_almost(class_def.gather_extra_chance("harvesting"), 0.0)
+	class_def.gather_passive_name = "Steady Pick"
+	assert_eq(class_def.gather_passive_text("Mining"),
+			"Steady Pick: Mining 15% faster, +10% bonus yield chance")
+
+
+func test_no_gathering_passive() -> void:
+	assert_almost(class_def.gather_time_multiplier("mining"), 1.0)
+	assert_almost(class_def.gather_extra_chance("mining"), 0.0)
+	assert_eq(class_def.gather_passive_text("Mining"), "")

@@ -145,6 +145,10 @@ $tune = @('--tune=combat/health/max=150', '--tune=combat/death/respawn_time=0.5'
 # Saves (World/Saves): everyone online every 8 s (60 s in the real data), so
 # periodic saves happen within the run too.
 $tune += '--tune=saving/save/interval=8.0'
+# Every class's own base health (data/class_<id>.cfg) at the low 150 above too.
+foreach ($classFile in @('fighter', 'juggernaut', 'assassin', 'ranger', 'mage', 'paladin')) {
+    $tune += "--tune=class_$classFile/class/base_health=150.0"
+}
 # Progression: every tree at its full points (the bots respec into capstones),
 # and XP curves 20x cheaper so the bots level up within the run (kills and
 # gathers) and the restart check covers a saved level.

@@ -62,6 +62,13 @@ var _trail_length := 0.0
 ## Meters flown since it was first shown (the trail never reaches further back).
 var _travelled := 0.0
 var _shown := false
+## F3 (Player.show_hitboxes): a sphere of the kind's hit_radius around the point
+## the server sweeps (Projectile.sweep_capsule adds the target's body radius).
+var _hit_sphere: MeshInstance3D
+static var _hit_sphere_material: StandardMaterial3D
+## Opaque enough to show against an orange glow halo (which is often larger: it
+## keeps a minimum size on screen).
+const HIT_SPHERE_COLOR := Color(1.0, 0.1, 0.1, 0.65)
 
 
 func setup(p: ProjectileParams) -> void:
@@ -70,6 +77,7 @@ func setup(p: ProjectileParams) -> void:
 	_body.mesh = _mesh_for(p)
 	_body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_body)
+	_add_hit_sphere(p)
 	if p.glow <= 0.0:
 		return
 	var wave := p.visual == ProjectileParams.VISUAL_WAVE
@@ -106,6 +114,28 @@ func show_at(pos: Vector3, velocity: Vector3) -> void:
 		_spin = fmod(_spin + _params.spin * get_process_delta_time(), TAU)
 		_body.rotation = Vector3(0.0, _spin, 0.0)
 	_show_glow(pos)
+	_hit_sphere.visible = Player.show_hitboxes and _params.hits
+
+
+func _add_hit_sphere(p: ProjectileParams) -> void:
+	if _hit_sphere_material == null:
+		_hit_sphere_material = StandardMaterial3D.new()
+		_hit_sphere_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_hit_sphere_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_hit_sphere_material.albedo_color = HIT_SPHERE_COLOR
+		_hit_sphere_material.no_depth_test = true
+	var sphere := SphereMesh.new()
+	var radius := maxf(p.hit_radius, 0.02)
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	sphere.radial_segments = 16
+	sphere.rings = 8
+	_hit_sphere = MeshInstance3D.new()
+	_hit_sphere.mesh = sphere
+	_hit_sphere.material_override = _hit_sphere_material
+	_hit_sphere.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hit_sphere.visible = false
+	add_child(_hit_sphere)
 
 
 ## Sizes the halo (at least HALO_MIN_ANGLE seen from the camera) and the trail

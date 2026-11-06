@@ -108,6 +108,10 @@ var rebirth_cost := 0.0
 var rebirth_ticks := 0
 ## Health on rising, fraction of max_health.
 var rebirth_health_fraction := 0.0
+## Rebirth burst ([rebirth] burst_*): rising hits every hostile within this
+## many meters for this fraction of its own max health (World._rebirth_burst).
+var rebirth_burst_radius := 0.0
+var rebirth_burst_fraction := 0.0
 var rebirth_cooldown_ticks := 0
 
 static var _current: PlayerParams
@@ -191,6 +195,8 @@ static func _load_wings_and_ember(p: PlayerParams, tps: float) -> void:
 	p.rebirth_cost = Tuning.get_value("ember", "rebirth", "cost")
 	p.rebirth_ticks = maxi(1, roundi(Tuning.get_value("ember", "rebirth", "duration") * tps))
 	p.rebirth_health_fraction = Tuning.get_value("ember", "rebirth", "health_fraction")
+	p.rebirth_burst_radius = Tuning.get_value("ember", "rebirth", "burst_radius")
+	p.rebirth_burst_fraction = Tuning.get_value("ember", "rebirth", "burst_max_health_fraction")
 	p.rebirth_cooldown_ticks = roundi(Tuning.get_value("ember", "rebirth", "cooldown") * tps)
 
 

@@ -736,3 +736,9 @@ func print_client_summary() -> void:
 	print("SUMMARY client=%d loot drops_seen=%d picked=%d inventory=%d equipped=%d" % [
 			multiplayer.get_unique_id(), _drops_seen, _picked_seen, inventory.size(),
 			equipment.items.size()])
+
+
+## Client: a notice line in the loot feed (like the server's _receive_notice).
+func notice(text: String) -> void:
+	if _hud:
+		_hud.add_feed_line(text, LootHud.NOTICE_COLOR)

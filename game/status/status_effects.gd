@@ -253,6 +253,17 @@ func damage_taken_multiplier(defs: StatusDefs) -> float:
 	return maxf(0.0, 1.0 + bonus)
 
 
+## Multiplier on out-of-combat health regeneration (HealthRegen): 1 + the sum
+## of health_regen x stacks.
+func health_regen_multiplier(defs: StatusDefs) -> float:
+	var bonus := 0.0
+	for e in entries:
+		var def := defs.get_def(e.status)
+		if def:
+			bonus += def.health_regen * e.stacks
+	return maxf(0.0, 1.0 + bonus)
+
+
 ## Who applied a status (Entry.source, server only), 0 if it isn't there.
 func source_of(index: int) -> int:
 	var e := find(index)

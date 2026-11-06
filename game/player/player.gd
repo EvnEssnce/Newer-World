@@ -142,6 +142,8 @@ var health := 0.0
 var bonus_max_health := 0.0
 ## Server: what this player's equipped gear adds up to (LootSystem sets it).
 var gear := Equipment.Stats.new()
+## Server: out-of-combat health regeneration (World._regen_health).
+var regen := HealthRegen.from_tuning()
 ## Server: the class's level bonus (set_level_bonus, from BuildService.set_points):
 ## its points and the parts only the server uses (the sim's are in PlayerState).
 var level_bonus_points := 0
@@ -258,6 +260,11 @@ var _radial_mesh: CylinderMesh
 var _wing_pivots: Array[Node3D] = []
 var _rebirth_fire: MeshInstance3D
 var _rebirth_mesh: CylinderMesh
+## Drawn rebirthing last frame (the burst ring starts when it ends).
+var _was_rebirthing := false
+const REBIRTH_BURST_COLOR := Color(1.0, 0.5, 0.12, 1.0)
+## Seconds the burst ring takes to reach its radius.
+const REBIRTH_BURST_RING_TIME := 0.3
 ## Beam attacks' look (client; `beam_color` in the weapon file).
 var _beam: BeamVisual
 ## Placeholder War Hammer, built in code (client; _build_hammer_model).
@@ -444,9 +451,27 @@ func reset_class_state() -> void:
 	wall_stun_source = 0
 
 
-## Base max health plus gear's.
+## Base max health (the class's: base_max_health) plus gear's and the level bonus.
 func max_health() -> float:
-	return params.max_health + bonus_max_health + level_bonus_health
+	return base_max_health() + bonus_max_health + level_bonus_health
+
+
+## Server: this tick's out-of-combat regeneration (HealthRegen), times gear's
+## health_regen_pct and statuses' health_regen.
+func regen_step() -> float:
+	var multiplier := ((1.0 + gear.bonus("health_regen_pct"))
+			* state.statuses.health_regen_multiplier(params.statuses))
+	return regen.step(state.combat_ticks, params.ember_combat_ticks, state.dead, health,
+			max_health(), multiplier)
+
+
+## The class's [class] base_health (ClassDef.base_health), else combat.cfg's
+## [health] max. Clients draw the max the snapshots carry (World sets
+## bonus_max_health to make up the difference).
+func base_max_health() -> float:
+	if build and build.class_def and build.class_def.base_health > 0.0:
+		return build.class_def.base_health
+	return params.max_health
 
 
 ## Server: `points` level bonus points (levels past a full Wing tree) of the
@@ -1500,6 +1525,12 @@ func _show_phoenix(view: PlayerState, attack: AttackParams, attack_tick: float) 
 		var side := -1.0 if i == 0 else 1.0
 		_wing_pivots[i].visible = wings_out
 		_wing_pivots[i].rotation = Vector3(0.0, -0.3 * side, wing_angle * side)
+	if rebirth >= 0.0:
+		_was_rebirthing = true
+	elif _was_rebirthing:
+		_was_rebirthing = false
+		if not view.dead:
+			_rebirth_burst_ring()
 	_rebirth_fire.visible = rebirth >= 0.0
 	if _rebirth_fire.visible:
 		# Grows up to its full height by halfway, flickering a little.
@@ -1507,6 +1538,18 @@ func _show_phoenix(view: PlayerState, attack: AttackParams, attack_tick: float) 
 		height *= 1.0 + 0.08 * sin(Time.get_ticks_msec() / 70.0)
 		_rebirth_mesh.height = height
 		_rebirth_fire.position = Vector3(0.0, height / 2.0, 0.0)
+
+
+## Rebirth burst (client, cosmetic): a fire ring out to [rebirth] burst_radius
+## as the body rises (the server's World._rebirth_burst decides the hits).
+func _rebirth_burst_ring() -> void:
+	if params.rebirth_burst_radius <= 0.0 or params.rebirth_burst_fraction <= 0.0:
+		return
+	var ring := ShockRingVisual.new()
+	ring.top_level = true
+	add_child(ring)
+	ring.setup(global_position, params.rebirth_burst_radius / REBIRTH_BURST_RING_TIME,
+			params.rebirth_burst_radius, 1.0, REBIRTH_BURST_COLOR, 0.0)
 
 
 ## 0 while lying dead; during the last 30% of a Rebirth, 0..1 as the body

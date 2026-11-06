@@ -53,6 +53,12 @@ var beam_color := Color(0.0, 0.0, 0.0, 0.0)
 ## channel follows the crosshair. Its facing heads for the crosshair's line at
 ## its full range (aim_reach), like a throw's heading.
 var aimed_beam := false
+## An aimed cone (aimed_cone key; a radial attack with an arc only): the cone's
+## axis isn't level along the facing but runs from the beam origin toward the
+## crosshair's aim point, pitch included (Plumage Flash: look up and it reaches a
+## hovering target). hitbox_range long, hitbox_arc wide all round the axis
+## (MeleeHitbox.cone_hits); hitbox_height is unused.
+var aimed_cone := false
 ## Knockback / pull / launch on hit (force_* keys), or null for none.
 var force: ForceParams = null
 ## This attack's own execute bonus (Executioner's Swing; execute_damage /
@@ -240,6 +246,8 @@ func load_from(file: String, section: String, tps: float) -> void:
 	beam_color = Tuning.get_optional(file, section, "beam_color", Color(0.0, 0.0, 0.0, 0.0))
 	aimed_beam = shape == SHAPE_BOX and Tuning.get_optional(file, section, "aimed_beam",
 			beam_color.a > 0.0)
+	aimed_cone = (shape == SHAPE_RADIAL and hitbox_arc > 0.0
+			and Tuning.get_optional(file, section, "aimed_cone", false))
 	execute = Vector2(Tuning.get_optional(file, section, "execute_damage", 0.0),
 			Tuning.get_optional(file, section, "execute_threshold", 0.0))
 	set_hyper_armor(Tuning.get_optional(file, section, "armor_start", 0.0),
@@ -324,6 +332,7 @@ func radial_copy(radius: float) -> AttackParams:
 	result.hitbox_range = radius
 	result.hitbox_arc = 0.0
 	result.aimed_beam = false
+	result.aimed_cone = false
 	return result
 
 

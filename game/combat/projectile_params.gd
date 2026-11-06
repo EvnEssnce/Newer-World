@@ -95,33 +95,62 @@ static func from_tuning(kind_id: String, tps: float) -> ProjectileParams:
 	var section := "projectile_" + kind_id
 	var p := ProjectileParams.new()
 	p.id = kind_id
-	p.speed = Tuning.get_value(FILE, section, "speed")
-	p.gravity = Tuning.get_value(FILE, section, "gravity")
-	p.pitch = deg_to_rad(Tuning.get_optional(FILE, section, "pitch", 0.0))
-	p.aim_pitch = Tuning.get_optional(FILE, section, "aim_pitch", true)
-	p.lifetime_ticks = maxi(1, roundi(Tuning.get_value(FILE, section, "lifetime") * tps))
-	p.hit_radius = Tuning.get_value(FILE, section, "hit_radius")
-	p.pierce = Tuning.get_value(FILE, section, "pierce")
-	p.walls = Tuning.get_value(FILE, section, "walls")
-	p.stopped_by_guard = Tuning.get_value(FILE, section, "stopped_by_guard")
-	p.release_height = Tuning.get_value(FILE, section, "release_height")
-	p.release_forward = Tuning.get_value(FILE, section, "release_forward")
-	p.returns = Tuning.get_optional(FILE, section, "returns", false)
+	p.speed = _value(section, "speed")
+	p.gravity = _value(section, "gravity")
+	p.pitch = deg_to_rad(_optional(section, "pitch", 0.0))
+	p.aim_pitch = _optional(section, "aim_pitch", true)
+	p.lifetime_ticks = maxi(1, roundi(_value(section, "lifetime") * tps))
+	p.hit_radius = _value(section, "hit_radius")
+	p.pierce = _value(section, "pierce")
+	p.walls = _value(section, "walls")
+	p.stopped_by_guard = _value(section, "stopped_by_guard")
+	p.release_height = _value(section, "release_height")
+	p.release_forward = _value(section, "release_forward")
+	p.returns = _optional(section, "returns", false)
 	if p.returns:
-		p.return_after_ticks = maxi(1, roundi(Tuning.get_value(FILE, section, "return_after") * tps))
-		p.return_speed = Tuning.get_value(FILE, section, "return_speed")
-		p.catch_radius = Tuning.get_value(FILE, section, "catch_radius")
-	p.visual = Tuning.get_value(FILE, section, "visual")
-	p.length = Tuning.get_value(FILE, section, "length")
-	p.color = Tuning.get_value(FILE, section, "color")
-	p.spin = deg_to_rad(Tuning.get_optional(FILE, section, "spin", 0.0))
-	p.glow = maxf(0.0, Tuning.get_optional(FILE, section, "glow", 1.0))
-	p.bounces = Tuning.get_optional(FILE, section, "bounces", 0)
-	p.bounce_range = Tuning.get_optional(FILE, section, "bounce_range", 0.0)
-	p.homing_turn = deg_to_rad(Tuning.get_optional(FILE, section, "homing_turn", 0.0))
-	p.homing_range = Tuning.get_optional(FILE, section, "homing_range", 0.0)
-	p.hits = Tuning.get_optional(FILE, section, "hits", true)
+		p.return_after_ticks = maxi(1, roundi(_value(section, "return_after") * tps))
+		p.return_speed = _value(section, "return_speed")
+		p.catch_radius = _value(section, "catch_radius")
+	p.visual = _value(section, "visual")
+	p.length = _value(section, "length")
+	p.color = _value(section, "color")
+	p.spin = deg_to_rad(_optional(section, "spin", 0.0))
+	p.glow = maxf(0.0, _optional(section, "glow", 1.0))
+	p.bounces = _optional(section, "bounces", 0)
+	p.bounce_range = _optional(section, "bounce_range", 0.0)
+	p.homing_turn = deg_to_rad(_optional(section, "homing_turn", 0.0))
+	p.homing_range = _optional(section, "homing_range", 0.0)
+	p.hits = _optional(section, "hits", true)
 	return p
+
+
+## The most `like` links followed (a loop of them is an error, not a hang).
+const MAX_LIKE_DEPTH := 8
+
+
+## The section `key` is read from: the kind's own, else the kind its `like` key
+## names (and so on: a kind that copies another and changes only what it lists,
+## e.g. an ability's arrow in its own color). "" if none has it.
+static func _source(section: String, key: String) -> String:
+	var current := section
+	for i in MAX_LIKE_DEPTH:
+		if Tuning.has_value(FILE, current, key):
+			return current
+		if not Tuning.has_value(FILE, current, "like"):
+			return ""
+		current = "projectile_" + str(Tuning.get_value(FILE, current, "like"))
+	push_error("%s.cfg: [%s] has a loop of like keys (or more than %d)" % [FILE, section, MAX_LIKE_DEPTH])
+	return ""
+
+
+static func _value(section: String, key: String) -> Variant:
+	var source := _source(section, key)
+	return Tuning.get_value(FILE, section if source.is_empty() else source, key)
+
+
+static func _optional(section: String, key: String, default: Variant) -> Variant:
+	var source := _source(section, key)
+	return default if source.is_empty() else Tuning.get_value(FILE, source, key)
 
 
 ## Meters it reaches on flat ground before ending (lifetime) or turning back

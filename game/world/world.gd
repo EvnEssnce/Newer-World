@@ -180,6 +180,10 @@ var _rebirths := 0
 ## Heals that restored health, and the health restored.
 var _heals := 0
 var _healed := 0.0
+## Health restored by out-of-combat regeneration; Rebirth bursts and their hits.
+var _regen_healed := 0.0
+var _rebirth_bursts := 0
+var _rebirth_burst_hits := 0
 ## Hits on an ally that a Shield Wall holder blocked for them.
 var _shield_wall_covers := 0
 ## Hold the Line pokes (Spear capstone).
@@ -366,8 +370,9 @@ func _ready() -> void:
 	# Gathering feeds tradeskills (server): XP per gather; the skill's level shortens
 	# the gather time and can add a bonus unit.
 	gathering.gathered.connect(tradeskills.on_gathered)
-	gathering.time_multiplier_hook = tradeskills.gather_time_multiplier
-	gathering.yield_bonus_hook = tradeskills.bonus_yield
+	# ...and the class's gathering passive ([gathering] in the class file) too.
+	gathering.time_multiplier_hook = _gather_time_multiplier
+	gathering.yield_bonus_hook = _gather_bonus_yield
 	_add_crafting_system()
 	# World/Progression: character and weapon mastery levels (both sides).
 	progression = ProgressionSystem.new()
@@ -406,6 +411,7 @@ func _ready() -> void:
 		add_child(_hud)
 		_hud.setup_equipment(loot)
 		_hud.setup_progression(progression)
+		_hud.setup_points(_builds)
 		_mastery_panel = MasteryPanel.new()
 		_hud.add_child(_mastery_panel)
 		_mastery_panel.setup(_builds)
@@ -464,6 +470,7 @@ func _server_tick(delta: float) -> void:
 		_check_wall_stun(player)
 		_apply_player_status_damage(player)
 		_apply_player_status_heal(player)
+		_regen_health(player)
 	_enemy_view = _enemy_targets()
 	for enemy: Enemy in _enemies.get_children():
 		if enemy.dead:
@@ -752,12 +759,12 @@ func _hit_targets(attacker: Player, attack: AttackParams, damage_scale: float) -
 	return connected
 
 
-## Server: an aimed beam's line this step (AttackParams.aimed_beam), as
-## [origin, unit direction]: from the attacker's beam origin toward its aim
-## point (World.aim_point: the crosshair of the input just simulated, so a
-## channel follows it), pitch included. Empty for any other attack.
+## Server: an aimed beam's line (or an aimed cone's axis: AttackParams.aimed_beam,
+## aimed_cone) this step, as [origin, unit direction]: from the attacker's beam
+## origin toward its aim point (World.aim_point: the crosshair of the input just
+## simulated, so a channel follows it), pitch included. Empty for any other attack.
 func _beam_of(attacker: Player, attack: AttackParams) -> PackedVector3Array:
-	if not attack.aimed_beam:
+	if not (attack.aimed_beam or attack.aimed_cone):
 		return PackedVector3Array()
 	var tuning := AimRay.tuned()
 	var origin := AimRay.beam_origin(attacker.global_position, attacker.state.yaw, tuning)
@@ -2507,6 +2514,79 @@ func _rebirth(player: Player) -> void:
 	player.state.finish_rebirth(player.params)
 	_rebirths += 1
 	print("[server] peer %d rose again (rebirth)" % player.peer_id)
+	_rebirth_burst(player)
+
+
+## Meters above or below the risen player a Rebirth burst still reaches.
+const REBIRTH_BURST_HEIGHT := 2.0
+
+
+## Server: rising from a Rebirth bursts into flame: every hostile player and
+## living enemy within [rebirth] burst_radius (horizontal, REBIRTH_BURST_HEIGHT
+## up or down) takes burst_max_health_fraction of its own max health, times its
+## damage-taken statuses; like damage over time, no block, armor or i-frames.
+## Clients draw a fire ring as the body rises (Player._show_phoenix).
+func _rebirth_burst(player: Player) -> void:
+	var radius := player.params.rebirth_burst_radius
+	var fraction := player.params.rebirth_burst_fraction
+	if radius <= 0.0 or fraction <= 0.0:
+		return
+	_rebirth_bursts += 1
+	var center := player.global_position
+	for target: Player in _players.get_children():
+		if (target.state.dead or are_allies(player.peer_id, target.peer_id)
+				or not _in_burst(center, target.global_position, radius)):
+			continue
+		var damage := (target.max_health() * fraction
+				* target.state.statuses.damage_taken_multiplier(target.params.statuses))
+		target.health = maxf(0.0, target.health - damage)
+		_rebirth_burst_hits += 1
+		_ember_from_damage(player.peer_id, target, damage)
+		var result := HIT_DAMAGED
+		if target.health <= 0.0:
+			result = HIT_DEFEATED
+			_kill_player(target)
+		_send_hit(player.peer_id, target.peer_id, damage, result)
+	for enemy: Enemy in _enemies.get_children():
+		if enemy.dead or not _in_burst(center, enemy.global_position, radius):
+			continue
+		var damage := (enemy.params.max_health * fraction
+				* enemy.statuses.damage_taken_multiplier(enemy.status_defs))
+		_rebirth_burst_hits += 1
+		_ember_from_damage(player.peer_id, null, damage)
+		_damage_enemy(enemy, damage, 0, player.peer_id, HIT_DAMAGED)
+
+
+static func _in_burst(center: Vector3, pos: Vector3, radius: float) -> bool:
+	return (Vector2(pos.x - center.x, pos.z - center.z).length() <= radius
+			and absf(pos.y - center.y) <= REBIRTH_BURST_HEIGHT)
+
+
+## Server (GatheringSystem's hooks): the tradeskill level's gather time and
+## bonus units, with the class's gathering passive (ClassDef.gather_*).
+func _gather_time_multiplier(peer: int, skill: String) -> float:
+	var class_def := _class_of(peer)
+	return (tradeskills.gather_time_multiplier(peer, skill)
+			* (class_def.gather_time_multiplier(skill) if class_def else 1.0))
+
+
+func _gather_bonus_yield(peer: int, skill: String) -> int:
+	var class_def := _class_of(peer)
+	return tradeskills.bonus_yield(peer, skill,
+			class_def.gather_extra_chance(skill) if class_def else 0.0)
+
+
+func _class_of(peer: int) -> ClassDef:
+	var player := _player_by_id(peer)
+	return player.build.class_def if player and player.build else null
+
+
+## Server: out-of-combat health regeneration this tick (Player.regen_step).
+func _regen_health(player: Player) -> void:
+	var amount := player.regen_step()
+	if amount > 0.0:
+		player.health = minf(player.max_health(), player.health + amount)
+		_regen_healed += amount
 
 
 ## Server: Ember for damage. The target (a Player; null for an enemy) gains
@@ -2633,9 +2713,9 @@ func _player_by_id(id: int) -> Player:
 
 
 func _print_ember_summary() -> void:
-	print("SUMMARY ember gained=%d spent=%d wing_uses=%d rebirths_started=%d rebirths=%d heals=%d healed=%d" % [
+	print("SUMMARY ember gained=%d spent=%d wing_uses=%d rebirths_started=%d rebirths=%d heals=%d healed=%d rebirth_bursts=%d rebirth_burst_hits=%d regen_healed=%d" % [
 			roundi(_ember_gained), roundi(_ember_spent), _wing_uses, _rebirths_started, _rebirths,
-			_heals, roundi(_healed)])
+			_heals, roundi(_healed), _rebirth_bursts, _rebirth_burst_hits, roundi(_regen_healed)])
 
 
 # --- Parties and allies ---
@@ -3478,7 +3558,8 @@ func _receive_snapshot(tick: int, data: PackedByteArray) -> void:
 		else:
 			player.push_snapshot(server_time, state[1], state[2])
 			health = state[3]
-		player.bonus_max_health = health.y - player.params.max_health
+		# Whatever base the client knows, the drawn max is the server's.
+		player.bonus_max_health += health.y - player.max_health()
 		player.set_health(health.x)
 	# Missing: it left, or it's out of view (interest management): either way
 	# it's dropped here and spawned fresh if it comes back.

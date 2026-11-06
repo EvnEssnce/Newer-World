@@ -617,7 +617,8 @@ behind, bonus or not).
   fires Fan of Knives via `ProjectileSystem.server_fire_attack` (no cooldown used).
 - **Assassin Wings** (`wings_assassin.cfg`, tree `mastery_wings_assassin.cfg`: Phantom /
   Trickster, 22 points): Ashstep (15 Ember, 6 s: a 4.5 m teleport the way you move, forward with none, i-frames)
-  and Plumage Flash (20 Ember, 12 s: 6 m 70° cone, 20 damage, **Dazzled** −25% damage
+  and Plumage Flash (20 Ember, 12 s: 6 m 70° cone aimed with the crosshair, pitch
+  included (`aimed_cone`, session 68), 20 damage, **Dazzled** −25% damage
   dealt 4 s + Slow 2.5 s), Ember Double (20 Ember, 14 s: a 4 s burning decoy, 15
   damage per 0.5 s around it, and **Veiled** 2 s) and Shadow Swap (15, 10 s, Trickster
   tier 3, requires Ember Double: trade

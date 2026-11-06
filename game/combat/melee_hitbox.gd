@@ -48,15 +48,44 @@ static func beam_hits(origin: Vector3, direction: Vector3, length: float, radius
 			target_radius, target_height) >= 0.0
 
 
+## Points along a target's capsule axis an aimed cone tests (feet to top).
+const CONE_SAMPLES := 5
+
+
+## An aimed cone (AttackParams.aimed_cone): from `origin` along the unit
+## `direction`, `length` m long, `arc` (full width, radians) wide all round the
+## axis, against a target's upright capsule standing at `target_pos`. Any pitch.
+## Tests CONE_SAMPLES points from its feet to its top: one within `length` (plus
+## the radius) whose angle off the axis is at most half the arc (plus the angle
+## the capsule's radius spans at that distance) is a hit.
+static func cone_hits(origin: Vector3, direction: Vector3, length: float, arc: float,
+		target_pos: Vector3, target_radius: float, target_height: float) -> bool:
+	for i in CONE_SAMPLES:
+		var point := target_pos + Vector3.UP * (target_height * i / float(CONE_SAMPLES - 1))
+		var offset := point - origin
+		var distance := offset.length()
+		if distance <= target_radius:
+			return true  # the origin is inside the capsule
+		if distance > length + target_radius:
+			continue
+		var spread := asin(minf(1.0, target_radius / distance))
+		if direction.angle_to(offset) <= arc / 2.0 + spread + 0.0001:
+			return true
+	return false
+
+
 ## The one "does this attack touch the target" test for a player's attack: an
-## aimed beam with `beam` = [origin, unit direction] (World._beam_of) tests the
-## beam (hitbox_range long, hitbox_width / 2 thick); anything else (or an empty
-## `beam`) is `hits`.
+## aimed beam or cone with `beam` = [origin, unit direction] (World._beam_of)
+## tests the beam (hitbox_range long, hitbox_width / 2 thick) or the cone
+## (cone_hits); anything else (or an empty `beam`) is `hits`.
 static func touches(attacker_pos: Vector3, yaw: float, attack: AttackParams,
 		beam: PackedVector3Array, target_pos: Vector3, target_radius: float,
 		target_height: float) -> bool:
 	if attack.aimed_beam and beam.size() == 2:
 		return beam_hits(beam[0], beam[1], attack.hitbox_range, attack.hitbox_width / 2.0,
+				target_pos, target_radius, target_height)
+	if attack.aimed_cone and beam.size() == 2:
+		return cone_hits(beam[0], beam[1], attack.hitbox_range, attack.hitbox_arc,
 				target_pos, target_radius, target_height)
 	return hits(attacker_pos, yaw, attack, target_pos, target_radius, target_height)
 

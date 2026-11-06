@@ -103,6 +103,9 @@ var _rng := RandomNumberGenerator.new()
 # Client
 var _visuals: Array[StationVisual] = []
 var _panel: CraftingPanel
+## Client: pinned recipes (a UI preference in user://) and their HUD list.
+var pins := RecipePins.new()
+var _pinned_hud: PinnedRecipesHud
 var _panel_station := -1
 var _panel_timer := 0.0
 ## The panel was open last frame (closing it cancels a craft).
@@ -172,6 +175,11 @@ func _ready() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 2  # with the other panels, above the HUD
 	add_child(layer)
+	pins = RecipePins.load_from()
+	pins.keep_only(defs.recipes.keys())
+	_pinned_hud = PinnedRecipesHud.new()
+	_pinned_hud.setup(self)
+	layer.add_child(_pinned_hud)
 	_panel = CraftingPanel.new()
 	_panel.setup(self)
 	layer.add_child(_panel)
@@ -359,6 +367,8 @@ func _make(player: Player, recipe: RecipeDefs.Recipe, quantity: int) -> bool:
 	for item in made_items:
 		gained.append(item.to_dict())
 	loot.bag_changed(peer, gained)
+	if recipe.output_kind == RecipeDefs.OUTPUT_GEAR and not gained.is_empty():
+		_receive_crafted_gear.rpc_id(peer, gained)  # the result card(s)
 	tradeskills.on_crafted(peer, recipe.tradeskill, recipe.xp * quantity)
 	if _verbose:
 		print("[server] crafting: %d made %d %s" % [peer, made, recipe.output])
@@ -446,6 +456,25 @@ func _receive_craft_started(recipe_id: String, quantity: int, ticks: int) -> voi
 	_current_msec = Time.get_ticks_msec()
 	_current_locked = false
 	_pending = false
+
+
+## Gear a craft of ours just made (Item dicts with bag uids): the panel shows
+## each piece (CraftResultDialog). Bots skip it.
+@rpc("authority", "call_remote", "reliable")
+func _receive_crafted_gear(items: Array) -> void:
+	if _panel and not _bot:
+		_panel.show_results(items)
+
+
+## Client: pins or unpins a recipe (saved at once). False when already at
+## RecipePins.MAX_PINS.
+func toggle_pin(recipe_id: String) -> bool:
+	if not pins.toggle(recipe_id):
+		return false
+	pins.save()
+	if _pinned_hud:
+		_pinned_hud.rebuild()
+	return true
 
 
 @rpc("authority", "call_remote", "reliable")

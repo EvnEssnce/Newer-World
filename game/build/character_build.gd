@@ -145,6 +145,28 @@ func _limits_dict() -> Dictionary:
 	return {"weapons": point_limits, "wings": wing_point_limit}
 
 
+## Key of the Wing tree in unspent_points().
+const WINGS_KEY := "wings"
+
+
+## Points the character's levels give a tree but not yet spent there, for each
+## equipped weapon (by weapon id) and the Wing tree (WINGS_KEY); trees with
+## none left are missing. The HUD's "unspent points" line.
+func unspent_points() -> Dictionary[String, int]:
+	var result: Dictionary[String, int] = {}
+	for weapon_id in weapons:
+		var tree: MasteryTree = trees.get(weapon_id)
+		if tree:
+			var left := tree.budget(point_limit(weapon_id)) - tree.spent(get_allocated(weapon_id))
+			if left > 0:
+				result[weapon_id] = left
+	if wing_tree:
+		var wing_left := wing_tree.budget(wing_point_limit) - wing_tree.spent(wing_nodes)
+		if wing_left > 0:
+			result[WINGS_KEY] = wing_left
+	return result
+
+
 func get_allocated(weapon_id: String) -> PackedStringArray:
 	return allocated.get(weapon_id, PackedStringArray())
 

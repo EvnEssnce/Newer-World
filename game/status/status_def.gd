@@ -42,6 +42,9 @@ var attack_speed := 1.0
 var attack_speed_min_stamina := 0.0
 
 # Damage effects (server)
+## Per stack: fraction more out-of-combat health regeneration (HealthRegen;
+## negative = less). Server.
+var health_regen := 0.0
 ## Per stack: fraction more damage taken / dealt.
 var damage_taken := 0.0
 var damage_dealt := 0.0
@@ -168,6 +171,7 @@ static func from_tuning(file: String, status_id: String, tps: float) -> StatusDe
 	s.cover_depth = Tuning.get_optional(file, section, "cover_depth", 0.0)
 	s.cover_width = Tuning.get_optional(file, section, "cover_width", 0.0)
 	s.damage_taken = Tuning.get_optional(file, section, "damage_taken", 0.0)
+	s.health_regen = Tuning.get_optional(file, section, "health_regen", 0.0)
 	s.damage_dealt = Tuning.get_optional(file, section, "damage_dealt", 0.0)
 	var per_second: float = Tuning.get_optional(file, section, "damage_per_second", 0.0)
 	var heal_per_second: float = Tuning.get_optional(file, section, "heal_per_second", 0.0)

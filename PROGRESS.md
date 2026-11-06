@@ -94,9 +94,14 @@ tested and playtested). Each sub-item is roughly one session with one testable g
      (session 55).
    - **First playtest done (session 56):** one friend over Tailscale at ~104 ms ping;
      not laggy or rough, performed very well. Their correction count wasn't checked.
-   - **Next playtest: 2–3 friends.** Ask each to read "Prediction corrections" in the
-     HUD's debug lines (next to Ping) before quitting; check the rest of the session 43
-     list (§4).
+   - **Second playtest done (session 68):** 3 players, ~26 minutes; about 2–3
+     prediction corrections per player (roughly one per 10 minutes: fine over the
+     internet, nothing changed). Its feedback was built in session 68 (Plumage Flash
+     aimed with pitch, class base health, projectile colors per ability), and the
+     developer's follow-up list in session 69 (health regen, Rebirth burst, F3
+     projectile spheres, Forge tabs/pins/result window, class gathering passives,
+     unspent points line, +9 gather nodes on Ashvale).
+   - **Next:** the rest of the session 43 list (§4) at a later playtest.
    - **Fix session** for what it finds. Candidate already known: projectile lag
      compensation if leading shots feels bad. (The build check is done, session 61:
      a friend on another build is refused with a message naming both versions;
@@ -233,6 +238,14 @@ other player), delta compression, or a cap on entities in view (§4, Known issue
 - Salvage, item levels beyond GS 140, perks with effects (not just stats).
 - A "Dedicated Server" export preset (`main.gd` already treats the feature tag like
   `--server`), for hosting on a rented machine (§7).
+- **Dropping and trading items between players** (developer, session 69): without it
+  there's no reason to craft weapons for other classes. Today drops are personal and
+  only their owner sees them; a trade window (both confirm) or droppable bag items.
+- **Recall to the nearest town** (developer, session 69): a key that takes you to the
+  nearest town centre by distance, chosen automatically (may become a choice later).
+  On Ashvale that's only the town at (0, 105): the three shrines are respawn points,
+  not towns. Needs a town marker group on maps (like `PlayerSpawns`), and a cast time
+  / cooldown / out-of-combat rule to decide.
 
 **Done so far** (details in the session log and git): Milestones 1, 2 and 4; the
 Fighter (sessions 12–24), Juggernaut (25), Assassin (32), Ranger (33), zones and summons
@@ -267,6 +280,25 @@ level 21+ character, or trust the feed line); Mending Beam healing you while it 
 ally, Renewal Pulse healing you from outside; Sapping Pulse, then a light or heavy on a
 sapped Husk: a bigger number and a green heal (the smoke bots never followed up in
 time, so this path is untested).
+
+**Session 68 (playtest feedback):** Plumage Flash blinding a Ranger hovering on
+Updraft when you look up at them (and still hitting on the ground when you look ahead);
+Juggernaut 1200 / Ranger and Mage 900 health feel right (`[class] base_health` in the
+class files); every Ranger, Assassin and Mage projectile ability tells apart from the
+others by color (`data/projectiles.cfg`, "One color per ability"; Recall's knives keep
+the knife color).
+
+**Session 69 (feedback list):** after 10 s with no damage dealt or taken you heal 1% of
+max health a second (watch the health number climb; it stops the moment you hit or are
+hit); a Rebirth hurts what stands within 3 m as you rise (an orange ring; a Husk loses
+20% of its max health); F3 draws a red sphere at each projectile's hit size (small next
+to some glows: firebolt 0.25 m); the Forge panel's tabs (Pinned / Refining /
+Weaponforging / Armorcraft), Pin buttons and the pinned list on the HUD's right (have /
+need, green or red; hidden while the Forge is open; pins kept between runs in
+`user://pinned_recipes.cfg`); after a weapon or armor craft, a window with each piece's
+stats, OK (next / back to the Forge) or Discard (two clicks); the P panel's "Class
+passive" line and gathering that resource 15% faster; "N unspent points (K): Spear 2,
+Wings 1" under the XP line; Ashvale's 9 new nodes feeling like enough (31, was 22).
 
 **Never reported in a playtest** (spot-check when convenient; most need `-NoBot` or a
 capstone learned in K): the War Hammer's Breaker capstone breaking a real guard;
@@ -364,6 +396,23 @@ Say "keep" or what to change.
   0.6 × the tradeskill XP of every gather and craft (a gather still gives 15), even
   when that tradeskill is capped. The Thornling's death leaves some parts uncoloured
   (fine, you said).
+
+- **Session 69 defaults:** health regen counts "out of combat" with the Ember's combat
+  timer (any damage dealt or taken, even blocked; healing doesn't count), starts after
+  10 s, 1% max health/s (`data/combat.cfg [health_regen]`), scaled by a
+  `health_regen_pct` gear stat and statuses' `health_regen` (none use them yet);
+  regen gives no Ember or threat. The **Rebirth burst** (`data/ember.cfg [rebirth]
+  burst_*`) hits hostile players and enemies within 3 m (2 m up or down) for 20% of
+  their max health, through damage-taken statuses but no block, i-frames, armor or
+  crit; it can kill and earns loot/XP like any hit. **Gathering passives**
+  (`[gathering]` in the class files): ore for Fighter (Steady Pick), Juggernaut
+  (Stonebreaker) and Assassin (Vein Sense); wood for Ranger (Woodsman), Mage (Emberwood
+  Sense) and Paladin (Grove Keeper), picked from what their weapon recipes use; nobody
+  leans to fiber (only armor uses it). Each is 15% faster gathering and +10% chance of a
+  bonus unit on that skill, so every node of that skill (future ore/wood/fiber kinds
+  too). **Pins:** up to 6, per machine (not per character, not saved on the server).
+  The result window shows only crafted gear (not refined materials); Discard deletes
+  the item like the I panel.
 
 **Decided for Milestone 3 (session 45):**
 - **Gathering key: F**, the same as loot pickup (one interact key; the prompt says
@@ -539,6 +588,8 @@ Full entries: sessions 1–28 in `git show 5cc5148:PROGRESS.md`, 29–43 in
 | 65 | 2026-10-31 | Developer's Ashvale playtest (session 64) approved: distances and difficulty fine for now, camps appear at a good distance (may raise interest to 80/100 later), slopes smooth for players and enemies, shrine respawns right, 1 correction in ~36k snapshots. Fixes: the crafting panel's bar and the gather/equip bar (`LootHud`) moved in 1% jumps (Godot `ProgressBar.step` defaults to 0.01: visible over a long batch); `step = 0` now. Choppable pines (`GatherNodeVisual._build_wood`) look different from decor pines: yellow-green canopy, gold crown, shimmering resin streaks, 7 rising light motes. Minimap noted for later (§3 5.2). Main fast-forwarded to this work at the developer's request; every other branch (all already in main) deleted, so main is the one branch. 916 tests pass; smoke run (bash, 2 bots) clean, gathering and crafting normal |
 | 66 | 2026-11-05 | Before the 3-player playtest: `tools/export_client.ps1` failed to parse on Windows (`"... $version: ..."`: PowerShell reads `$version:` as a drive-qualified variable), so nothing had been exported since session 61 added that line; now `${version}`. Every `tools/*.ps1` parse-checked with PowerShell 7's parser (0 errors). Game code unchanged |
 | 67 | 2026-11-06 | Developer confirmed by hand: progression (XP feed lines, XP bar, a level-up point in K, level kept on rejoin; build order 4.4 done) and the session 65 Ashvale fixes (smooth Forge batch bar, choppable pines stand out). Docs only |
+| 68 | 2026-11-06 | Feedback from the 3-player playtest (~26 min; 2–3 corrections per player: fine, nothing changed). **Plumage Flash** follows the crosshair up and down (`aimed_cone`: `MeleeHitbox.cone_hits` along `World._beam_of`'s line; was a level cone 2.2 m tall, so an Updrafting Ranger was out of reach). **Class base health** (`[class] base_health`, `Player.base_max_health`; clients take the max from snapshots): Juggernaut 1200, Ranger and Mage 900, others 1000; the smoke test tunes every class to 150. **Projectile colors per ability**: `like="<kind>"` in projectiles.cfg (a kind that copies another, changing only what it lists); 11 new colored copies for abilities that shared their weapon's projectile, 6 near-identical kinds recolored. 923 tests (7 new: the aimed cone, projectile kinds against the data); smoke default, `-Party`, `-Class ranger` ×2 and `-Class assassin` ×2 pass (one Assassin run failed loot: no Husk died in time; one Ranger run had 1 correction at seq 7, a 2 cm join-time mismatch, not seen again). Needs the hand checks in §4 |
+| 69 | 2026-11-06 | The developer's follow-up feedback list. **Health regen** out of combat (`HealthRegen`, `data/combat.cfg [health_regen]`: 1% max health/s after 10 s with no damage dealt or taken, `PlayerState.combat_ticks`; × `health_regen_pct` gear and statuses' `health_regen`; server only). **Rebirth burst** (`World._rebirth_burst`, `ember.cfg [rebirth] burst_*`: 20% of each hostile's max health within 3 m as you rise; an orange ring on clients). **F3 projectile spheres** (`ProjectileVisual._hit_sphere`, the kind's `hit_radius`). **Forge panel**: tabs per recipe skill plus Pinned, Pin buttons (`RecipePins`, up to 6, `user://pinned_recipes.cfg`), a pinned list on the HUD (`PinnedRecipesHud`: have/need), and a result window after a gear craft (`CraftResultDialog`, `_receive_crafted_gear`: stats, OK or Discard). **Class gathering passives** (`[gathering]` in the class files, `ClassDef.gather_*`, `World._gather_time_multiplier`/`_gather_bonus_yield`: ore for Fighter/Juggernaut/Assassin, wood for Ranger/Mage/Paladin; 15% faster, +10% bonus chance; shown in P). **Unspent points** line under the XP line (`CharacterBuild.unspent_points`, `Hud.points_text`). **Ashvale** 22 → 31 gather nodes (+41%). Dropping/trading items and recall to town noted under Later. 937 tests (14 new: regen, unspent points, gathering passives, pins, Forge tabs); smoke default and `-Party` pass (`rebirth_bursts=2`, hits 4/3; `regen_healed=0`: the bots never rest 10 s). Screenshot runs show ~25 corrections (gather-lock timing on a lone windowed bot); the committed code shows the same (26), so it isn't from this session and smoke runs stay at 0. Needs the hand checks in §4 |
 
 ---
 

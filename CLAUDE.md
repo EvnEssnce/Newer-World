@@ -69,6 +69,10 @@ game/
   player/player_state.gd     Stamina, dodge, attacks, abilities, cooldowns, weapon swap,
                              stagger, death, facing, Wing abilities, Ember, Rebirth.
                              Pure logic, unit tested.
+  player/health_regen.gd     HealthRegen: out-of-combat regen (combat.cfg [health_regen]:
+                             after `delay` s with combat_ticks 0, a fraction of max health/s ×
+                             `health_regen_pct` gear and statuses' `health_regen`). Server
+                             only (`World._regen_health`). Pure, unit tested.
   player/player_params.gd    Player tuning converted to ticks/radians, every weapon and
                              Wing set, Ember/Rebirth, loaded once.
   combat/attack_params.gd    One attack's tuning (phases, hit windows, damage, hitbox). Players and enemies.
@@ -97,8 +101,12 @@ game/
   combat/projectile_system.gd  World/Projectiles: server flight + hits, spawn/turn/end events,
                              client copies (render clock / local cosmetic copy).
   combat/projectile_visual.gd  Client look: feather (quill + vane + streak), spinning axe or
-                             wave (a crescent on the ground: Shockwave).
-  build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout.
+                             wave (a crescent on the ground: Shockwave). F3: a red sphere of
+                             the kind's `hit_radius` (`_hit_sphere`).
+  build/class_def.gd         A class (data/class_<id>.cfg): allowed weapons, default loadout,
+                             base health, its gathering passive (`[gathering]`: skill, name,
+                             time_multiplier, bonus_chance; `World._gather_time_multiplier` /
+                             `_gather_bonus_yield` combine it with the tradeskill level).
   build/mastery_tree.gd      A weapon's mastery tree (or a class's Wing tree) and its rules.
                              Pure logic, unit tested.
   build/character_build.gd   Class + equipped weapons + per-weapon tree allocation and slots
@@ -148,6 +156,8 @@ game/
                              first: a failed craft loses nothing); crafting_station.gd: reach, pick.
                              Pure, unit tested. crafting_system.gd: World/Crafting (server checks,
                              the busy lock, panel, prompt, bot); station_visual.gd: the Forge.
+                             recipe_pins.gd: RecipePins (client, up to 6 pinned recipe ids in
+                             user://pinned_recipes.cfg; pure apart from load/save, tested).
   persistence/persistence.gd The one database module (server): SQLite via godot-sqlite (made through
                              ClassDB, so it parses where the extension is missing), migrations in
                              `PRAGMA user_version`, accounts, characters (save parts as JSON text
@@ -186,7 +196,12 @@ ui/                  connect_menu (client start screens: address, login/create a
                      in code), crosshair (screen-centre ticks + dot,
                      hidden under modal panels), hud (health/stamina/Ember bars with a
                      current/max health number, ability bar, Wing slots, weapon line, status
-                     row, Rebirth banner, debug info, the XP bar along the bottom edge),
+                     row, Rebirth banner, debug info, the XP bar along the bottom edge and
+                     "N unspent points (K): ..." under its label, `CharacterBuild.unspent_points`),
+                     crafting_panel (the Forge: tabs Pinned + one per recipe skill
+                     (`CraftingPanel.tabs_for`), Pin buttons), craft_result_dialog (after a
+                     gear craft: each piece's stats, OK / Discard), pinned_recipes_hud (right
+                     side under the gear box: pinned recipes' have/need),
                      keybinds_panel (F1: the key list, bottom left, from InputActions),
                      equipment_summary (top-right gear box: average gear score, a drawn symbol
                      per equip slot tinted by rarity, gear stat totals from
@@ -350,7 +365,9 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   On finish: yield (+ `yield_bonus_hook`) into the bag as stacks (`LootSystem.give_resources`)
   and `gathered(peer, skill, kind, amount)`. **Tradeskills** (`World/Tradeskills`): wired in
   `World._ready`: `gathered` → `on_gathered` (XP), `time_multiplier_hook` /
-  `yield_bonus_hook` → `gather_time_multiplier` / `bonus_yield`; server → owner
+  `yield_bonus_hook` → `World._gather_time_multiplier` / `_gather_bonus_yield` (the
+  tradeskill's level × the class's gathering passive, by skill so every node kind of
+  that skill counts); server → owner
   `_receive_skills(dict)` and `_receive_level_up(skill, from, to)`; no client requests;
   `add_xp(peer, skill, xp)` for crafting; every gain also sends the owner
   `_receive_xp(skill, xp)`, a "+25 Mining XP" feed line. Saved with the character (`join_xp` only for a
@@ -370,7 +387,8 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   A cancelled batch still makes its whole finished pieces (`CraftProgress.pieces_done`,
   "(2 of 5 made)"); inputs are only taken for what's made, at the
   end. Server → owner `_receive_craft_started(recipe, qty, ticks)` / `_receive_craft_ended`
-  drive the panel's progress bar (then the predicted `equip_left`). The bot walks to the
+  drive the panel's progress bar (then the predicted `equip_left`); after a gear craft
+  `_receive_crafted_gear(items)` (Item dicts) opens the result window. The bot walks to the
   Forge on purpose once it has materials (`CraftingSystem.bot_trip`).
   Recipes have `output_kind` "item" (refining) or "gear": each piece is its own
   `CraftingRules.roll_gear` → `LootRoller.roll_item` (server RNG) at a gear score range and
@@ -646,7 +664,11 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   from `[beam] origin_height`/`origin_forward` (the projectile release point) toward
   `World.aim_point` (pitch included; `for_allies` lands on the ally under the crosshair
   for Mending Beam/Ward), `range` long, `width/2` thick (`MeleeHitbox.touches`); their
-  facing heads for the crosshair line at the full range. Movement is slowed by
+  facing heads for the crosshair line at the full range. **Aimed cones**
+  (`aimed_cone=true` on a radial attack with an `arc`: Plumage Flash) use the same
+  line as the cone's axis (`MeleeHitbox.cone_hits`: `range` long, `arc` wide all
+  round it, 5 points up the target's capsule; `height` unused), so looking up reaches
+  a hovering target. Movement is slowed by
   `move_multiplier`.
 - **Block** (`[block]` in combat.cfg): `PlayerState.blocking` while the button is held
   and not attacking/dodging/staggered (attack or dodge drops the guard; it comes back if
@@ -765,7 +787,10 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
 - **Projectiles** (the `PROJ` tag). Kinds in `data/projectiles.cfg` (`[projectile_<id>]`:
   speed, gravity, pitch, lifetime, hit_radius, pierce, walls, stopped_by_guard, release
   point, optional `returns`/`return_after`/`return_speed`/`catch_radius`, and the look:
-  `visual` "feather", "axe" or "wave", length, color, spin). An attack or ability throws with
+  `visual` "feather", "axe" or "wave", length, color, spin; `like="<kind>"` copies
+  another kind and changes only the keys it lists: every ability that shares its
+  weapon's projectile has its own colored copy, session 68, `ProjectileParams._source`,
+  checked by `tests/test_projectile_kinds.gd`). An attack or ability throws with
   Every kind glows (a camera-facing halo and a short trail; optional `glow`, 0 = off;
   `ProjectileVisual.prewarm_looks` via `ProjectileSystem._prewarm_step`).
   `projectile` (kind id), `projectile_time` (s from its start), optional
@@ -803,8 +828,14 @@ tools/               PowerShell run scripts, unit test runner, smoke test; run_l
   each way; a guard doesn't stop it). Both are tier-1 nodes in their trees and in the
   default allocation, not in the default slots (slot them in K).
 - Health is server-owned, outside `PlayerState` (clients don't predict damage), sent in
-  snapshots. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
-  results) for damage numbers, labels and the red flash.
+  snapshots. Base max health is the class file's `[class] base_health` (Juggernaut
+  1200, Ranger and Mage 900, the rest 1000; `Player.base_max_health`, else
+  combat.cfg `[health] max`), plus gear and the level bonus; clients take the max
+  from snapshots. The smoke test tunes every class's to 150. Hit events go to clients via reliable `World._receive_hit` (`HIT_*`
+  results) for damage numbers, labels and the red flash. **Out of combat**
+  (`combat_ticks` 0 for `[health_regen] delay` s) health regenerates (`HealthRegen`,
+  `World._regen_health`, after status heals; no Ember, threat or hit event; `SUMMARY
+  ember ... regen_healed=`).
 - **Stagger**: a hit with `stagger > 0` (weapon file; heavy only by default) calls
   `PlayerState.apply_stagger`: interrupts the target's attack/dodge, and it can't act
   until it ends (presses stay buffered).
@@ -977,7 +1008,12 @@ charges are cross-class).
   `rebirth_left` (ticks, counted down in `step()`) and starts the cooldown (which only
   counts down once they've risen). When `rebirth_left` reaches 0, `World._rebirth`
   raises them where they fell with `health_fraction` of max health (`finish_rebirth`:
-  like `revive` but keeps the Ember left). Otherwise the normal respawn runs unchanged.
+  like `revive` but keeps the Ember left) and `_rebirth_burst` hits every hostile player
+  and living enemy within `burst_radius` (horizontal, `REBIRTH_BURST_HEIGHT` up/down)
+  for `burst_max_health_fraction` of its max health × damage-taken statuses (no block,
+  i-frames, armor or crit; kills, loot and XP as usual; `SUMMARY ember ...
+  rebirth_bursts= rebirth_burst_hits=`); clients draw an orange ring as the body rises
+  (`Player._rebirth_burst_ring`). Otherwise the normal respawn runs unchanged.
   All of it is synced state (index 34), so the HUD banner and cooldown come from the
   predicted state. **Paladin hooks**: `rebirth_ember_needed()` (threshold modifiers),
   `rebirth_charges` + `grant_rebirth_charge()` (extra Rebirths that ignore the
@@ -1139,8 +1175,8 @@ charges are cross-class).
   120); Thornlings ×3 west (−105, 51, GS 140) and east (95, 8, GS 145); Cinder Seers ×3
   in a stone circle (−75, −48, GS 150) and ×2 at ruins (123, −72, GS 155); Cragmaws ×1 on
   the north ridge (12, −130, GS 180) and ×2 in a hollow (−116, −121, GS 185); 21 enemies;
-  22 gather nodes (7 fiber in meadows near town, 8 wood in forests, 7 ore in the rocky
-  north and on hills). Roads from the town's gates to the shrines and camps. The
+  31 gather nodes (10 fiber in meadows, 11 wood in forests, 10 ore in the rocky north
+  and on hills; session 69 added the last 9). Roads from the town's gates to the shrines and camps. The
   enemies' navmesh takes ~1.1 s to bake here (startup, and in the background for each
   enemy-blocking wall).
 - To redo the overview image: load the map under an orthographic camera at y 200,

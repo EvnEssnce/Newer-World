@@ -140,11 +140,12 @@ func gather_time_multiplier(peer: int, skill: String) -> float:
 
 
 ## Extra units for one gather by this player (rolled on the server's RNG; 0 if
-## unknown). Count them in the amount passed to on_gathered. Server.
-func bonus_yield(peer: int, skill: String) -> int:
+## unknown). Count them in the amount passed to on_gathered. extra_chance: added
+## to the level's bonus chance (the class's gathering passive). Server.
+func bonus_yield(peer: int, skill: String, extra_chance := 0.0) -> int:
 	if not _skills.has(peer):
 		return 0
-	var bonus := _skills[peer].bonus_yield(skill, _rng)
+	var bonus := _skills[peer].bonus_yield(skill, _rng, extra_chance)
 	_bonus_units += bonus
 	return bonus
 

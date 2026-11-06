@@ -15,6 +15,17 @@ var default_loadout := PackedStringArray()
 ## Multiplies every Ember gain (the Mage spends Ember on weapon abilities, so it
 ## gains more). 1 = normal.
 var ember_gain := 1.0
+## Base max health before gear and the level bonus ([class] base_health); 0 =
+## the shared data/combat.cfg [health] max.
+var base_health := 0.0
+## Gathering passive ([gathering]): a gathering tradeskill (mining, logging,
+## harvesting: every node of that skill, whatever its resource) the class is
+## better at, its name, the fraction of the gather time it takes (0.85 = 15%
+## faster) and the bonus-unit chance it adds. "" = none.
+var gather_skill := ""
+var gather_passive_name := ""
+var gather_time := 1.0
+var gather_bonus_chance := 0.0
 ## Level bonus (levels past a full Wing tree, data/class_<id>.cfg [level_bonus]):
 ## the stat each point raises (one of LEVEL_BONUS_STATS) and by how much.
 var level_bonus_stat := ""
@@ -59,6 +70,11 @@ static func from_tuning(class_id: String) -> ClassDef:
 	c.weapons = PackedStringArray(Tuning.get_value(file, "class", "weapons"))
 	c.default_loadout = PackedStringArray(Tuning.get_value(file, "class", "default_loadout"))
 	c.ember_gain = Tuning.get_optional(file, "class", "ember_gain", 1.0)
+	c.base_health = Tuning.get_optional(file, "class", "base_health", 0.0)
+	c.gather_skill = Tuning.get_optional(file, "gathering", "skill", "")
+	c.gather_passive_name = Tuning.get_optional(file, "gathering", "name", "")
+	c.gather_time = clampf(Tuning.get_optional(file, "gathering", "time_multiplier", 1.0), 0.1, 1.0)
+	c.gather_bonus_chance = clampf(Tuning.get_optional(file, "gathering", "bonus_chance", 0.0), 0.0, 1.0)
 	c.level_bonus_stat = Tuning.get_optional(file, "level_bonus", "stat", "")
 	c.level_bonus_per_point = Tuning.get_optional(file, "level_bonus", "per_point", 0.0)
 	if not c.level_bonus_stat.is_empty() and not (c.level_bonus_stat in LEVEL_BONUS_STATS):
@@ -93,6 +109,32 @@ func level_bonus_text(points: int) -> String:
 		"healing":
 			return "+%s healing" % percent
 	return ""
+
+
+## Fraction of the gather time for a node of this tradeskill (the passive's
+## time_multiplier for its skill, else 1).
+func gather_time_multiplier(skill: String) -> float:
+	return gather_time if not gather_skill.is_empty() and skill == gather_skill else 1.0
+
+
+## Bonus-unit chance the passive adds for this tradeskill (0 for any other).
+func gather_extra_chance(skill: String) -> float:
+	return gather_bonus_chance if not gather_skill.is_empty() and skill == gather_skill else 0.0
+
+
+## "Prospector: Mining 15% faster, +10% bonus yield chance" ("" for none): the P panel.
+func gather_passive_text(skill_name: String) -> String:
+	if gather_skill.is_empty():
+		return ""
+	var parts := PackedStringArray()
+	if gather_time < 1.0:
+		parts.append("%s %d%% faster" % [skill_name, roundi((1.0 - gather_time) * 100.0)])
+	if gather_bonus_chance > 0.0:
+		parts.append("+%d%% bonus yield chance" % roundi(gather_bonus_chance * 100.0))
+	if parts.is_empty():
+		return ""
+	var title := gather_passive_name if not gather_passive_name.is_empty() else display_name
+	return "%s: %s" % [title, ", ".join(parts)]
 
 
 func allows_weapon(weapon_id: String) -> bool:

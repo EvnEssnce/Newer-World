@@ -68,10 +68,10 @@ func gather_time_multiplier(skill: String) -> float:
 
 ## Bonus units for one gather: defs.bonus_units with the level's bonus chance,
 ## else 0 (always 0 for non-gathering skills). Server only (its RNG).
-func bonus_yield(skill: String, rng: RandomNumberGenerator) -> int:
+func bonus_yield(skill: String, rng: RandomNumberGenerator, extra_chance := 0.0) -> int:
 	if not defs.is_gathering(skill):
 		return 0
-	var chance := defs.bonus_chance(level(skill))
+	var chance := minf(1.0, defs.bonus_chance(level(skill)) + maxf(0.0, extra_chance))
 	if chance <= 0.0:
 		return 0
 	return defs.bonus_units if rng.randf() < chance else 0

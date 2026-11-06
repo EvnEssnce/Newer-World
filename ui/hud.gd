@@ -54,6 +54,11 @@ var _progression: ProgressionSystem
 var _keybinds: KeybindsPanel
 var _xp_bar: ProgressBar
 var _xp_label: Label
+## "2 unspent points (K): Spear 1, Wings 1" under the level label, hidden when
+## none are left (setup_points; World/Builds' local build).
+var _builds: BuildService
+var _points_label: Label
+const POINTS_COLOR := Color(1.0, 0.85, 0.35)
 const XP_FILL := Color(0.55, 0.8, 0.45)
 ## The XP bar's height along the bottom edge (pixels).
 const XP_BAR_HEIGHT := 10.0
@@ -135,6 +140,56 @@ func setup_progression(progression: ProgressionSystem) -> void:
 	_xp_label.add_theme_constant_override("outline_size", 4)
 	_xp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_xp_label)
+
+
+## The unspent tree points line under the level label (client).
+func setup_points(builds: BuildService) -> void:
+	_builds = builds
+	_points_label = Label.new()
+	_points_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_points_label.offset_left = -620.0
+	_points_label.offset_right = -160.0
+	_points_label.offset_top = -66.0
+	_points_label.offset_bottom = -48.0
+	_points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_points_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_points_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_points_label.add_theme_font_size_override("font_size", 13)
+	_points_label.add_theme_color_override("font_color", POINTS_COLOR)
+	_points_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	_points_label.add_theme_constant_override("outline_size", 4)
+	_points_label.visible = false
+	add_child(_points_label)
+	builds.build_changed.connect(_update_points)
+
+
+func _update_points() -> void:
+	var build := _builds.local_build
+	var text := points_text(build.unspent_points(), _tree_names(build)) if build else ""
+	_points_label.text = text
+	_points_label.visible = not text.is_empty()
+
+
+## Weapon id -> display name for the build's equipped weapons, plus "Wings".
+static func _tree_names(build: CharacterBuild) -> Dictionary:
+	var names := {CharacterBuild.WINGS_KEY: "Wings"}
+	for weapon_id in build.weapons:
+		var weapon := PlayerParams.current().weapon(weapon_id)
+		names[weapon_id] = weapon.display_name if weapon else weapon_id
+	return names
+
+
+## "3 unspent points (K): Spear 2, Wings 1", "" for none. `unspent`: tree key ->
+## points (CharacterBuild.unspent_points), `names`: tree key -> shown name.
+static func points_text(unspent: Dictionary, names: Dictionary) -> String:
+	var total := 0
+	var parts := PackedStringArray()
+	for key: String in unspent:
+		total += int(unspent[key])
+		parts.append("%s %d" % [names.get(key, key), int(unspent[key])])
+	if total <= 0:
+		return ""
+	return "%d unspent point%s (K): %s" % [total, "" if total == 1 else "s", ", ".join(parts)]
 
 
 func _unhandled_input(event: InputEvent) -> void:

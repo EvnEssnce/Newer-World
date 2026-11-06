@@ -15,8 +15,13 @@ extends Control
 ## While one runs, a box under the title shows it (show_progress): the recipe,
 ## a bar filling over the whole batch, "3 / 5" and the time left; the Craft
 ## buttons wait for it.
+## Tabs (tab_of): Refining (every refining tradeskill), then one per crafting
+## tradeskill (Weaponforging, Armorcraft), and Pinned when any recipe is pinned
+## (each row's Pin button; CraftingSystem.pins, also listed on the HUD). The tab
+## you last chose stays chosen. A gear craft's results come up one at a time in
+## a CraftResultDialog over the panel: OK keeps it, Discard (twice) throws it away.
 
-const PANEL_WIDTH := 700.0
+const PANEL_WIDTH := 780.0
 ## Most of the viewport's height the recipe list takes before it scrolls.
 const LIST_HEIGHT_FRACTION := 0.68
 const QUANTITY_CHOICES: PackedStringArray = ["1", "5", "Max"]
@@ -40,10 +45,56 @@ var _list: VBoxContainer
 var _scroll: ScrollContainer
 ## Recipe id -> {recipe, root, name, inputs (HBoxContainer), odds (gear: HBoxContainer of the gear\n## score label, then one label per rarity in rarity order; else null), status, quantity, craft, mode}.
 var _rows: Dictionary[String, Dictionary] = {}
+## The tab buttons, the tab shown, and the open station's recipes.
+var _tabs: HBoxContainer
+var _tab := ""
+var _recipes: Array[RecipeDefs.Recipe] = []
+## Gear just crafted (one card at a time, over the panel).
+var _result: CraftResultDialog
+
+const TAB_PINNED := "pinned"
+const TAB_REFINING := "refining"
+const PIN_COLOR := Color(1.0, 0.85, 0.35)
 
 
 func setup(system: CraftingSystem) -> void:
 	_system = system
+
+
+## The tab a recipe is listed under: TAB_REFINING for a refining tradeskill,
+## else its own tradeskill id (one tab per crafting skill).
+static func tab_of(recipe: RecipeDefs.Recipe, skills: TradeskillDefs) -> String:
+	var skill: TradeskillDefs.SkillDef = skills.skills.get(recipe.tradeskill)
+	return TAB_REFINING if skill and skill.category == TAB_REFINING else recipe.tradeskill
+
+
+## The tabs for these recipes, in order: TAB_PINNED (when `pinned`), TAB_REFINING,
+## then each crafting skill in the Tradeskills panel's order (any unknown last).
+static func tabs_for(recipes: Array[RecipeDefs.Recipe], skills: TradeskillDefs, pinned: bool) -> PackedStringArray:
+	var present := {}
+	for recipe in recipes:
+		present[tab_of(recipe, skills)] = true
+	var tabs := PackedStringArray()
+	if pinned:
+		tabs.append(TAB_PINNED)
+	if present.has(TAB_REFINING):
+		tabs.append(TAB_REFINING)
+	for id in skills.order:
+		if present.has(id) and id != TAB_REFINING:
+			tabs.append(id)
+	for tab: String in present:
+		if not tab in tabs:
+			tabs.append(tab)
+	return tabs
+
+
+static func tab_title(tab: String, skills: TradeskillDefs) -> String:
+	match tab:
+		TAB_PINNED:
+			return "Pinned"
+		TAB_REFINING:
+			return "Refining"
+	return skills.display_name(tab)
 
 
 func _ready() -> void:
@@ -86,6 +137,9 @@ func _ready() -> void:
 	close_button.pressed.connect(close)
 	header.add_child(close_button)
 	column.add_child(_build_progress_box())
+	_tabs = HBoxContainer.new()
+	_tabs.add_theme_constant_override(&"separation", 4)
+	column.add_child(_tabs)
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	column.add_child(_scroll)
@@ -98,6 +152,14 @@ func _ready() -> void:
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size.x = PANEL_WIDTH - 28.0
 	column.add_child(hint)
+	_result = CraftResultDialog.new()
+	_result.setup(_system.loot if _system else null)
+	add_child(_result)  # last: drawn over the panel
+
+
+## Client: gear just crafted (Item dicts), shown one card at a time.
+func show_results(items: Array) -> void:
+	_result.add_items(items)
 
 
 func _build_progress_box() -> Control:
@@ -158,33 +220,12 @@ func show_progress(view: Array) -> void:
 	_progress_status.text = view[2]
 
 
-## Shows `station`'s recipes, grouped by tradeskill (in the Tradeskills panel's order).
+## Shows `station`'s recipes on tabs, grouped by tradeskill within a tab (in the
+## Tradeskills panel's order).
 func open(station: RecipeDefs.StationDef, recipes: Array[RecipeDefs.Recipe]) -> void:
 	_title.text = station.name
-	for child in _list.get_children():
-		_list.remove_child(child)
-		child.queue_free()
-	_rows.clear()
-	var skills := _system.tradeskills.defs
-	var skill_ids: Array[String] = []
-	for id in skills.order:
-		skill_ids.append(id)
-	for recipe in recipes:
-		if not recipe.tradeskill in skill_ids:
-			skill_ids.append(recipe.tradeskill)
-	for skill in skill_ids:
-		var group := recipes.filter(func(r: RecipeDefs.Recipe) -> bool: return r.tradeskill == skill)
-		if group.is_empty():
-			continue
-		var header := _label("", 15, SECTION_COLOR)
-		header.set_meta(&"skill", skill)
-		header.custom_minimum_size.y = 24
-		header.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-		_list.add_child(header)
-		for recipe: RecipeDefs.Recipe in group:
-			_list.add_child(_recipe_row(recipe))
-	if recipes.is_empty():
-		_list.add_child(_label("Nothing to make here yet.", 14, DETAIL_COLOR))
+	_recipes = recipes
+	_rebuild()
 	if not visible:
 		visible = true
 		InventoryPanel.hide_other_modals(self)  # one mouse panel at a time
@@ -192,6 +233,85 @@ func open(station: RecipeDefs.StationDef, recipes: Array[RecipeDefs.Recipe]) -> 
 	_scroll.scroll_vertical = 0
 	refresh()
 	_fit_list.call_deferred()
+
+
+## The tab buttons and the shown tab's rows.
+func _rebuild() -> void:
+	var skills := _system.tradeskills.defs
+	var pins := _system.pins
+	var tabs := tabs_for(_recipes, skills, not pins.ids.is_empty())
+	if not _tab in tabs:
+		_tab = tabs[1] if tabs.size() > 1 and tabs[0] == TAB_PINNED else (tabs[0] if not tabs.is_empty() else "")
+	for child in _tabs.get_children():
+		_tabs.remove_child(child)
+		child.queue_free()
+	var group := ButtonGroup.new()
+	for tab in tabs:
+		var button := Button.new()
+		button.text = tab_title(tab, skills)
+		button.toggle_mode = true
+		button.button_group = group
+		button.button_pressed = tab == _tab
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(110, 30)
+		if tab == TAB_PINNED:
+			button.add_theme_color_override(&"font_color", PIN_COLOR)
+		button.pressed.connect(_select_tab.bind(tab))
+		_tabs.add_child(button)
+	_tabs.visible = tabs.size() > 1
+	for child in _list.get_children():
+		_list.remove_child(child)
+		child.queue_free()
+	_rows.clear()
+	var shown: Array[RecipeDefs.Recipe] = []
+	if _tab == TAB_PINNED:
+		for id in pins.ids:
+			for recipe in _recipes:
+				if recipe.id == id:
+					shown.append(recipe)
+	else:
+		shown.assign(_recipes.filter(func(r: RecipeDefs.Recipe) -> bool: return tab_of(r, skills) == _tab))
+	var skill_ids: Array[String] = []
+	for id in skills.order:
+		skill_ids.append(id)
+	for recipe in shown:
+		if not recipe.tradeskill in skill_ids:
+			skill_ids.append(recipe.tradeskill)
+	for skill in skill_ids:
+		var in_skill := shown.filter(func(r: RecipeDefs.Recipe) -> bool: return r.tradeskill == skill)
+		if in_skill.is_empty():
+			continue
+		var header := _label("", 15, SECTION_COLOR)
+		header.set_meta(&"skill", skill)
+		header.custom_minimum_size.y = 24
+		header.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		_list.add_child(header)
+		for recipe: RecipeDefs.Recipe in in_skill:
+			_list.add_child(_recipe_row(recipe))
+	if shown.is_empty():
+		_list.add_child(_label("Nothing to make here yet." if _tab != TAB_PINNED
+				else "No pinned recipes here.", 14, DETAIL_COLOR))
+	if visible:
+		refresh()
+		_fit_list.call_deferred()
+
+
+func _select_tab(tab: String) -> void:
+	if tab == _tab:
+		return
+	_tab = tab
+	_rebuild()
+	_scroll.scroll_vertical = 0
+
+
+func _toggle_pin(recipe_id: String) -> void:
+	if not _system.toggle_pin(recipe_id):
+		_system.loot.notice("You can pin at most %d recipes." % RecipePins.MAX_PINS)
+		return
+	if _tab == TAB_PINNED or _system.pins.ids.size() <= 1:
+		_rebuild()  # the Pinned tab appears, disappears or loses a row
+	else:
+		refresh()
 
 
 ## The list as tall as its rows, up to LIST_HEIGHT_FRACTION of the viewport (then it scrolls).
@@ -204,6 +324,7 @@ func close() -> void:
 	if not visible:
 		return
 	visible = false
+	_result.clear()
 	if not InventoryPanel.other_modal_open(self):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED  # back to the game
 
@@ -278,8 +399,15 @@ func _recipe_row(recipe: RecipeDefs.Recipe) -> Control:
 	craft.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	craft.pressed.connect(_craft.bind(recipe.id))
 	row.add_child(craft)
+	var pin := Button.new()
+	pin.focus_mode = Control.FOCUS_NONE
+	pin.custom_minimum_size = Vector2(64, 34)
+	pin.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pin.tooltip_text = "Pin: list it on the HUD with what you have of each material, and in the Pinned tab."
+	pin.pressed.connect(_toggle_pin.bind(recipe.id))
+	row.add_child(pin)
 	_rows[recipe.id] = {"recipe": recipe, "root": frame, "name": name_label, "inputs": inputs, "odds": odds,
-			"status": status, "quantity": quantity, "craft": craft, "mode": 0}
+			"status": status, "quantity": quantity, "craft": craft, "pin": pin, "mode": 0}
 	return frame
 
 
@@ -354,6 +482,10 @@ func refresh() -> void:
 					recipe.craft_ticks / float(Engine.physics_ticks_per_second), recipe.xp]
 			status.add_theme_color_override(&"font_color", DETAIL_COLOR)
 		(row["quantity"] as Label).text = "x%d" % quantity
+		var pin := row["pin"] as Button
+		var pinned := _system.pins.is_pinned(recipe_id)
+		pin.text = "Unpin" if pinned else "Pin"
+		pin.add_theme_color_override(&"font_color", PIN_COLOR if pinned else Color.WHITE)
 		(row["craft"] as Button).disabled = quantity == 0 or not error.is_empty() or _system.crafting()
 
 

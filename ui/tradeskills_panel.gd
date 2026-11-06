@@ -26,6 +26,9 @@ const BAR_COLORS := {
 var _system: TradeskillSystem
 ## Skill id -> [level Label, ProgressBar, XP Label, detail Label or null].
 var _rows: Dictionary[String, Array] = {}
+## The class's gathering passive (ClassDef.gather_passive_text), under the title.
+var _passive: Label
+const PASSIVE_COLOR := Color(0.95, 0.8, 0.45)
 
 
 func setup(system: TradeskillSystem) -> void:
@@ -61,6 +64,9 @@ func _ready() -> void:
 	column.add_theme_constant_override(&"separation", 6)
 	panel.add_child(column)
 	column.add_child(_label("Tradeskills", 20, Color.WHITE))
+	_passive = _label("", 13, PASSIVE_COLOR)
+	_passive.visible = false
+	column.add_child(_passive)
 	var defs := _system.defs
 	for category in TradeskillDefs.CATEGORIES:
 		var ids := defs.ids_in(category)
@@ -147,6 +153,11 @@ func refresh() -> void:
 		return
 	var skills := _system.local
 	var defs := _system.defs
+	var builds := _system.get_parent().get_node_or_null("Builds") as BuildService
+	var class_def: ClassDef = builds.local_build.class_def if builds and builds.local_build else null
+	_passive.text = ("Class passive: " + class_def.gather_passive_text(
+			defs.display_name(class_def.gather_skill))) if class_def else ""
+	_passive.visible = class_def != null and not class_def.gather_passive_text("").is_empty()
 	for id: String in _rows:
 		var row := _rows[id]
 		var lv := skills.level(id)
